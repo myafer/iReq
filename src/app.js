@@ -29,12 +29,20 @@ function lanAddresses() {
   return out;
 }
 
+/** pkg 打包成单文件后 __dirname 在只读快照里，数据目录要落到可执行文件同级 */
+function defaultDataDir() {
+  if (process.pkg || __dirname.startsWith('/snapshot')) {
+    return path.join(path.dirname(process.execPath), 'data');
+  }
+  return path.join(__dirname, '..', 'data');
+}
+
 async function createApp({
   proxyPort = 9090,
   uiPort = 9091,
   bindHost = '0.0.0.0',
   uiHost = '127.0.0.1',
-  dataDir = path.join(__dirname, '..', 'data'),
+  dataDir = defaultDataDir(),
   persist = true,
   maxFlows = 2000,
   config = {},
