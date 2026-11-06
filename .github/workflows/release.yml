@@ -41,9 +41,10 @@ jobs:
       - name: Package (posix)
         if: runner.os != 'Windows'
         run: |
-          mv dist/ireq-node22-* dist/ireq-${{ matrix.os }}-${{ matrix.arch }}
+          # pkg 单 target 时 --output 就是精确文件名（dist/ireq），不带平台后缀
           cd dist
-          chmod +x ireq-${{ matrix.os }}-${{ matrix.arch }}
+          chmod +x ireq
+          cp ireq ireq-${{ matrix.os }}-${{ matrix.arch }}
           tar -czf iReq-${{ matrix.os }}-${{ matrix.arch }}.tar.gz ireq-${{ matrix.os }}-${{ matrix.arch }}
           shasum -a 256 iReq-${{ matrix.os }}-${{ matrix.arch }}.tar.gz > iReq-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
 
@@ -51,8 +52,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Move-Item dist/ireq-node22*-win-x64.exe dist/ireq-win-x64.exe
           cd dist
+          Move-Item ireq ireq-win-x64.exe
           Compress-Archive -Path ireq-win-x64.exe -DestinationPath iReq-win-x64.zip -Force
           $h = (Get-FileHash iReq-win-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$h  iReq-win-x64.zip" | Out-File -Encoding ascii iReq-win-x64.zip.sha256
