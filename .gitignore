@@ -3,3 +3,5 @@ data/
 docs/screenshots/
 *.log
 .DS_Store
+dist/
+_tmp/
