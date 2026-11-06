@@ -84,7 +84,11 @@ async function main() {
     return;
   }
 
-  const dataDir = path.resolve(args.data || path.join(__dirname, '..', 'data'));
+  // pkg 快照里的 __dirname 只读：数据目录默认放到可执行文件同级（--data 可覆盖）
+  const defaultData = process.pkg || __dirname.startsWith('/snapshot')
+    ? path.join(path.dirname(process.execPath), 'data')
+    : path.join(__dirname, '..', 'data');
+  const dataDir = path.resolve(args.data || defaultData);
 
   if (cmd === 'ca') {
     const caPath = path.join(dataDir, 'ca', 'reqlite-ca.pem');
