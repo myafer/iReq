@@ -77,9 +77,7 @@ class UpdateChecker {
     this.state.checking = true;
     this.state.error = null;
     try {
-      const latest = await this._fetchLatest();
-      this.state.latest = latest;
-      this.state.hasUpdate = isNewerVersion(latest.version, this.version);
+      await this._fetchLatest();
       this.state.checkedAt = Date.now();
     } catch (err) {
       this.state.error = String((err && err.message) || err);
@@ -99,17 +97,34 @@ class UpdateChecker {
     try {
       body = await this._directGet(path, headers);
     } catch (directErr) {
+      if (directErr && directErr.code === 'NO_RELEASE') {
+        // 仓库还没有发布过 Release：不算错误，等首发版
+        this.state.latest = null;
+        this.state.hasUpdate = false;
+        this.state.error = '暂无发布版（首次打 tag 后才有）';
+        this.state.checkedAt = Date.now();
+        return;
+      }
       // 直连失败 → 走自家代理（本机 9090 本来就开着）
       body = await this._proxyGet(path, headers);
       if (!body) throw directErr;
     }
+    if (!body) {
+      this.state.latest = null;
+      this.state.hasUpdate = false;
+      this.state.error = '暂无发布版（首次打 tag 后才有）';
+      this.state.checkedAt = Date.now();
+      return;
+    }
     const json = JSON.parse(body);
     if (!json.tag_name) throw new Error('响应里没有 tag_name');
-    return {
+    this.state.latest = {
       version: normalizeTag(json.tag_name),
       url: json.html_url || `https://github.com/${this.owner}/${this.repo}/releases`,
       publishedAt: json.published_at || null,
     };
+    this.state.hasUpdate = isNewerVersion(this.state.latest.version, this.version);
+    this.state.checkedAt = Date.now();
   }
 
   _directGet(path, headers) {
@@ -117,6 +132,12 @@ class UpdateChecker {
       const req = https.get(
         { host: 'api.github.com', path, headers, timeout: TIMEOUT_MS },
         (res) => {
+          if (res.statusCode === 404) {
+            res.resume();
+            const err = new Error('no release yet');
+            err.code = 'NO_RELEASE';
+            return reject(err);
+          }
           if (res.statusCode !== 200) {
             res.resume();
             return reject(new Error(`GitHub API ${res.statusCode}`));
