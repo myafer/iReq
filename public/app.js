@@ -28,20 +28,22 @@ let detailEmptyHtml = '';
 /* ---------------------------------------------------------------- 字号缩放 */
 
 const SCALE_KEY = 'reqlite-scale';
-const SCALE_MIN = 0.85;
-const SCALE_MAX = 1.6;
+/* 缩放基准：CSS 变量 1.3 对应界面显示的 100% */
+const SCALE_BASE = 1.3;
+const SCALE_MIN = 0.91; // ≈70%
+const SCALE_MAX = 1.95; // 150%
 const SCALE_STEP = 0.05;
 
 function currentScale() {
   const v = Number(document.documentElement.style.getPropertyValue('--ui-scale'));
-  return Number.isFinite(v) && v > 0 ? v : 1;
+  return Number.isFinite(v) && v > 0 ? v : SCALE_BASE;
 }
 
 function applyScale(value, persist = true) {
   const raw = Math.round(Number(value) * 100) / 100;
   const scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, Number.isFinite(raw) ? raw : 1));
   document.documentElement.style.setProperty('--ui-scale', String(scale));
-  const label = Math.round(scale * 100) + '%';
+  const label = Math.round((scale / SCALE_BASE) * 100) + '%';
   const val = $('#fontVal');
   if (val) val.textContent = label;
   const down = $('#fontDown');
@@ -2833,7 +2835,7 @@ function bind() {
   $('#fontUp').addEventListener('click', () => applyScale(currentScale() + SCALE_STEP));
   $('#fontDown').addEventListener('click', () => applyScale(currentScale() - SCALE_STEP));
   $('#fontVal').addEventListener('click', () => {
-    applyScale(1);
+    applyScale(SCALE_BASE);
     toast('字号已恢复 100%');
   });
 
@@ -2958,7 +2960,7 @@ async function init() {
   detailEmptyHtml = $('#detail').innerHTML;
   const savedTheme = localStorage.getItem('reqlite-theme');
   if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-  applyScale(Number(localStorage.getItem(SCALE_KEY)) || 1, false);
+  applyScale(Number(localStorage.getItem(SCALE_KEY)) || SCALE_BASE, false);
   ICONS().mount();
   if (window.ReqLiteJSON) {
     window.ReqLiteJSON.setTheme(savedTheme === 'dark' ? 'dark' : 'light');

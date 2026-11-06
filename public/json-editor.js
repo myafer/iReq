@@ -23,7 +23,7 @@
   let loaderPromise = null;
   let monaco = null;
   let currentTheme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
-  let currentScale = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+  let currentScale = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1.3;
 
   const esc = (s) =>
     String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
