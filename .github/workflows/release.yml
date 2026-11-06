@@ -18,11 +18,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: darwin,  arch: arm64, runner: macos-14,   target: node20-macos-arm64 }
-          - { os: darwin,  arch: x64,   runner: macos-14,   target: node20-macos-x64 }
-          - { os: linux,   arch: x64,   runner: ubuntu-22.04, target: node20-linux-x64 }
-          - { os: linux,   arch: arm64, runner: ubuntu-22.04, target: node20-linux-arm64 }
-          - { os: win,     arch: x64,   runner: windows-latest, target: node20-win-x64 }
+          # 固定 node22.22.3：pkg-fetch v3.6 缓存里五平台 base 二进制齐全，
+          # 用 "node22" 这种大版本号会解析到没有预编译二进制的最新版，触发源码编译直接失败
+          - { os: darwin,  arch: arm64, runner: macos-14,   target: node22.22.3-macos-arm64 }
+          - { os: darwin,  arch: x64,   runner: macos-14,   target: node22.22.3-macos-x64 }
+          - { os: linux,   arch: x64,   runner: ubuntu-22.04, target: node22.22.3-linux-x64 }
+          - { os: linux,   arch: arm64, runner: ubuntu-22.04, target: node22.22.3-linux-arm64 }
+          - { os: win,     arch: x64,   runner: windows-latest, target: node22.22.3-win-x64 }
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +41,7 @@ jobs:
       - name: Package (posix)
         if: runner.os != 'Windows'
         run: |
-          mv dist/ireq-node20-* dist/ireq-${{ matrix.os }}-${{ matrix.arch }}
+          mv dist/ireq-node22-* dist/ireq-${{ matrix.os }}-${{ matrix.arch }}
           cd dist
           chmod +x ireq-${{ matrix.os }}-${{ matrix.arch }}
           tar -czf iReq-${{ matrix.os }}-${{ matrix.arch }}.tar.gz ireq-${{ matrix.os }}-${{ matrix.arch }}
@@ -49,7 +51,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Move-Item dist/ireq-node20-win-x64.exe dist/ireq-win-x64.exe
+          Move-Item dist/ireq-node22-win-x64.exe dist/ireq-win-x64.exe
           cd dist
           Compress-Archive -Path ireq-win-x64.exe -DestinationPath iReq-win-x64.zip -Force
           $h = (Get-FileHash iReq-win-x64.zip -Algorithm SHA256).Hash.ToLower()
