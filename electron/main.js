@@ -45,7 +45,7 @@ function createWindow(uiPort) {
     minHeight: 620,
     title: 'iReq',
     backgroundColor: '#f7f6f4',
-    icon: path.join(__dirname, 'icons', 'icon.png'),
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
