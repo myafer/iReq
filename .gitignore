@@ -6,3 +6,5 @@ docs/screenshots/
 dist/
 release/
 _tmp/
+build/Modern_flat*.*
+build/Remove_the_*
