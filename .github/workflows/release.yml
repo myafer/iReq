@@ -20,8 +20,8 @@ jobs:
         include:
           # 固定 node22.23.4：pkg-fetch v3.6 缓存里五平台 base 二进制齐全，
           # 用 "node22" 这种大版本号会解析到没有预编译二进制的最新版，触发源码编译直接失败
-          - { os: darwin,  arch: arm64, runner: macos-14,   target: node22.23.4-macos-arm64 }
-          - { os: darwin,  arch: x64,   runner: macos-14,   target: node22.23.4-macos-x64 }
+          - { os: darwin,  arch: arm64, runner: macos-latest, target: node22.23.4-macos-arm64 }
+          - { os: darwin,  arch: x64,   runner: macos-13,     target: node22.23.4-macos-x64 }
           - { os: linux,   arch: x64,   runner: ubuntu-22.04, target: node22.23.4-linux-x64 }
           - { os: linux,   arch: arm64, runner: ubuntu-22.04, target: node22.23.4-linux-arm64 }
           - { os: win,     arch: x64,   runner: windows-latest, target: node22.23.4-win-x64 }
@@ -53,7 +53,8 @@ jobs:
         shell: pwsh
         run: |
           cd dist
-          Move-Item ireq ireq-win-x64.exe
+          # Windows 上 pkg 会自动补 .exe 扩展名
+          if (Test-Path ireq.exe) { Move-Item ireq.exe ireq-win-x64.exe } else { Move-Item ireq ireq-win-x64.exe }
           Compress-Archive -Path ireq-win-x64.exe -DestinationPath iReq-win-x64.zip -Force
           $h = (Get-FileHash iReq-win-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$h  iReq-win-x64.zip" | Out-File -Encoding ascii iReq-win-x64.zip.sha256
