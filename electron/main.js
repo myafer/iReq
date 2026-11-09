@@ -34,12 +34,18 @@ const MENU_LABELS = {
     window: 'Window', minimize: 'Minimize', close: 'Close', startFailed: 'iReq failed to start', startFailedLog: '[iReq] Failed to start:',
   },
 };
-let menuLang = (app.getLocale() || '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+function systemMenuLang() {
+  return (app.getLocale() || '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+}
+let menuLang = systemMenuLang();
 const L = (key) => (MENU_LABELS[menuLang] || MENU_LABELS.en)[key];
 function syncMenuLang(lang) {
-  if (lang !== 'en' && lang !== 'zh-CN') return;
-  if (lang === menuLang) return;
-  menuLang = lang;
+  // auto = 跟随系统；网页传来的也可能是实际生效语言（en / zh-CN）
+  const next = !lang || lang === 'auto'
+    ? systemMenuLang()
+    : (lang === 'en' || lang === 'zh-CN' ? lang : null);
+  if (!next || next === menuLang) return;
+  menuLang = next;
   setupMenu();
 }
 

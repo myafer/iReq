@@ -104,18 +104,20 @@
   var origText = new WeakMap();
   var origAttr = new WeakMap();
   var origTitle = document.title;
+  /* mode = 用户在设置里的选择：auto（跟随系统，默认）/ en / zh-CN；lang = 当前实际生效语言 */
+  var mode = 'auto';
   var lang;
 
   function systemLang() {
     var n = (navigator.language || navigator.userLanguage || '').toLowerCase();
     return n.indexOf('zh') === 0 ? 'zh-CN' : 'en';
   }
+  function resolveLang() { return mode === 'auto' ? systemLang() : mode; }
   try {
-    lang = localStorage.getItem(KEY) || systemLang();
-  } catch (e) {
-    lang = systemLang();
-  }
-  if (lang !== 'en' && lang !== 'zh-CN') lang = 'en';
+    var saved = localStorage.getItem(KEY);
+    if (saved === 'auto' || saved === 'en' || saved === 'zh-CN') mode = saved;
+  } catch (e) { /* 隐私模式 / 禁写 localStorage 时保持默认 auto */ }
+  lang = resolveLang();
 
   function t(s, exactOnly) {
     if (typeof s !== 'string' || !HAN.test(s)) return s;
@@ -209,16 +211,22 @@
     var btn = document.getElementById('btnLang');
     if (btn) {
       btn.textContent = lang === 'en' ? '中' : 'EN';
-      btn.title = 'Switch interface language';
+      btn.title = mode === 'auto'
+        ? (lang === 'en'
+          ? 'Auto: following the system language. Click to switch to Chinese.'
+          : '自动：跟随系统语言，点击切换到英文。')
+        : (lang === 'en' ? 'Click to switch to Chinese' : '点击切换到英文');
       btn.setAttribute('aria-label', btn.title);
     }
     var sel = document.getElementById('stLang');
-    if (sel) sel.value = lang;
+    if (sel) sel.value = mode;
   }
 
+  /* next: 'auto'（跟随系统，默认）| 'en' | 'zh-CN'；旧版存的 en / zh-CN 直接兼容 */
   function setLang(next) {
-    lang = next === 'en' ? 'en' : 'zh-CN';
-    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    mode = (next === 'en' || next === 'zh-CN') ? next : 'auto';
+    try { localStorage.setItem(KEY, mode); } catch (e) {}
+    lang = resolveLang();
     refresh();
     if (window.ReqLiteDesktop && window.ReqLiteDesktop.setLang) window.ReqLiteDesktop.setLang(lang);
     // 让页面里依赖语言的下拉/派生文案重绘一次
@@ -241,6 +249,7 @@
     t: t,
     setLang: setLang,
     getLang: function () { return lang; },
+    getMode: function () { return mode; },
     isEn: function () { return lang === 'en'; },
     refresh: refresh,
   };
@@ -276,5 +285,15 @@
   });
   document.addEventListener('change', function (e) {
     if (e.target && e.target.id === 'stLang') setLang(e.target.value);
+  });
+  /* 系统语言偏好在运行中变化（切系统设置 / Electron locale 变更）时，跟随系统模式自动跟上 */
+  window.addEventListener('languagechange', function () {
+    if (mode !== 'auto') return;
+    var next = resolveLang();
+    if (next === lang) return;
+    lang = next;
+    refresh();
+    if (window.ReqLiteDesktop && window.ReqLiteDesktop.setLang) window.ReqLiteDesktop.setLang(lang);
+    window.dispatchEvent(new CustomEvent('reqlite-langchange', { detail: lang }));
   });
 })();

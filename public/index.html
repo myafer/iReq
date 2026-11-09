@@ -69,7 +69,7 @@
           <button class="btn icon ghost" id="fontUp" aria-label="增大字号">A+</button>
         </div>
         <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
-        <button class="btn icon" id="btnLang" title="Switch interface language">EN</button>
+        <button class="btn icon" id="btnLang" data-no-i18n title="Switch interface language">EN</button>
       </div>
     </header>
 
@@ -566,11 +566,12 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <div class="addr-card-top">
               <h3>Language / 界面语言</h3>
             </div>
-            <p class="hint">Switches instantly and is saved for the next launch. / 立即生效，下次打开保持选择。</p>
+            <p class="hint">默认跟随系统语言；手动选择后立即生效并记住。 / Follows the system language by default; a manual choice applies instantly and is remembered.</p>
             <div class="addr-card-row">
               <select id="stLang" class="input mono">
+                <option value="auto">跟随系统（默认）/ Auto</option>
                 <option value="en">English</option>
-                <option value="zh-CN">简体中文</option>
+                <option value="zh-CN">简体中文 / Chinese</option>
               </select>
             </div>
           </div>
