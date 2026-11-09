@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iReq · 抓包 / Mock / 重放</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script>
+      // 主题与字号在首屏渲染前生效，避免闪一下默认样式
+      try {
+        var t = localStorage.getItem('reqlite-theme');
+        if (t) document.documentElement.dataset.theme = t;
+        var s = localStorage.getItem('reqlite-scale');
+        if (s) document.documentElement.style.setProperty('--ui-scale', s);
+        var p = JSON.parse(localStorage.getItem('reqlite-panes') || '{}');
+        if (p && typeof p.side === 'number' && isFinite(p.side))
+          document.documentElement.style.setProperty('--side-w', p.side + 'px');
+        if (p && typeof p.list === 'number' && isFinite(p.list))
+          document.documentElement.style.setProperty('--list-w', p.list + 'px');
+      } catch (e) {}
+    </script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📡</text></svg>" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">i<span>Req</span></span>
+        <span class="divider"></span>
+        <span class="conn"><i id="dot" class="dot"></i><span id="connText">未连接</span></span>
+        <div class="addr-wrap" id="addrWrap">
+          <div class="addr" id="addrBox" title="代理地址：点 IP / 端口分别复制，或点 ⧉ 复制完整地址">
+            <button type="button" class="addr-part addr-ip" id="addrIp" title="复制 IP">—</button>
+            <span class="addr-sep">:</span>
+            <button type="button" class="addr-part addr-port" id="addrPort" title="复制端口">—</button>
+            <span class="addr-div"></span>
+            <button type="button" class="addr-act" id="addrPick" title="切换地址（多网卡 / 本机回环）" aria-label="切换地址" aria-expanded="false">▾</button>
+            <button type="button" class="addr-act" id="addrCopyAll" title="复制完整地址" aria-label="复制完整地址">⧉</button>
+          </div>
+          <div class="addr-menu" id="addrMenu" hidden>
+            <div class="addr-menu-head">代理地址 · 点选切换</div>
+            <div id="addrOptions"></div>
+            <div class="addr-menu-copy">
+              <button type="button" class="btn ghost" data-copy="ip">复制 IP</button>
+              <button type="button" class="btn ghost" data-copy="port">复制端口</button>
+              <button type="button" class="btn primary" data-copy="all">复制完整地址</button>
+            </div>
+            <div class="addr-menu-tip">
+              配 Wi-Fi 代理时：<b>服务器</b>填 IP、<b>端口</b>单独填。<br />
+              抓手机用局域网 IP，抓本机用 <code>127.0.0.1</code>。
+            </div>
+          </div>
+        </div>
+        <button class="lp-chip off" id="localChip" hidden title="点这里打开设置，一键让本机流量经过 iReq">本机未接管</button>
+      </div>
+      <div class="actions">
+        <label class="switch" title="抓包开关：关掉后代理继续运行，但不再记录">
+          <input type="checkbox" id="capture" checked />
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+          <span class="switch-label">抓包</span>
+        </label>
+        <button class="btn" id="btnRules">规则 <b id="ruleCount">0</b></button>
+        <button class="btn" id="btnCa">证书</button>
+        <button class="btn" id="btnSettings">设置</button>
+        <a class="btn upd-badge" id="updBadge" hidden target="_blank" rel="noreferrer" title="点击打开新版本发布页">↑ <span id="updBadgeVer"></span></a>
+        <button class="btn ghost" id="btnClear">清空</button>
+        <div class="fontctl" title="界面字号">
+          <button class="btn icon ghost" id="fontDown" aria-label="减小字号">A−</button>
+          <button class="fs-val" id="fontVal" title="点一下恢复 100%">100%</button>
+          <button class="btn icon ghost" id="fontUp" aria-label="增大字号">A+</button>
+        </div>
+        <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <button class="btn icon ghost" id="sideShow" title="展开分组边栏" hidden>☰</button>
+      <div class="search">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path
+            d="M11.7 10.3a6 6 0 1 0-1.4 1.4l3 3a1 1 0 0 0 1.4-1.4l-3-3ZM7 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
+            fill="currentColor"
+          />
+        </svg>
+        <input id="search" type="text" placeholder="搜 URL / 方法 / 状态码…" spellcheck="false" />
+        <kbd id="searchKbd">⌘K</kbd>
+      </div>
+      <div class="seg" id="filters">
+        <button class="on" data-status="">全部</button>
+        <button data-status="error">错误</button>
+        <button data-status="json">JSON</button>
+        <button data-mocked="1">Mock</button>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="count" id="count">0 条</div>
+    </div>
+
+    <div class="shell" id="shell">
+      <aside class="side" id="side">
+        <div class="side-head">
+          <span>分组</span>
+          <button class="btn icon ghost" id="sideHide" title="收起边栏">‹</button>
+        </div>
+        <div class="side-body" id="sideBody"></div>
+      </aside>
+      <div
+        class="splitter"
+        id="splitSide"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整分组边栏宽度"
+        tabindex="0"
+        title="左右拖动调整宽度 · 双击复位"
+      ></div>
+      <div class="side-backdrop" id="sideBackdrop" hidden></div>
+
+    <main class="layout">
+      <section class="listpane">
+        <div class="listhead">
+          <span class="c-method">方法</span>
+          <span class="c-url">地址</span>
+          <span class="c-status">状态</span>
+          <span class="c-time">耗时</span>
+        </div>
+        <div class="list" id="list"></div>
+        <div class="empty" id="listEmpty">
+          <p class="empty-title">还没有流量</p>
+          <p class="empty-hint">把客户端或浏览器的代理指向 <code id="emptyProxy">—</code>，然后刷新页面。</p>
+        </div>
+      </section>
+
+      <div
+        class="splitter"
+        id="splitList"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整请求列表宽度"
+        tabindex="0"
+        title="左右拖动调整宽度 · 双击复位"
+      ></div>
+
+      <section class="detailpane" id="detail">
+        <div class="detail-empty" id="detailEmpty">
+          <div class="kbd-hint">选一条请求查看详情</div>
+          <ul class="tips">
+            <li><b>抓包</b>：代理已在本机监听，HTTPS 需要信任根证书（点右上「证书」）</li>
+            <li><b>Mock</b>：在任意请求详情里点「Mock 此请求」即可造一条规则</li>
+            <li><b>重放</b>：改 URL / Header / Body 后重发，结果作为新请求入列</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+    </div>
+
+    <!-- 重放 -->
+    <div class="modal" id="modalReplay" hidden>
+      <div class="modal-card wide">
+        <div class="modal-head">
+          <h2>重放请求</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field-row">
+            <select id="rpMethod" class="input mono">
+              <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
+              <option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+            </select>
+            <input id="rpUrl" class="input mono grow" spellcheck="false" />
+          </div>
+          <label class="field">
+            <span>请求头 <em>每行 Key: Value</em></span>
+            <textarea id="rpHeaders" class="input mono" rows="4" spellcheck="false"></textarea>
+          </label>
+          <div class="field">
+            <span class="field-label">请求体 <em>JSON 会自动高亮并校验</em></span>
+            <div class="je-wrap">
+              <div class="je-toolbar">
+                <div class="je-tools">
+                  <select id="rpBodyLang" class="je-select" title="内容类型">
+                    <option value="auto">自动识别</option>
+                    <option value="json">JSON</option>
+                    <option value="plaintext">纯文本</option>
+                    <option value="html">HTML</option>
+                    <option value="xml">XML</option>
+                  </select>
+                  <button type="button" class="je-btn" id="rpFormat" title="格式化 JSON">≡ 格式化</button>
+                  <button type="button" class="je-btn" id="rpMinify" title="压缩成一行">压缩</button>
+                  <button type="button" class="je-btn" id="rpCopyBody">复制</button>
+                </div>
+                <span class="je-state" id="rpBodyState">自动</span>
+              </div>
+              <div class="je-host je-host-mid" id="rpBodyEditor"></div>
+              <textarea id="rpBody" class="je-source" hidden spellcheck="false"></textarea>
+              <div class="je-status"><span id="rpBodyStatus">—</span><span class="fill"></span><span id="rpBodySize">0 B</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="hint" id="rpHint">重放会直接打上游，不经过 Mock 规则</span>
+          <div>
+            <button class="btn ghost" data-close>取消</button>
+            <button class="btn primary" id="rpSend">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增 / 编辑规则 -->
+    <div class="modal" id="modalRule" hidden>
+      <div class="modal-card rule-editor">
+        <div class="modal-head">
+          <div class="re-head">
+            <span class="re-logo">MOCK</span>
+            <div>
+              <h2 id="ruleTitle">新建 Mock 规则</h2>
+              <div class="hint" id="ruSubtitle">命中即本地直返，不打上游</div>
+            </div>
+          </div>
+          <div class="re-head-actions">
+            <label class="mini-switch"><input type="checkbox" id="ruEnabled" checked /><span>启用</span></label>
+            <button class="btn icon ghost" data-close>✕</button>
+          </div>
+        </div>
+
+        <div class="re-tabs" id="ruTabs">
+          <button type="button" data-rutab="match" class="on"><i>1</i> 匹配条件</button>
+          <button type="button" data-rutab="response"><i>2</i> 响应设置</button>
+          <button type="button" data-rutab="body"><i>3</i> 响应体</button>
+          <button type="button" data-rutab="preview"><i>4</i> 预览 / 测试</button>
+          <span class="fill"></span>
+          <span class="re-valid" id="ruValidBadge">—</span>
+        </div>
+
+        <div class="re-body">
+          <div class="re-main">
+            <!-- ① 匹配条件 -->
+            <section class="re-pane on" data-rupane="match">
+              <div class="re-card">
+                <div class="re-card-head"><h3>基本信息</h3><span class="hint">给规则起个一眼能认出的名字</span></div>
+                <div class="re-grid two">
+                  <label class="re-field"><span>规则名称</span><input id="ruName" class="input" placeholder="例如：用户详情 - 返回测试数据" /></label>
+                  <label class="re-field"><span>备注 / 用途 <em>可选</em></span><input id="ruNote" class="input" placeholder="例如：联调用，别删" /></label>
+                </div>
+              </div>
+
+              <div class="re-card">
+                <div class="re-card-head"><h3>请求匹配</h3><span class="hint">从上到下匹配，命中即返回</span></div>
+                <div class="re-grid two">
+                  <label class="re-field"><span>请求方法</span>
+                    <select id="ruMethod" class="input mono">
+                      <option>*</option><option>GET</option><option>POST</option><option>PUT</option>
+                      <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+                    </select>
+                  </label>
+                  <label class="re-field"><span>匹配方式</span>
+                    <select id="ruMode" class="input">
+                      <option value="contains">包含（最常用）</option>
+                      <option value="wildcard">通配符 *</option>
+                      <option value="regex">正则表达式</option>
+                    </select>
+                  </label>
+                  <label class="re-field span2"><span>URL 匹配表达式</span><input id="ruMatch" class="input mono" placeholder="/api/user 或 ^/api/v1/user/\d+$" spellcheck="false" /></label>
+                  <label class="re-field span2"><span>限定域名 <em>可选，留空则不限</em></span><input id="ruHost" class="input mono" placeholder="api.example.com" spellcheck="false" /></label>
+                </div>
+                <div class="re-mode-hint" id="ruModeHint">包含：请求的完整 URL 里出现这段文字就命中。</div>
+                <div class="re-chips">
+                  <span class="hint">快捷填法</span>
+                  <button type="button" class="chip-btn" data-match-preset="wildcard">整段通配符</button>
+                  <button type="button" class="chip-btn" data-match-preset="regex-id">带数字 ID</button>
+                  <button type="button" class="chip-btn" data-match-preset="regex-all">通配任意路径</button>
+                  <button type="button" class="chip-btn" data-match-preset="clear">清空</button>
+                </div>
+              </div>
+
+              <details class="re-card re-tester">
+                <summary class="re-card-head">
+                  <h3>匹配测试器</h3><span class="hint">不保存也能试，输入真实 URL 看会不会命中</span>
+                </summary>
+                <div class="re-grid two">
+                  <label class="re-field span2"><span>测试 URL</span><input id="ruTestUrl" class="input mono" placeholder="https://api.example.com/api/user/123?page=1" spellcheck="false" /></label>
+                  <label class="re-field"><span>测试方法</span>
+                    <select id="ruTestMethod" class="input mono"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
+                  </label>
+                  <label class="re-field"><span>测试域名 <em>留空则从 URL 解析</em></span><input id="ruTestHost" class="input mono" placeholder="api.example.com" spellcheck="false" /></label>
+                </div>
+                <div class="re-test-result" id="ruTestResult">填一个 URL，实时看命中结果</div>
+              </details>
+            </section>
+
+            <!-- ② 响应设置 -->
+            <section class="re-pane" data-rupane="response">
+              <div class="re-card">
+                <div class="re-card-head"><h3>状态与节奏</h3><span class="hint">延迟用来模拟弱网 / 超时</span></div>
+                <div class="re-grid two">
+                  <label class="re-field"><span>HTTP 状态码</span><input id="ruStatus" class="input mono" value="200" inputmode="numeric" /></label>
+                  <label class="re-field"><span>延迟（毫秒）</span><input id="ruDelay" class="input mono" value="0" inputmode="numeric" /></label>
+                </div>
+                <div class="re-chips" id="ruStatusChips">
+                  <span class="hint">常用状态</span>
+                  <button type="button" class="chip-btn" data-status="200">200</button>
+                  <button type="button" class="chip-btn" data-status="201">201</button>
+                  <button type="button" class="chip-btn" data-status="204">204</button>
+                  <button type="button" class="chip-btn" data-status="400">400</button>
+                  <button type="button" class="chip-btn" data-status="401">401</button>
+                  <button type="button" class="chip-btn" data-status="403">403</button>
+                  <button type="button" class="chip-btn" data-status="404">404</button>
+                  <button type="button" class="chip-btn" data-status="429">429</button>
+                  <button type="button" class="chip-btn" data-status="500">500</button>
+                  <button type="button" class="chip-btn" data-status="502">502</button>
+                </div>
+                <div class="re-chips" id="ruDelayChips">
+                  <span class="hint">弱网预设</span>
+                  <button type="button" class="chip-btn" data-delay="0">0ms</button>
+                  <button type="button" class="chip-btn" data-delay="200">200ms</button>
+                  <button type="button" class="chip-btn" data-delay="800">800ms</button>
+                  <button type="button" class="chip-btn" data-delay="1500">1.5s</button>
+                  <button type="button" class="chip-btn" data-delay="3000">3s</button>
+                  <button type="button" class="chip-btn" data-delay="5000">5s</button>
+                </div>
+                <input type="range" id="ruDelayRange" class="re-range" min="0" max="5000" step="100" value="0" title="拖动调整延迟" />
+              </div>
+
+              <div class="re-card">
+                <div class="re-card-head">
+                  <h3>响应头</h3>
+                  <div class="re-card-actions">
+                    <button type="button" class="btn ghost" id="ruCors" title="加上跨域常用头">+ 一键 CORS</button>
+                    <button type="button" class="btn ghost" id="ruAddHeader">+ 添加一行</button>
+                  </div>
+                </div>
+                <label class="re-field"><span>Content-Type 预设</span>
+                  <select id="ruContentType" class="input">
+                    <option value="application/json; charset=utf-8">application/json（推荐）</option>
+                    <option value="text/plain; charset=utf-8">text/plain</option>
+                    <option value="text/html; charset=utf-8">text/html</option>
+                    <option value="application/xml; charset=utf-8">application/xml</option>
+                    <option value="">自定义 / 不设置</option>
+                  </select>
+                </label>
+                <div class="re-hdr-head"><span>Header</span><span>Value</span><span></span></div>
+                <div id="ruHeaderRows" class="re-hdr-rows"></div>
+                <details class="re-raw">
+                  <summary>原始文本（每行 <code>Key: Value</code>）</summary>
+                  <textarea id="ruHeaders" class="input mono" rows="3" spellcheck="false" placeholder="content-type: application/json"></textarea>
+                </details>
+              </div>
+            </section>
+
+            <!-- ③ 响应体 -->
+            <section class="re-pane" data-rupane="body">
+              <div class="re-card re-card-editor">
+                <div class="re-card-head"><h3>响应体</h3><span class="hint">Monaco Editor · 语法高亮 / 实时校验 / 折叠 / 补全</span></div>
+                <div class="je-wrap" id="ruBodyWrap">
+                  <div class="je-toolbar">
+                    <div class="je-tools">
+                      <select id="ruBodyLang" class="je-select" title="内容类型">
+                        <option value="auto">自动识别</option>
+                        <option value="json">JSON</option>
+                        <option value="plaintext">纯文本</option>
+                        <option value="html">HTML</option>
+                        <option value="xml">XML</option>
+                        <option value="javascript">JavaScript</option>
+                      </select>
+                      <button type="button" class="je-btn" id="ruFormat" title="格式化 JSON（⌘⇧F）">≡ 格式化</button>
+                      <button type="button" class="je-btn" id="ruMinify">压缩</button>
+                      <button type="button" class="je-btn" id="ruValidate">校验</button>
+                      <span class="je-sep"></span>
+                      <button type="button" class="je-btn" id="ruCopyBody">复制</button>
+                      <button type="button" class="je-btn" id="ruImportBody">导入文件</button>
+                      <button type="button" class="je-btn" id="ruClearBody">清空</button>
+                      <button type="button" class="je-btn" id="ruFullscreen" title="全屏 / 退出全屏">⤢ 全屏</button>
+                    </div>
+                    <span class="je-state" id="ruBodyState">自动</span>
+                  </div>
+                  <div class="je-host je-host-tall" id="ruBodyEditor"></div>
+                  <textarea id="ruBody" class="je-source" hidden spellcheck="false"></textarea>
+                  <div class="je-status">
+                    <span id="ruBodyStatus">正在载入编辑器…</span>
+                    <span class="fill"></span>
+                    <span id="ruBodyCursor">行 1 · 列 1</span>
+                    <span id="ruBodySize">0 B</span>
+                  </div>
+                </div>
+                <div class="re-tmpl-bar">
+                  <button type="button" class="je-btn" id="ruTmplPick" title="从我的模板里选一个插入">▾ 我的模板</button>
+                  <button type="button" class="je-btn" id="ruSaveTmpl" title="把当前响应体存为模板">＋ 存为模板</button>
+                </div>
+                <div class="tmpl-picker" id="ruTmplPicker" hidden>
+                  <div class="re-tmpl-save" id="ruTmplSave" hidden>
+                    <input id="ruTmplName" placeholder="模板名称" maxlength="30">
+                    <button type="button" class="je-btn" id="ruTmplOk">保存</button>
+                    <button type="button" class="je-btn" id="ruTmplCancel">取消</button>
+                  </div>
+                  <div class="tmpl-picker-head">我的模板 <span class="hint">点一下替换响应体</span></div>
+                  <div class="re-templates" data-template-box></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ④ 预览 / 测试 -->
+            <section class="re-pane" data-rupane="preview">
+              <div class="re-card">
+                <div class="re-card-head"><h3>客户端会收到的响应</h3><span class="hint">状态行 + 响应头 + 响应体</span></div>
+                <pre class="code-block re-preview" id="ruPreview"></pre>
+              </div>
+              <div class="re-card">
+                <div class="re-card-head">
+                  <h3>JSON 结构树</h3>
+                  <div class="re-card-actions">
+                    <button type="button" class="btn ghost" id="ruTreeExpand">全部展开</button>
+                    <button type="button" class="btn ghost" id="ruTreeCollapse">全部折叠</button>
+                  </div>
+                </div>
+                <div id="ruTree" class="re-tree"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="modal-foot re-foot">
+          <span class="hint" id="ruHint"></span>
+          <div>
+            <button type="button" class="btn ghost" id="ruDelete" hidden>删除规则</button>
+            <button type="button" class="btn" id="ruSaveCopy">另存为副本</button>
+            <button type="button" class="btn ghost" data-close>取消</button>
+            <button type="button" class="btn primary" id="ruSave">保存并启用</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 规则列表：左文件树 + 右规则卡片 -->
+    <div class="modal" id="modalRules" hidden>
+      <div class="modal-card wide rules-dialog">
+        <div class="modal-head">
+          <h2>Mock 规则 <span class="muted" id="rulesCount"></span></h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body rules-split">
+          <aside class="rt-pane">
+            <div class="rt-tools">
+              <button type="button" class="btn ghost" id="rtNewRule" title="在当前文件夹新建规则">+ 规则</button>
+              <button type="button" class="btn ghost" id="rtNewDir" title="在当前文件夹新建子文件夹">+ 文件夹</button>
+              <button type="button" class="btn ghost" id="rtRefresh" title="重新扫描 rules 目录">⟳</button>
+            </div>
+            <div id="rulesTree" class="rt-tree" spellcheck="false"></div>
+            <p class="rt-hint">规则即文件，保存在 data/rules/，可用任意编辑器修改，改动自动生效</p>
+          </aside>
+          <div class="rt-main">
+            <div class="rules-toolbar">
+              <input id="rulesSearch" class="input grow" placeholder="搜索名称 / URL / 域名 / 状态码" spellcheck="false" />
+              <button type="button" class="btn" id="rulesImport">导入 JSON</button>
+              <button type="button" class="btn" id="rulesExport">导出 JSON</button>
+              <button type="button" class="btn primary" id="ruNew">+ 新建规则</button>
+            </div>
+            <div id="rulesDirCrumb" class="rt-crumb" hidden></div>
+            <div id="rulesList" class="rules"></div>
+            <p class="hint" style="margin-top: 12px">
+              命中即本地直返，不会打到上游。匹配顺序 = 文件树排序（浅层在前、同层按名称）。
+            </p>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">规则保存在 data/rules/ 目录，文件与界面实时同步</span>
+          <div><button class="btn ghost" data-close>关闭</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 规则 JSON 导入 / 导出 -->
+    <div class="modal" id="modalJsonIO" hidden>
+      <div class="modal-card wide">
+        <div class="modal-head">
+          <h2 id="jsonIoTitle">规则 JSON</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint" id="jsonIoHint"></p>
+          <div class="je-wrap">
+            <div class="je-toolbar">
+              <div class="je-tools">
+                <button type="button" class="je-btn" id="ioFormat">≡ 格式化</button>
+                <button type="button" class="je-btn" id="ioCopy">复制全部</button>
+                <button type="button" class="je-btn" id="ioDownload">下载 .json</button>
+                <button type="button" class="je-btn" id="ioPickFile">从文件读取</button>
+              </div>
+              <span class="je-state" id="ioState">JSON</span>
+            </div>
+            <div class="je-host je-host-io" id="jsonIoEditor"></div>
+            <textarea id="jsonIoSource" class="je-source" hidden spellcheck="false"></textarea>
+            <div class="je-status"><span id="jsonIoStatus">—</span><span class="fill"></span><span id="jsonIoSize">0 B</span></div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="hint" id="jsonIoFoot"></span>
+          <div>
+            <button class="btn ghost" data-close>取消</button>
+            <button class="btn primary" id="jsonIoApply">导入并覆盖</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 证书 -->
+    <div class="modal" id="modalCa" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>信任根证书</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint">
+            解密 HTTPS 需要客户端信任 iReq 的根证书，<b>只需做一次</b>。证书只在本机生成，私钥不会离开这台机器。
+          </p>
+          <div class="notice" style="margin: 10px 0">
+            手机浏览器如果提示「证书错误」，几乎都是因为地址被跳成了 <b>https</b>。请确认地址栏是
+            <b>http://</b>；实在跳不过去，就把本机这个文件隔空投送 / 发邮件到手机安装：
+            <code id="caLocalPath">data/ca/reqlite-ca.pem</code>
+          </div>
+          <div class="ca-row">
+            <a class="btn primary" href="/ca.cer" download="reqlite-ca.cer">下载 .cer（推荐）</a>
+            <a class="btn" href="/ca.pem" download="reqlite-ca.pem">下载 .pem</a>
+          </div>
+          <h3>手机直接装（推荐路径）</h3>
+          <ol class="steps">
+            <li>Wi-Fi 代理指向 <code id="caMobileProxy">—</code>（HTTP / HTTPS 都填这个）</li>
+            <li>浏览器打开 <code id="caUrl">—</code> —— 这个页面会给出下载按钮和步骤</li>
+            <li>下载后：iOS 去 设置 › 已下载描述文件 › 安装</li>
+            <li><b>iOS 还要多一步：</b>设置 › 通用 › 关于本机 › 证书信任设置，打开 <b>iReq Root CA</b></li>
+          </ol>
+          <p class="hint" style="margin-top: 8px">
+            没配代理也能打开这个地址；配了代理也能打开（代理端口自己会应答，不会绕圈）。
+          </p>
+          <h3>macOS（抓本机 HTTPS 必做）</h3>
+          <p class="hint" style="margin: 0 0 6px">
+            手机装的是描述文件，本机要单独信任根证书，否则 Safari / Chrome 会报证书错误。
+            <b>双击 .pem 导入钥匙串只算「安装」</b>，还得把「使用此证书时」改成「始终信任」；
+            直接复制下面第一条（免 sudo）会一次完成安装 + 信任。别的抓包工具的 CA 不能替代。
+          </p>
+          <pre class="code" id="caCmdMac">—</pre>
+          <h3>Android</h3>
+          <ol class="steps">
+            <li>打开上面的地址下载 .cer，通知栏点开或 设置 › 安全 › 加密与凭据 › 安装证书 › CA 证书</li>
+            <li>Android 7+ 应用默认只信系统证书，抓自家 App 建议用 debug 包并配 networkSecurityConfig</li>
+          </ol>
+          <h3>Windows / Linux</h3>
+          <pre class="code">certutil -addstore -user Root reqlite-ca.pem   # Windows
+sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-ca-certificates   # Debian 系</pre>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">个别 App 有证书固定（pinning），请把它加进「设置 › 跳过解密的域名」</span>
+          <div><button class="btn" data-close>知道了</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 设置 -->
+    <div class="modal" id="modalSettings" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>设置</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="addr-card">
+            <div class="addr-card-top">
+              <h3>代理地址</h3>
+              <span class="lp-badge" id="stAddrKind">—</span>
+            </div>
+            <p class="hint">手机 / 其它设备填 Wi-Fi 代理时用下面这组；IP 和端口可以分开复制。</p>
+            <div class="addr-card-row">
+              <button type="button" class="btn ghost" id="stCopyIp">复制 IP</button>
+              <button type="button" class="btn ghost" id="stCopyPort">复制端口</button>
+              <button type="button" class="btn primary" id="stCopyAll">复制完整地址</button>
+              <code id="stAddrFull">—</code>
+            </div>
+            <p class="hint" id="stAddrTip">—</p>
+          </div>
+
+          <div class="addr-card">
+            <div class="addr-card-top">
+              <h3>更新</h3>
+              <span class="lp-badge" id="updStateBadge">—</span>
+            </div>
+            <p class="hint" id="updStatusText">启动时和每 6 小时自动检查一次 GitHub Releases；关闭后仍可点「检查更新」手动查。</p>
+            <div class="addr-card-row">
+              <label class="inline-field"><input type="checkbox" id="updAuto" /> 自动检查更新</label>
+              <button class="btn ghost" id="updCheckNow">检查更新</button>
+              <a class="btn primary" id="updGoRelease" hidden target="_blank" rel="noreferrer">前往下载</a>
+            </div>
+          </div>
+
+          <div class="local-proxy">
+            <div class="lp-top">
+              <div>
+                <h3>本机抓包 <span class="lp-badge" id="lpBadge">检测中…</span> <span class="lp-badge trust" id="lpTrustBadge" hidden></span></h3>
+                <p class="hint">
+                  HTTP 代理不是透明的：手机填了 Wi-Fi 代理就能抓，<b>本机必须设置「系统代理」</b>，
+                  浏览器和桌面 App 的流量才会经过 iReq。环境变量 <code>HTTP_PROXY</code> 只影响
+                  curl / node 这类命令行程序，对 Safari、Chrome、桌面 App 无效。
+                </p>
+              </div>
+            </div>
+            <div class="lp-state" id="lpState">—</div>
+            <div class="lp-warn" id="lpCaWarn" hidden>
+              <div class="lp-warn-title">本机根证书还没被信任</div>
+              <p class="hint" id="lpCaReason">—</p>
+              <p class="hint">
+                Chrome 报「您的连接不是私密连接」就是卡在这一步。保护已自动生效：接管后本机 HTTPS
+                会<b>原样透传</b>，网站能正常打开，但看不到明文（列表里会标记「透传」）。
+                执行下面的命令、再点「重新检测」，就会自动恢复解密。
+              </p>
+              <p class="hint">
+                双击 .pem 导入钥匙串只算「安装」，还必须改成「始终信任」；
+                Reqable / Proxyman 等别的工具的 CA 不能替代 iReq 的根证书。
+              </p>
+              <pre class="code" id="lpCaCmd">—</pre>
+              <div class="lp-warn-actions">
+                <button class="btn primary" id="lpCopyTrust">复制信任命令（免 sudo）</button>
+                <button class="btn ghost" id="lpRecheckTrust">重新检测</button>
+              </div>
+            </div>
+            <div class="lp-actions">
+              <button class="btn primary" id="lpToggle">接管本机</button>
+              <label class="inline-field">网络服务 <select id="lpService" class="input mono"></select></label>
+              <button class="btn ghost" id="lpCopyOn">复制开启命令</button>
+              <button class="btn ghost" id="lpCopyOff">复制关闭命令</button>
+            </div>
+            <details class="lp-details">
+              <summary>手动设置 / 还是看不到？</summary>
+              <p class="hint">在终端执行（或在 系统设置 › 网络 › Wi-Fi › 代理 里手填）：</p>
+              <pre class="code" id="lpCmdOn">—</pre>
+              <p class="hint">关闭：</p>
+              <pre class="code" id="lpCmdOff">—</pre>
+              <ul class="steps">
+                <li>抓 HTTPS 还要<b>信任本机根证书</b>：点右上「证书」，照 macOS 那段命令执行一次即可。浏览器报证书错误就是没信任。</li>
+                <li>Chrome / Edge 有时走 QUIC(HTTP/3) 绕过代理，可在 <code>chrome://flags</code> 关掉，或用 <code>--proxy-server=127.0.0.1:9090</code> 启动。</li>
+                <li>证书固定的 App（Apple 系统服务、部分 IM）会握手失败，在下面「跳过解密的域名」加白名单，或用诊断区一键添加。</li>
+                <li>命令行程序不吃系统代理，需显式设 <code>HTTP_PROXY / HTTPS_PROXY=http://127.0.0.1:9090</code>。</li>
+                <li>停止服务时会自动还原系统代理；若进程被强杀，手动执行上面的「关闭」命令或 <code>reqlite local off</code>。</li>
+              </ul>
+            </details>
+          </div>
+
+          <div class="app-id">
+            <h3>应用识别 <span class="lp-badge" id="appIdBadge">检测中…</span></h3>
+            <p class="hint">
+              <b>本机流量</b>按 TCP 连接查真实进程（Google Chrome、DingTalk、汽水音乐…），不是靠 UA 猜；
+              <b>手机等远程设备</b>只看得到设备 IP，拿不到对端进程，默认按 User-Agent 推断。
+              UA 是 <code>okhttp/4.9</code> 这类通用库时，可以在下面手动标注应用名。
+            </p>
+            <label class="inline-field" style="margin: 0 0 10px">
+              <input type="checkbox" id="stProcessMap" checked /> 识别本机真实进程（macOS）
+            </label>
+            <label class="field">
+              <span>UA → 应用名 <em>每行一条：关键词=显示名；仅对新抓到的请求生效</em></span>
+              <textarea id="stUaAppMap" class="input mono" rows="4" spellcheck="false" placeholder="demo-app/2.0=我的App&#10;okhttp=另一个App&#10;CFNetwork=我的 iOS 客户端"></textarea>
+            </label>
+            <p class="hint" id="appIdStat" style="margin: 4px 0 0">—</p>
+          </div>
+
+          <label class="field">
+            <span>跳过解密的域名 <em>每行一个，匹配子域；证书固定的 App 用它</em></span>
+            <textarea id="stPassthrough" class="input mono" rows="5" spellcheck="false" placeholder="pinned.example.com&#10;apple.com"></textarea>
+          </label>
+          <label class="field">
+            <span>需要解密的端口 <em>默认只解密 443；其它端口原样透传，避免 MQTT / IMAP 这类协议被破坏</em></span>
+            <input id="stMitmPorts" class="input mono" placeholder="443, 8443" spellcheck="false" />
+          </label>
+          <div class="field-row">
+            <label class="inline-field">内存保留条数 <input id="stMax" class="input mono tiny" value="2000" /></label>
+            <span class="hint" style="align-self: end">超出后自动丢弃最旧的记录</span>
+          </div>
+          <div id="stDiagWrap" hidden>
+            <h3>握手失败的域名</h3>
+            <p class="hint" style="margin: 0 0 6px">
+              客户端不认 iReq 的证书（证书固定 / 自带校验），这类域名建议直接透传，否则 App 会表现为「连不上」。
+            </p>
+            <div id="stDiag"></div>
+          </div>
+          <h3>运行信息</h3>
+          <pre class="code" id="stInfo">—</pre>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">改动立即生效</span>
+          <div>
+            <button class="btn ghost" data-close>取消</button>
+            <button class="btn primary" id="stSave">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <input type="file" id="fileInput" accept=".json,.txt,application/json" hidden />
+    <script src="/app-icons.js"></script>
+    <script src="/json-editor.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

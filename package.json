@@ -1,0 +1,116 @@
+{
+  "name": "ireq",
+  "version": "1.2.3",
+  "private": true,
+  "description": "iReq - 轻量跨平台 HTTP(S) 抓包 / Mock / 重放工具",
+  "author": "myafer",
+  "bin": {
+    "ireq": "bin/ireq.js"
+  },
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:cli": "node bin/ireq.js start",
+    "ca": "node bin/ireq.js ca",
+    "icon": "node tools/gen-icon.js",
+    "dist": "electron-builder --publish never"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/myafer/iReq.git"
+  },
+  "dependencies": {
+    "node-forge": "^1.3.1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "pkg": {
+    "assets": [
+      "public/**/*"
+    ],
+    "outputPath": "dist"
+  },
+  "build": {
+    "appId": "co.myafer.ireq",
+    "productName": "iReq",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en",
+      "zh-CN",
+      "zh-TW"
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "iReq-${version}-${arch}-mac.${ext}"
+    },
+    "dmg": {
+      "format": "UDBZ",
+      "artifactName": "iReq-${version}-${arch}.dmg"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "iReq-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "iReq-Portable-${version}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "iReq-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  }
+}

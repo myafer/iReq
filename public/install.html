@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>reqLite · 安装根证书</title>
+    <style>
+      :root {
+        --bg: #f7f6f4;
+        --card: #fff;
+        --border: #e5e2dc;
+        --text: #211f1c;
+        --muted: #7c756b;
+        --accent: #2f5fe0;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #141517;
+          --card: #1b1d20;
+          --border: #2c3035;
+          --text: #e8e7e4;
+          --muted: #8f959d;
+          --accent: #6b93ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px 18px 48px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+      .wrap { max-width: 460px; margin: 0 auto; }
+      h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.3px; }
+      .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      .btn {
+        display: block;
+        text-align: center;
+        text-decoration: none;
+        padding: 13px 16px;
+        border-radius: 11px;
+        font-weight: 600;
+        font-size: 15px;
+        background: var(--accent);
+        color: #fff;
+        margin-bottom: 10px;
+      }
+      .btn.secondary {
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        font-weight: 500;
+        padding: 10px 16px;
+        font-size: 14px;
+        margin-bottom: 0;
+      }
+      .warn {
+        background: #fff8e6;
+        border: 1px solid #f0d79a;
+        color: #8a5a00;
+        border-radius: 11px;
+        padding: 11px 13px;
+        font-size: 13px;
+        margin-bottom: 14px;
+      }
+      @media (prefers-color-scheme: dark) {
+        .warn { background: #2a2317; border-color: #5c4a22; color: #e8c07a; }
+      }
+      h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 18px 0 8px; }
+      ol { margin: 0; padding-left: 20px; font-size: 14px; }
+      li { margin-bottom: 6px; }
+      code {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        background: rgba(127, 127, 127, 0.14);
+        padding: 1px 5px;
+        border-radius: 5px;
+        word-break: break-all;
+      }
+      .kv { font-size: 13px; color: var(--muted); margin-top: 2px; }
+      .kv b { color: var(--text); font-weight: 500; }
+      footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 22px; line-height: 1.7; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>安装 reqLite 根证书</h1>
+      <p class="sub">信任一次，就能在这台设备上看到 HTTPS 明文。</p>
+
+      <div class="warn">
+        ⚠️ 地址栏必须是 <b>http://</b> 开头。如果浏览器跳成了 https，会出现「证书错误」——那是加密没问题、
+        而是 <b>还没装证书</b>，先按下面的步骤装一次。
+      </div>
+
+      <div class="card">
+        <a class="btn" href="/ca.cer" download="reqlite-ca.cer">下载证书（推荐 · .cer）</a>
+        <a class="btn secondary" href="/ca.pem" download="reqlite-ca.pem">下载 PEM 格式</a>
+      </div>
+
+      <h2>iOS / iPadOS</h2>
+      <ol>
+        <li>点上按钮下载，弹出「此网站正尝试下载一个配置描述文件」→ 允许</li>
+        <li>设置 › 已下载描述文件 › 安装</li>
+        <li><b>关键一步：</b>设置 › 通用 › 关于本机 › 证书信任设置，把 <b>reqLite Root CA</b> 打开</li>
+      </ol>
+
+      <h2>Android</h2>
+      <ol>
+        <li>下载后在通知栏点开，或 设置 › 安全 › 加密与凭据 › 安装证书 › CA 证书</li>
+        <li>Android 7+ 的 App 默认只信任系统证书；抓自家 App 请用 debug 包并配 networkSecurityConfig</li>
+      </ol>
+
+      <h2>当前代理</h2>
+      <p class="kv">把这台设备的 Wi-Fi 代理指向 <b>__PROXY__</b>（HTTP 与 HTTPS 都填这一个）。</p>
+
+      <footer>
+        证书只在这台 Mac 上生成，私钥从不外传。<br />
+        装完可以关掉这个页面，回到 App 里正常使用。
+      </footer>
+    </div>
+  </body>
+</html>
