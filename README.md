@@ -22,6 +22,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Connection diagnostics | Domains with repeated TLS handshake failures are listed, with one-click "add to skip decryption" — the most common cause of an app "not connecting" |
 | Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
 | Bilingual UI | Defaults to your system language; switch between English and Simplified Chinese from the top bar or Settings — the choice is remembered |
+| Merged title bar (macOS) | The native title bar is hidden: the red/yellow/green buttons sit inside the app top bar, which also acts as the window drag handle. Windows and Linux keep the system title bar |
 
 ## Quick start
 

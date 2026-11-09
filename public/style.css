@@ -3322,3 +3322,28 @@ pre.raw-view {
 .count {
   font-size: calc(11.5px * var(--hd));
 }
+
+/* ------------------------------------ macOS 融合标题栏（仅 Electron 桌面版生效）
+   原生标题栏隐藏后，红黄绿按钮浮在网页顶栏左侧；顶栏本身接管窗口拖拽。
+   CLI / 浏览器模式没有 data-electron-titlebar 标记，布局完全不受影响。 */
+
+html[data-electron-titlebar="hidden"] .topbar {
+  /* 给系统交通灯按钮留出位置（x=16 起，三个按钮约 52px 宽） */
+  padding-left: 86px;
+  -webkit-app-region: drag;
+}
+
+/* 所有可交互区域必须显式排除拖拽，否则点击会被窗口拖动吃掉 */
+html[data-electron-titlebar="hidden"] .topbar :is(
+  button, a, input, select, label, .addr-wrap, .actions, .fontctl,
+  [contenteditable="true"], [role="button"]
+) {
+  -webkit-app-region: no-drag;
+}
+
+@media (max-width: 1100px) {
+  html[data-electron-titlebar="hidden"] .topbar {
+    padding-left: 76px;
+    gap: 10px;
+  }
+}

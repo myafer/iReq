@@ -70,6 +70,12 @@ function resolveDataDir() {
 }
 
 function createWindow(uiPort) {
+  const isMac = process.platform === 'darwin';
+  /* macOS：隐藏原生标题栏，只把红黄绿三个按钮浮在网页顶栏里，视觉上与内容融为一体。
+     Windows / Linux 仍保留系统标题栏——那里隐藏标题栏会连最小化/关闭按钮一起消失。 */
+  const chrome = isMac
+    ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 16, y: 18 } }
+    : {};
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -78,6 +84,7 @@ function createWindow(uiPort) {
     title: 'iReq',
     backgroundColor: '#f7f6f4',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    ...chrome,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -94,9 +101,12 @@ function createWindow(uiPort) {
 
   mainWindow.loadURL(`http://127.0.0.1:${uiPort}/`);
   // 首次启动按网页里保存的语言重建菜单（没有保存值时保持系统语言判断）
+  // 顺带补打标题栏标记：即使 preload 阶段来不及写，也不会首屏闪一下旧布局
   mainWindow.webContents.on('did-finish-load', () => {
+    const js = (isMac ? "document.documentElement.dataset.electronTitlebar='hidden'; " : '')
+      + "localStorage.getItem('reqlite-lang')";
     mainWindow.webContents
-      .executeJavaScript("localStorage.getItem('reqlite-lang')")
+      .executeJavaScript(js)
       .then((saved) => syncMenuLang(saved))
       .catch(() => {});
   });
@@ -173,6 +183,19 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     setupMenu();
     ipcMain.on('reqlite-lang', (_e, lang) => syncMenuLang(lang));
+    /* 网页顶栏充当标题栏：让原生窗口底色跟随主题、红黄绿按钮随顶栏高度垂直居中。
+       字号缩放 / 主题切换 / 窗口尺寸变化时由 preload 主动上报。 */
+    ipcMain.on('reqlite-window-chrome', (_e, info) => {
+      if (!mainWindow || mainWindow.isDestroyed() || !info) return;
+      if (typeof info.background === 'string' && /^#[0-9a-f]{3,8}$/i.test(info.background)) {
+        mainWindow.setBackgroundColor(info.background);
+      }
+      if (process.platform === 'darwin'
+        && typeof mainWindow.setTrafficLightPosition === 'function'
+        && Number.isFinite(info.trafficY)) {
+        mainWindow.setTrafficLightPosition({ x: 16, y: Math.max(8, Math.round(info.trafficY)) });
+      }
+    });
     try {
       const { createApp } = require('../src/app');
       running = await createApp({
