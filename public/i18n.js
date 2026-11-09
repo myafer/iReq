@@ -25,6 +25,9 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 导出反馈：带条数 / 错误原因，必须整句翻译，不能让片段替换译成「已导出 N flows」
+    [/^已导出 (\d+) 条$/, function (m, a) { return 'Exported ' + a + ' flows'; }],
+    [/^导出失败: (.+)$/, function (m, a) { return 'Export failed: ' + a; }],
     // 进程识别诊断提示：运行时数字 + 片段替换可能已把「次」变成 requests，两种形态都收
     [/^lsof 快照\s+(\d+)\s*(?:次|requests)?\s*·\s*解析到\s+(\d+)\s*个连接\s*·\s*未命中\s+(\d+)$/,
       function (m, a, b, c) { return 'lsof snapshot: ' + a + ' refreshes · ' + b + ' connections resolved · ' + c + ' misses'; }],

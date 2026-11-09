@@ -1,9 +1,10 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /** 自检：控制台「本机抓包」面板的真实点击往返，并确认系统代理最终还原 */
 const { chromium, EXEC } = require('./_pw');
 const { SystemProxy } = require('../src/system-proxy');
-const sp = new SystemProxy({ proxyPort: 9090, dataDir: require('path').join(__dirname, '..', 'data') });
+const sp = new SystemProxy({ proxyPort: PROXY_PORT, dataDir: require('path').join(__dirname, '..', 'data') });
 const svc = sp.primaryService();
 const original = sp.snapshot(svc);
 const checks = [];
@@ -16,7 +17,7 @@ const checks = [];
   page.on('dialog', (d) => d.accept());
 
   try {
-    await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+    await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(900);
 
     const chip0 = await page.$eval('#localChip', (e) => ({ hidden: e.hidden, text: e.textContent.trim(), cls: e.className }));
@@ -51,7 +52,7 @@ const checks = [];
     }));
     const sysOn = sp.status(svc);
     console.log('接管后:', JSON.stringify({ ...afterOn, ours: sysOn.ours, web: sysOn.web }));
-    checks.push(['点击后系统代理真的接管', sysOn.ours && sysOn.web.port === 9090]);
+    checks.push(['点击后系统代理真的接管', sysOn.ours && sysOn.web.port === PROXY_PORT]);
     checks.push(['UI 同步为已接管', afterOn.badge === '已接管' && afterOn.toggle === '释放本机代理' && afterOn.chip === '本机已接管']);
 
     // 点「释放本机代理」

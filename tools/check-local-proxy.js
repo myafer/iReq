@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /**
  * 自检：本机系统代理接管。
@@ -16,7 +17,7 @@ const { execFileSync } = require('child_process');
 const { SystemProxy, BYPASS } = require('../src/system-proxy');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reqlite-sysproxy-'));
-const sp = new SystemProxy({ proxyPort: 9090, dataDir: dir });
+const sp = new SystemProxy({ proxyPort: PROXY_PORT, dataDir: dir });
 const checks = [];
 const add = (name, ok) => checks.push([name, !!ok]);
 
@@ -69,13 +70,13 @@ try {
   console.log('开启后:', JSON.stringify({ web: st1.web, secure: st1.secure, bypass: st1.bypass }));
   add('状态识别为 reqLite 接管', st1.ours);
   add('managed 标记为 true', st1.managed);
-  add('HTTP 与 HTTPS 都指向 9090', st1.web.port === 9090 && st1.secure.port === 9090);
+  add('HTTP 与 HTTPS 都指向 PROXY_PORT', st1.web.port === PROXY_PORT && st1.secure.port === PROXY_PORT);
   add('本机回环域名全部绕过（防控制台自环）', BYPASS.every((d) => st1.bypass.includes(d)));
 
   const sc = scutilProxy();
   console.log('scutil --proxy:', JSON.stringify({ HTTPEnable: sc.HTTPEnable, HTTPPort: sc.HTTPPort, HTTPSEnable: sc.HTTPSEnable, HTTPSPort: sc.HTTPSPort }));
-  add('系统层面 HTTP 代理已生效', sc.HTTPEnable === '1' && Number(sc.HTTPPort) === 9090);
-  add('系统层面 HTTPS 代理已生效', sc.HTTPSEnable === '1' && Number(sc.HTTPSPort) === 9090);
+  add('系统层面 HTTP 代理已生效', sc.HTTPEnable === '1' && Number(sc.HTTPPort) === PROXY_PORT);
+  add('系统层面 HTTPS 代理已生效', sc.HTTPSEnable === '1' && Number(sc.HTTPSPort) === PROXY_PORT);
 
   const auto1 = sp.autoRestore();
   console.log('服务退出自动恢复:', JSON.stringify(auto1));

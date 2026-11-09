@@ -1,3 +1,4 @@
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
 const OUT = require('path').join(__dirname, '..', 'docs', 'screenshots');
 
@@ -13,7 +14,7 @@ const OUT = require('path').join(__dirname, '..', 'docs', 'screenshots');
   });
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('http://127.0.0.1:9090/', { waitUntil: 'networkidle' });
+  await page.goto(`${PROXY_URL}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(400);
   await page.screenshot({ path: OUT + '/07-install-mobile.png', fullPage: true });
   console.log('title:', await page.title());

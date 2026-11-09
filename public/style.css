@@ -3347,3 +3347,37 @@ html[data-electron-titlebar="hidden"] .topbar :is(
     gap: 10px;
   }
 }
+
+/* ------------------------------------ 设置弹窗：紧凑版
+   正文只保留标签与控件，说明收进折叠区 / hover 提示。 */
+#modalSettings .modal-body { padding: 14px 16px; }
+#modalSettings .addr-card,
+#modalSettings .local-proxy {
+  padding: calc(12px * var(--ui-scale));
+  margin-bottom: calc(12px * var(--ui-scale));
+}
+#modalSettings .app-id {
+  padding: calc(12px * var(--ui-scale));
+  margin-bottom: calc(12px * var(--ui-scale));
+}
+#modalSettings .addr-card .hint { margin: 8px 0 0; }
+#modalSettings .modal-foot { justify-content: flex-end; }
+#modalSettings h3 { margin: 14px 0 6px; }
+#modalSettings .addr-card h3,
+#modalSettings .local-proxy h3,
+#modalSettings .app-id h3 { margin: 0 0 8px; }
+#modalSettings .field { margin-bottom: 10px; }
+#modalSettings .field-row { margin-bottom: 10px; }
+#modalSettings .lp-details { margin-top: 8px; }
+/* 状态明细 / 运行信息：默认只露一行摘要，展开才看多行等宽文本 */
+.lp-state-details {
+  margin: 8px 0 10px;
+  font-size: calc(12px * var(--ui-scale));
+}
+.lp-state-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.lp-state-details[open] summary { color: var(--text-2); }
+.lp-state-details .lp-state { margin: 8px 0 0; }
+.st-details .code { margin-top: 8px; white-space: pre-wrap; }

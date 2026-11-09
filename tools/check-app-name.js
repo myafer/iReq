@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /**
  * 应用名识别验收：
@@ -22,7 +23,7 @@ const { ProcessMap, parseLsof, cleanCommand, appNameFromPath } = require('../src
 const { FlowStore } = require('../src/store');
 const { ProxyServer } = require('../src/proxy');
 
-const API = 'http://127.0.0.1:9091';
+const API = UI;
 const checks = [];
 
 const api = async (p, opts = {}) => {
@@ -75,7 +76,7 @@ function watchSse(ms) {
 async function probeHttps(tag) {
   const host = `${tag}.invalid`;
   await execFileAsync('curl', [
-    '--noproxy', '', '--proxy', 'http://127.0.0.1:9090',
+    '--noproxy', '', '--proxy', PROXY_URL,
     '-k', '-s', '-o', '/dev/null', '--max-time', '8',
     '-H', 'User-Agent: okhttp/9.9', `https://${host}/x`,
   ]).catch(() => {}); // 上游 .invalid 必然解析失败，这里只验 flow 的进程识别
@@ -87,7 +88,7 @@ async function probeHttps(tag) {
 /** 经真实代理发一条本机请求，UA 故意伪装成通用库 */
 async function probe(base, tag) {
   await execFileAsync('curl', [
-    '--noproxy', '', '--proxy', 'http://127.0.0.1:9090',
+    '--noproxy', '', '--proxy', PROXY_URL,
     '-s', '-o', '/dev/null',
     '-H', 'User-Agent: okhttp/4.9.3',
     `${base}/${tag}`,
@@ -109,8 +110,8 @@ async function probe(base, tag) {
   try {
     // ---------------------------------------------------------- 纯逻辑
     const aliases = parseAppAliases('# 注释\ndemo-app/2.0=示例App\nokhttp=另一个App');
-    checks.push(['UA 别名解析（忽略注释/空行）', aliases.length === 2 && aliases[1].name === '示例 App']);
-    checks.push(['别名优先于 UA 推断', appOf('okhttp/4.9.3', aliases) === '示例 App']);
+    checks.push(['UA 别名解析（忽略注释/空行）', aliases.length === 2 && aliases[0].name === '示例App']);
+    checks.push(['别名优先于 UA 推断', appOf('demo-app/2.0.0 (iPhone)', aliases) === '示例App']);
     checks.push(['无别名时仍按 UA 推断', appOf('okhttp/4.9.3') === 'OkHttp 4']);
     checks.push(['别名对不匹配 UA 不生效', aliasOf('Mozilla/5.0 Chrome/120', aliases) === null]);
     checks.push([
@@ -167,7 +168,7 @@ async function probe(base, tag) {
     });
     checks.push([
       '★ 手机设备不会被误标成本机进程',
-      remoteMeta.process === null && remoteMeta.appSource === 'alias' && remoteMeta.app === '示例 App',
+      remoteMeta.process === null && remoteMeta.appSource === 'alias' && remoteMeta.app === '另一个App',
     ]);
     checks.push([
       '★ 本机连接命中端口 → 真实进程名（覆盖 UA/别名）',

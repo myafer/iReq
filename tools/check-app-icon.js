@@ -17,7 +17,7 @@ const { chromium, EXEC } = require('./_pw');
 const { seedFlows } = require('./_seed');
 const { AppIconResolver, normalizeName, bundlePathOf, safeIconFile } = require('../src/app-icon');
 
-const API = `http://127.0.0.1:${Number(process.env.REQLITE_UI_PORT || 9091)}`;
+const { UI: API } = require('./_env');
 const checks = [];
 const ok = (name, cond, extra = '') => {
   checks.push([name, !!cond]);

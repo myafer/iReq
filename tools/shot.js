@@ -1,3 +1,4 @@
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
 const OUT = require('path').join(__dirname, '..', 'docs', 'screenshots');
 
@@ -8,7 +9,7 @@ require('fs').mkdirSync(OUT, { recursive: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 880 }, deviceScaleFactor: 2 });
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(900);
 
   const rows = await page.$$('.row');

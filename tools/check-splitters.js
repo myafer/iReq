@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /** 自检：两根纵向分割线可拖拽 / 命中区 / 边界夹紧 / 持久化 / 复位 / 键盘 / 侧栏收起 / 窄屏 */
 const { chromium, EXEC } = require('./_pw');
@@ -15,7 +16,7 @@ const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
   page.on('pageerror', (e) => errs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(900);
 
   const geo = () =>

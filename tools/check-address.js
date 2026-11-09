@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /**
  * 自检：顶栏代理地址
@@ -10,7 +11,7 @@
  * 只读取服务端状态；空状态通过临时清空页面内存里的 S.flows 触发，不改服务端数据。
  */
 const { chromium, EXEC } = require('./_pw');
-const BASE = 'http://127.0.0.1:9091';
+const BASE = UI;
 const checks = [];
 const ok = (name, pass, extra = '') => checks.push([name, !!pass, extra]);
 

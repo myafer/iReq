@@ -125,7 +125,8 @@ class FlowStore extends EventEmitter {
     return flow;
   }
 
-  list({
+  /** 条件筛选：返回完整 flow 对象。列表接口再映射成 summary，导出直接用完整对象。 */
+  filter({
     query = '',
     method = '',
     status = '',
@@ -163,10 +164,19 @@ class FlowStore extends EventEmitter {
         } ${(f.process && `${f.process.name} ${f.process.command} ${f.process.pid}`) || ''}`.toLowerCase();
         if (!hay.includes(q)) continue;
       }
-      out.push(summary(f));
+      out.push(f);
       if (out.length >= limit) break;
     }
     return out;
+  }
+
+  list(options = {}) {
+    return this.filter(options).map(summary);
+  }
+
+  /** 导出用：带 headers / body 的完整记录，条数上限交给调用方 */
+  listFull(options = {}) {
+    return this.filter({ limit: 2000, ...options });
   }
 
   /** 侧边栏用的聚合：设备 / 应用 / 域名 / 接口结构 */

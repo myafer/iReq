@@ -1,10 +1,11 @@
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
 (async () => {
   const browser = await chromium.launch({ executablePath: EXEC });
   const page = await browser.newPage({ viewport: { width: 1100, height: 780 }, deviceScaleFactor: 2 });
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(900);
 
   const probe = () =>

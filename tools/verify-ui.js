@@ -1,3 +1,4 @@
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
 (async () => {
   const browser = await chromium.launch({ executablePath: EXEC });
@@ -6,7 +7,7 @@ const { chromium, EXEC } = require('./_pw');
   page.on('pageerror', (e) => errs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => m.type() === 'error' && errs.push('CONSOLE ' + m.text()));
 
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1200);
 
   console.log('列表行数:', await page.$$eval('.row', (r) => r.length));

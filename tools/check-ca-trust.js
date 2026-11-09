@@ -26,7 +26,7 @@ const { RuleEngine } = require('../src/rules');
 
 const ROOT = path.join(__dirname, '..');
 const CA_DIR = path.join(ROOT, 'data', 'ca');
-const UI = process.env.REQLITE_UI_PORT ? `http://127.0.0.1:${process.env.REQLITE_UI_PORT}` : 'http://127.0.0.1:9091';
+const { UI } = require('./_env');
 const checks = [];
 const push = (name, ok) => checks.push([name, Boolean(ok)]);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'reqlite-catrust-'));

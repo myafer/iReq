@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /** 自检：分组边栏（收藏/设备/应用/域名/接口结构）、筛选、书签、收起、移动端抽屉 */
 const { chromium, EXEC } = require('./_pw');
@@ -12,7 +13,7 @@ const { seedFlows } = require('./_seed');
   page.on('pageerror', (e) => errs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1000);
 
   const groups = await page.$$eval('.sgroup', (els) =>

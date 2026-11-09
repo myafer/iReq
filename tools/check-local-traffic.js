@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /**
  * 端到端验收：开启系统代理后，本机浏览器发出的请求真的会出现在列表里。
@@ -29,7 +30,7 @@ function lanIp() {
     return;
   }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'reqlite-lt-'));
-  const sp = new SystemProxy({ proxyPort: 9090, dataDir: tmp });
+  const sp = new SystemProxy({ proxyPort: PROXY_PORT, dataDir: tmp });
   const svc = sp.primaryService();
   const original = sp.snapshot(svc);
   const checks = [];
@@ -58,7 +59,7 @@ function lanIp() {
     await page.waitForTimeout(1200);
     checks.push(['浏览器经代理访问成功', status === 200]);
 
-    const flows = await fetch('http://127.0.0.1:9091/api/flows?limit=800').then((r) => r.json());
+    const flows = await fetch(`${UI}/api/flows?limit=800`).then((r) => r.json());
     const hit = flows.filter((f) => f.url.includes(tag));
     console.log('抓到的记录:', JSON.stringify(hit.map((f) => ({ url: f.url, clientIp: f.clientIp, status: f.status }))));
     checks.push(['★ 本机请求出现在流量列表', hit.length > 0]);

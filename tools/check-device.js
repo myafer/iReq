@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /**
  * 自检：设备分组把 127.0.0.1 / ::1 / 本机网卡 IP 合并成「本机」，
@@ -16,7 +17,7 @@ const L = require('../src/local-address');
 const { FlowStore } = require('../src/store');
 const { ProcessMap } = require('../src/process-map');
 
-const API = 'http://127.0.0.1:9091';
+const API = UI;
 const REMOTE = '203.0.113.7';
 const checks = [];
 const ok = (name, cond, extra = '') => {
@@ -45,11 +46,11 @@ function viaLan(lan) {
     const req = http.request(
       {
         host: lan,
-        port: 9090,
+        port: PROXY_PORT,
         localAddress: lan,
         method: 'GET',
-        path: `http://127.0.0.1:9091/api/status?tag=${tag}`,
-        headers: { host: '127.0.0.1:9091', 'user-agent': 'curl/8.7.1' },
+        path: `${UI}/api/status?tag=${tag}`,
+        headers: { host: UI_HOST, 'user-agent': 'curl/8.7.1' },
         timeout: 5000,
       },
       (res) => {

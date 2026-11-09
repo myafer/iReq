@@ -13,7 +13,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | --- | --- |
 | HTTPS decryption | Self-generates a root CA on first run, dynamically issues leaf certificates per domain (397-day validity + SAN, meeting Apple's requirements) |
 | Capture | Full records of plaintext HTTP and decrypted HTTPS: method, URL, headers, body, status, duration, size |
-| Live view | Console pushes via SSE; a request appears in the list the moment it completes |
+| Live view | Console pushes via SSE; a request appears in the list the moment it completes. New flows insert a single row instead of re-rendering the whole list |
 | Grouped sidebar | Automatically aggregates **device / app / domain / API structure**; one click filters; bookmark frequently used filters |
 | Mock | Matches by method + URL (contains / wildcard / regex) + domain, returns custom status code, headers, body; add delay to simulate a slow network |
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
@@ -21,6 +21,8 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
 | Connection diagnostics | Domains with repeated TLS handshake failures are listed, with one-click "add to skip decryption" — the most common cause of an app "not connecting" |
 | Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
+| Export | One-click **HAR 1.2** export of the current filter (full headers / bodies + iReq app / device metadata); raw JSON available at `/api/export/json` |
+| Instant settings | Settings save automatically as you type (short debounce); closing the dialog flushes pending edits — no Save button to remember |
 | Bilingual UI | Defaults to your system language; switch between English and Simplified Chinese from the top bar or Settings — the choice is remembered |
 | Merged title bar (macOS) | The native title bar is hidden: the red/yellow/green buttons sit inside the app top bar, which also acts as the window drag handle. Windows and Linux keep the system title bar |
 
@@ -232,6 +234,7 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 - **Header block**: request / response headers highlight on hover line by line, **click a line to copy** `name: value`; key headers (host / content-type / authorization / cookie, etc.) are color-hinted; the block toolbar has "Copy all" (one `name: value` per line) / "Copy JSON" (the whole header object)
 - **Raw tab**: request / response messages with **line numbers**, click any line to copy it; toolbar "Copy all" (incl. body) / "Status line and headers only"; binary bodies are omitted in raw view with a hint pointing elsewhere
 - **Actions**: replay, Mock this request, copy cURL, copy response body
+- **Export** (top bar): downloads the currently filtered flows as a HAR 1.2 file, including complete request / response headers and bodies; no filter means all in-memory flows. Dialogs keep keyboard focus inside them and restore it on close.
 - **Rules**: rich editor (see below) — add / edit / delete, enable / disable, reorder, search, copy, JSON import / export
 - **JSON editor**: built-in **Monaco Editor 0.52.2** (the same engine as VS Code), vendored locally with no CDN dependency,
   works offline; syntax highlighting, error squiggles (real JSON worker validation), bracket matching, code folding, autocomplete,
@@ -318,6 +321,8 @@ tools/              Dev self-check scripts (_seed.js generates test traffic, see
 ```
 GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, iface}], proxyPort, caTrust, safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
+GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
+GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
 GET    /api/app-icons?names=A,B   Batch-find real icons by app name → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      Icon file (only hash filenames inside data/app-icons/)
@@ -354,9 +359,15 @@ curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json'
 ## Development self-checks
 
 With the service running (`node bin/ireq.js start`) you can run these directly. UI scripts all generate test traffic through the proxy themselves via `tools/_seed.js`,
-so they don't depend on the console happening to have data; each script prints a per-item ✅/❌ at the end:
+so they don't depend on the console happening to have data; each script prints a per-item ✅/❌ at the end.
+
+`npm run check` runs the read-only suites in sequence and prints a summary. All scripts take their addresses from
+`tools/_env.js`, so point them at a specific instance with `REQLITE_UI_PORT=9294 REQLITE_PROXY_PORT=9293 npm run check`
+(defaults: 9091 / 9090) — this avoids a stale service producing a false green.
 
 ```bash
+npm run check                   # one-shot summary (excludes suites that change the macOS system proxy)
+node tools/check-i18n.js        # English dictionary: orphan keys / uncovered Chinese UI text (no service needed)
 node tools/check-store.js        # persistence / restart recovery / clear doesn't resurrect (pure unit, temp dir)
 node tools/check-proxy.js        # plaintext forwarding, non-443 passthrough, 8MB streaming upload, keep-alive reuse, MITM, pinning diagnostics, capture toggle
 node tools/check-dom.js          # statically check that every #id referenced by app.js exists

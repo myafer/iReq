@@ -3,7 +3,7 @@
 /** 自检：界面整体字号缩放、上下限、持久化、控件不被裁切、不产生横向溢出 */
 const { chromium, EXEC } = require('./_pw');
 const { seedFlows } = require('./_seed');
-const UI = `http://127.0.0.1:${Number(process.env.REQLITE_UI_PORT || 9091)}`;
+const { UI } = require('./_env');
 (async () => {
   console.log('注入测试流量:', JSON.stringify(await seedFlows()));
   const browser = await chromium.launch({ executablePath: EXEC });
@@ -59,7 +59,11 @@ const UI = `http://127.0.0.1:${Number(process.env.REQLITE_UI_PORT || 9091)}`;
   checks.push(['百分比文案同步', up2.label === '110%']);
   checks.push(['放大后无横向溢出', up2.overflowX <= 0]);
 
-  for (let i = 0; i < 12; i++) await page.click('#fontUp').catch(() => {});
+  // 到上限就停：按钮 disabled 后再 click 会一直等到 Playwright 超时，批量回归里能拖垮整套
+  for (let i = 0; i < 12; i++) {
+    if (await page.$eval('#fontUp', (e) => e.disabled)) break;
+    await page.click('#fontUp');
+  }
   await page.waitForTimeout(200);
   const max = await read();
   console.log('到上限:', JSON.stringify(max));

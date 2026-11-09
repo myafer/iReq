@@ -14,8 +14,7 @@
 const http = require('http');
 
 const PROXY_HOST = '127.0.0.1';
-const PROXY_PORT = Number(process.env.REQLITE_PROXY_PORT || 9090);
-const CONSOLE = `http://127.0.0.1:${Number(process.env.REQLITE_UI_PORT || 9091)}`;
+const { UI: CONSOLE, PROXY_PORT } = require('./_env');
 
 const UAS = [
   'demo-app/2.0.0 (iPhone; iOS 17.0) CFNetwork/1496',

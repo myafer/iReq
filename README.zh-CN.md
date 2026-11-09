@@ -13,7 +13,7 @@
 | --- | --- |
 | HTTPS 解密 | 首次运行自建根证书，按域名动态签发叶子证书（397 天有效期 + SAN，符合 Apple 要求） |
 | 抓包 | 明文 HTTP 与解密后的 HTTPS 全量记录：方法、URL、头、body、状态、耗时、大小 |
-| 实时看 | 控制台走 SSE 推送，请求完成即时出现在列表里 |
+| 实时看 | 控制台走 SSE 推送，请求完成即时出现在列表里；新请求只插入一行，不整表重绘 |
 | 分组边栏 | 自动聚合 **设备 / 应用 / 域名 / 接口结构**，点一下即筛选；可收藏常用筛选为书签 |
 | Mock | 按 方法 + URL（包含 / 通配 / 正则）+ 域名 匹配，返回自定义状态码、头、body，可加延迟模拟弱网 |
 | 重放 | 改 method / URL / header / body 重新发送，结果作为新请求入列并与原请求关联 |
@@ -21,6 +21,8 @@
 | 只解密 HTTP | **默认只解密 443**，其它端口原样透传（MQTT / IMAP / 私有二进制协议不会被破坏）；设置里可加端口 |
 | 连接诊断 | 反复 TLS 握手失败的域名会列出来，一键「加入跳过解密」——这是 App「连不上」的最常见原因 |
 | 落盘 | 当天流量写 `data/flows/flows-YYYY-MM-DD.jsonl`，重启可回看最近 300 条 |
+| 导出 | 顶栏一键把当前筛选结果导出为 **HAR 1.2**（完整头 / body + iReq 应用、设备扩展字段）；原始 JSON 用 `/api/export/json` |
+| 设置自动保存 | 输入停顿即保存，关闭弹窗会兜底 flush，不用记着点「保存」 |
 | 中英双语界面 | 默认跟随系统语言；顶栏或设置里可切换 English / 简体中文（跟随系统、简体中文、English 三选一），选择会被记住 |
 | 融合标题栏（macOS） | 隐藏系统标题栏，红黄绿按钮浮在应用顶栏内，顶栏同时承担窗口拖拽；Windows / Linux 保留系统标题栏 |
 
@@ -232,6 +234,7 @@ CFNetwork=我的 iOS 客户端
 - **头区块**：请求头 / 响应头逐行 hover 高亮，**点行即复制** `name: value`；关键头（host / content-type / authorization / cookie 等）着色提示；区块工具条「复制全部」（每行 `name: value`）/「复制 JSON」（整个头对象）
 - **原文页签**：请求 / 响应报文带**行号**，点任意行复制该行；工具条「复制全部」（含 body）/「仅状态行和头」；二进制 body 在原文中省略并给出指引提示
 - **操作**：重放、Mock 此请求、复制 cURL、复制响应体
+- **导出**（顶栏）：把当前筛选的请求下载成 HAR 1.2，含完整请求 / 响应头与 body；没有筛选时导出内存中全部记录。弹窗会把键盘焦点锁在内部，关闭后还原到原来的位置。
 - **规则**：富版编辑器（见下节），增删改、启停、排序、搜索、复制、JSON 导入导出
 - **JSON 编辑器**：内置 **Monaco Editor 0.52.2**（VS Code 同款内核），本地 vendor 化不依赖 CDN，
   断网可用；语法高亮、错误红线（真 JSON worker 校验）、括号匹配、代码折叠、自动补全、
@@ -318,6 +321,8 @@ tools/              开发自检脚本（_seed.js 负责造测试流量，见「
 ```
 GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]、proxyPort、caTrust、safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
+GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
+GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }
 GET    /api/app-icons?names=A,B   按应用名批量找真实图标 → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      图标文件（仅 data/app-icons/ 里的 hash 文件名）
@@ -354,9 +359,15 @@ curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json'
 ## 开发自检
 
 服务起来后（`node bin/ireq.js start`）可直接跑。UI 类脚本都通过 `tools/_seed.js` 自己经代理造测试流量，
-不依赖控制台里恰好有数据，脚本末尾会打印逐条 ✅/❌：
+不依赖控制台里恰好有数据，脚本末尾会打印逐条 ✅/❌。
+
+`npm run check` 会顺序跑只读类自检并汇总。所有脚本统一从 `tools/_env.js` 取地址，
+用 `REQLITE_UI_PORT=9294 REQLITE_PROXY_PORT=9293 npm run check` 指向指定实例
+（默认 9091 / 9090），避免连到旧服务「假绿」。
 
 ```bash
+npm run check                   # 一键汇总（不含会改动 macOS 系统代理的脚本）
+node tools/check-i18n.js        # 英文字典：孤儿键 / 未覆盖中文文案（无需服务）
 node tools/check-store.js        # 落盘 / 重启恢复 / 清空不复活（纯单元，用临时目录）
 node tools/check-proxy.js        # 明文转发、非 443 透传、8MB 流式上传、保活复用、MITM、证书固定诊断、抓包开关
 node tools/check-dom.js          # 静态检查 app.js 引用的 #id 是否都存在

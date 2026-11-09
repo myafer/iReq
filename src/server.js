@@ -49,6 +49,85 @@ const MIME = {
   '.ttf': 'font/ttf',
 };
 
+/* 导出 HAR 1.2：headers / body / 耗时按规范映射，抓包里的应用名、设备 IP 等放到 _iReq 扩展字段 */
+function harHeaders(obj) {
+  return Object.entries(obj || {}).map(([name, value]) => ({
+    name,
+    value: Array.isArray(value) ? value.join(', ') : String(value),
+  }));
+}
+
+function harContent(flow, isRequest) {
+  const text = isRequest ? flow.reqBody : flow.resBody;
+  const b64 = isRequest ? flow.reqBodyBase64 : flow.resBodyBase64;
+  const heads = isRequest ? flow.reqHeaders : flow.resHeaders;
+  const contentType = (heads && (heads['content-type'] || heads['Content-Type'])) || '';
+  const content = {
+    size: Number(isRequest ? flow.reqSize : flow.resSize) || 0,
+    mimeType: String(Array.isArray(contentType) ? contentType[0] : contentType),
+  };
+  if (b64) {
+    content.text = String(b64);
+    content.encoding = 'base64';
+  } else {
+    content.text = text == null ? '' : String(text);
+  }
+  return content;
+}
+
+function toHar(flows, version) {
+  const entries = flows
+    .slice()
+    .reverse() // 内部是最新在前，HAR 按时间正序更自然
+    .map((f) => {
+      let queryString = [];
+      try {
+        queryString = [...new URL(f.url).searchParams].map(([name, value]) => ({ name, value }));
+      } catch (_) {
+        /* URL 不完整时忽略 query */
+      }
+      const time = Math.max(0, Number(f.duration) || 0);
+      return {
+        startedDateTime: new Date(f.ts || Date.now()).toISOString(),
+        time,
+        request: {
+          method: f.method || 'GET',
+          url: f.url || '',
+          httpVersion: 'HTTP/1.1',
+          headers: harHeaders(f.reqHeaders),
+          queryString,
+          cookies: [],
+          headersSize: -1,
+          bodySize: Number(f.reqSize) || 0,
+          postData: harContent(f, true),
+        },
+        response: {
+          status: Number(f.status) || 0,
+          statusText: String(f.statusText || ''),
+          httpVersion: 'HTTP/1.1',
+          headers: harHeaders(f.resHeaders),
+          cookies: [],
+          content: harContent(f, false),
+          redirectURL: '',
+          headersSize: -1,
+          bodySize: Number(f.resSize) || 0,
+        },
+        cache: {},
+        timings: { send: 0, wait: time, receive: 0 },
+        _iReq: {
+          id: f.id,
+          app: f.app || null,
+          clientIp: f.clientIp || null,
+          mocked: Boolean(f.mocked),
+          error: f.error || null,
+        },
+      };
+    });
+  return {
+    log: { version: '1.2', creator: { name: 'iReq', version: version || '' }, pages: [], entries },
+  };
+}
+
 class ConsoleServer {
   constructor({ port = 9091, host = '127.0.0.1', store, rules, bookmarks, proxy, ca, config, systemProxy, caTrust, appIcons, updater, dataDir, publicDir }) {
     this.port = port;
@@ -204,6 +283,33 @@ class ConsoleServer {
         icons,
         stats: this.appIcons.status(),
       });
+    }
+
+    /* 导出 HAR / 原始 JSON：复用列表的筛选条件，返回带附件名的下载 */
+    if (parts[1] === 'export' && method === 'GET') {
+      const format = parts[2] === 'json' ? 'json' : 'har';
+      const sp = url.searchParams;
+      const flows = this.store.listFull({
+        query: sp.get('q') || '',
+        status: sp.get('status') || '',
+        onlyMocked: sp.get('mocked') === '1',
+        host: sp.get('host') || '',
+        ip: sp.get('ip') || '',
+        app: sp.get('app') || '',
+        route: sp.get('route') || '',
+        limit: Math.min(Number(sp.get('limit')) || 2000, 2000),
+      });
+      const payload = format === 'json' ? flows.slice().reverse() : toHar(flows, require('../package.json').version);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const data = Buffer.from(JSON.stringify(payload, null, format === 'har' ? 2 : 0));
+      res.writeHead(200, {
+        'content-type': format === 'har' ? 'application/har+json; charset=utf-8' : 'application/json; charset=utf-8',
+        'content-disposition': `attachment; filename="ireq-${stamp}.${format === 'json' ? 'json' : 'har'}"`,
+        'content-length': data.length,
+        'x-flow-count': String(flows.length),
+        'cache-control': 'no-store',
+      });
+      return res.end(data);
     }
 
     if (parts[1] === 'flows') {

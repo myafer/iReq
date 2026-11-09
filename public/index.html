@@ -61,6 +61,7 @@
         <button class="btn" id="btnRules">规则 <b id="ruleCount">0</b></button>
         <button class="btn" id="btnCa">证书</button>
         <button class="btn" id="btnSettings">设置</button>
+        <button class="btn" id="btnExport" title="导出当前筛选的请求（HAR）">导出</button>
         <a class="btn upd-badge" id="updBadge" hidden target="_blank" rel="noreferrer" title="点击打开新版本发布页">↑ <span id="updBadgeVer"></span></a>
         <button class="btn ghost" id="btnClear">清空</button>
         <div class="fontctl" title="界面字号">
@@ -566,12 +567,11 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <div class="addr-card-top">
               <h3>Language / 界面语言</h3>
             </div>
-            <p class="hint">默认跟随系统语言；手动选择后立即生效并记住。 / Follows the system language by default; a manual choice applies instantly and is remembered.</p>
             <div class="addr-card-row">
-              <select id="stLang" class="input mono">
-                <option value="auto">跟随系统（默认）/ Auto</option>
+              <select id="stLang" class="input mono" data-autofocus>
+                <option value="auto">跟随系统 / Auto</option>
                 <option value="en">English</option>
-                <option value="zh-CN">简体中文 / Chinese</option>
+                <option value="zh-CN">简体中文</option>
               </select>
             </div>
           </div>
@@ -581,7 +581,6 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <h3>代理地址</h3>
               <span class="lp-badge" id="stAddrKind">—</span>
             </div>
-            <p class="hint">手机 / 其它设备填 Wi-Fi 代理时用下面这组；IP 和端口可以分开复制。</p>
             <div class="addr-card-row">
               <button type="button" class="btn ghost" id="stCopyIp">复制 IP</button>
               <button type="button" class="btn ghost" id="stCopyPort">复制端口</button>
@@ -596,7 +595,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <h3>更新</h3>
               <span class="lp-badge" id="updStateBadge">—</span>
             </div>
-            <p class="hint" id="updStatusText">启动时和每 6 小时自动检查一次 GitHub Releases；关闭后仍可点「检查更新」手动查。</p>
+            <p class="hint" id="updStatusText">自动检查 GitHub Releases</p>
             <div class="addr-card-row">
               <label class="inline-field"><input type="checkbox" id="updAuto" /> 自动检查更新</label>
               <button class="btn ghost" id="updCheckNow">检查更新</button>
@@ -606,28 +605,16 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
 
           <div class="local-proxy">
             <div class="lp-top">
-              <div>
-                <h3>本机抓包 <span class="lp-badge" id="lpBadge">检测中…</span> <span class="lp-badge trust" id="lpTrustBadge" hidden></span></h3>
-                <p class="hint">
-                  HTTP 代理不是透明的：手机填了 Wi-Fi 代理就能抓，<b>本机必须设置「系统代理」</b>，
-                  浏览器和桌面 App 的流量才会经过 iReq。环境变量 <code>HTTP_PROXY</code> 只影响
-                  curl / node 这类命令行程序，对 Safari、Chrome、桌面 App 无效。
-                </p>
-              </div>
+              <h3>本机抓包 <span class="lp-badge" id="lpBadge">检测中…</span> <span class="lp-badge trust" id="lpTrustBadge" hidden></span></h3>
             </div>
-            <div class="lp-state" id="lpState">—</div>
+            <details class="lp-state-details">
+              <summary id="lpStateSummary">—</summary>
+              <div class="lp-state" id="lpState">—</div>
+            </details>
             <div class="lp-warn" id="lpCaWarn" hidden>
               <div class="lp-warn-title">本机根证书还没被信任</div>
               <p class="hint" id="lpCaReason">—</p>
-              <p class="hint">
-                Chrome 报「您的连接不是私密连接」就是卡在这一步。保护已自动生效：接管后本机 HTTPS
-                会<b>原样透传</b>，网站能正常打开，但看不到明文（列表里会标记「透传」）。
-                执行下面的命令、再点「重新检测」，就会自动恢复解密。
-              </p>
-              <p class="hint">
-                双击 .pem 导入钥匙串只算「安装」，还必须改成「始终信任」；
-                Reqable / Proxyman 等别的工具的 CA 不能替代 iReq 的根证书。
-              </p>
+              <p class="hint">未信任时本机 HTTPS 自动透传；执行下面命令，再点「重新检测」。</p>
               <pre class="code" id="lpCaCmd">—</pre>
               <div class="lp-warn-actions">
                 <button class="btn primary" id="lpCopyTrust">复制信任命令（免 sudo）</button>
@@ -641,65 +628,57 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <button class="btn ghost" id="lpCopyOff">复制关闭命令</button>
             </div>
             <details class="lp-details">
-              <summary>手动设置 / 还是看不到？</summary>
-              <p class="hint">在终端执行（或在 系统设置 › 网络 › Wi-Fi › 代理 里手填）：</p>
+              <summary>命令与说明</summary>
+              <p class="hint">开启</p>
               <pre class="code" id="lpCmdOn">—</pre>
-              <p class="hint">关闭：</p>
+              <p class="hint">关闭</p>
               <pre class="code" id="lpCmdOff">—</pre>
               <ul class="steps">
-                <li>抓 HTTPS 还要<b>信任本机根证书</b>：点右上「证书」，照 macOS 那段命令执行一次即可。浏览器报证书错误就是没信任。</li>
-                <li>Chrome / Edge 有时走 QUIC(HTTP/3) 绕过代理，可在 <code>chrome://flags</code> 关掉，或用 <code>--proxy-server=127.0.0.1:9090</code> 启动。</li>
-                <li>证书固定的 App（Apple 系统服务、部分 IM）会握手失败，在下面「跳过解密的域名」加白名单，或用诊断区一键添加。</li>
-                <li>命令行程序不吃系统代理，需显式设 <code>HTTP_PROXY / HTTPS_PROXY=http://127.0.0.1:9090</code>。</li>
-                <li>停止服务时会自动还原系统代理；若进程被强杀，手动执行上面的「关闭」命令或 <code>reqlite local off</code>。</li>
+                <li>本机需设置「系统代理」；HTTP_PROXY 只影响命令行程序。</li>
+                <li>抓 HTTPS 需先信任根证书（点顶栏「证书」）。</li>
+                <li>Chrome / Edge 可在 chrome://flags 关闭 QUIC，或用 --proxy-server 启动。</li>
+                <li>证书固定的 App 加到「跳过解密的域名」；命令行程序需显式设 HTTP_PROXY / HTTPS_PROXY。</li>
+                <li>服务停止会自动还原系统代理；被强杀时执行上面的关闭命令。</li>
               </ul>
             </details>
           </div>
 
           <div class="app-id">
-            <h3>应用识别 <span class="lp-badge" id="appIdBadge">检测中…</span></h3>
-            <p class="hint">
-              <b>本机流量</b>按 TCP 连接查真实进程（Google Chrome、DingTalk、汽水音乐…），不是靠 UA 猜；
-              <b>手机等远程设备</b>只看得到设备 IP，拿不到对端进程，默认按 User-Agent 推断。
-              UA 是 <code>okhttp/4.9</code> 这类通用库时，可以在下面手动标注应用名。
-            </p>
+            <h3 title="本机按进程识别，远程设备按 User-Agent 推断">应用识别 <span class="lp-badge" id="appIdBadge">检测中…</span></h3>
             <label class="inline-field" style="margin: 0 0 10px">
               <input type="checkbox" id="stProcessMap" checked /> 识别本机真实进程（macOS）
             </label>
             <label class="field">
-              <span>UA → 应用名 <em>每行一条：关键词=显示名；仅对新抓到的请求生效</em></span>
+              <span>UA → 应用名 <em>每行：关键词=显示名</em></span>
               <textarea id="stUaAppMap" class="input mono" rows="4" spellcheck="false" placeholder="demo-app/2.0=我的App&#10;okhttp=另一个App&#10;CFNetwork=我的 iOS 客户端"></textarea>
             </label>
             <p class="hint" id="appIdStat" style="margin: 4px 0 0">—</p>
           </div>
 
           <label class="field">
-            <span>跳过解密的域名 <em>每行一个，匹配子域；证书固定的 App 用它</em></span>
+            <span>跳过解密的域名 <em>每行一个，匹配子域</em></span>
             <textarea id="stPassthrough" class="input mono" rows="5" spellcheck="false" placeholder="pinned.example.com&#10;apple.com"></textarea>
           </label>
           <label class="field">
-            <span>需要解密的端口 <em>默认只解密 443；其它端口原样透传，避免 MQTT / IMAP 这类协议被破坏</em></span>
+            <span>需要解密的端口 <em>默认 443</em></span>
             <input id="stMitmPorts" class="input mono" placeholder="443, 8443" spellcheck="false" />
           </label>
           <div class="field-row">
             <label class="inline-field">内存保留条数 <input id="stMax" class="input mono tiny" value="2000" /></label>
-            <span class="hint" style="align-self: end">超出后自动丢弃最旧的记录</span>
           </div>
           <div id="stDiagWrap" hidden>
             <h3>握手失败的域名</h3>
-            <p class="hint" style="margin: 0 0 6px">
-              客户端不认 iReq 的证书（证书固定 / 自带校验），这类域名建议直接透传，否则 App 会表现为「连不上」。
-            </p>
             <div id="stDiag"></div>
           </div>
-          <h3>运行信息</h3>
-          <pre class="code" id="stInfo">—</pre>
+          <details class="lp-details st-details">
+            <summary>运行信息</summary>
+            <pre class="code" id="stInfo">—</pre>
+          </details>
         </div>
         <div class="modal-foot">
-          <span class="hint">改动立即生效</span>
           <div>
-            <button class="btn ghost" data-close>取消</button>
-            <button class="btn primary" id="stSave">保存</button>
+            <button class="btn ghost" data-close>关闭</button>
+            <button class="btn primary" id="stSave">完成</button>
           </div>
         </div>
       </div>

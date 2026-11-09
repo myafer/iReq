@@ -1,3 +1,4 @@
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
 const log = (...a) => console.log(...a);
 
@@ -7,7 +8,7 @@ const log = (...a) => console.log(...a);
   const errs = [];
   page.on('pageerror', (e) => errs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
 
   log('overflowX:', await page.evaluate(() => document.documentElement.scrollWidth - innerWidth));
@@ -79,7 +80,7 @@ const log = (...a) => console.log(...a);
 
   // 8) 实时追加：外部发起一条请求，界面是否自动出现
   const before2 = await page.$$eval('.row', (r) => r.length);
-  await page.evaluate(() => fetch('http://127.0.0.1:9090/api/live?x=1').catch(() => {}));
+  await page.evaluate(() => fetch(`${PROXY_URL}/api/live?x=1`).catch(() => {}));
   await page.waitForTimeout(1500);
   log('实时行数:', before2, '->', await page.$$eval('.row', (r) => r.length));
 

@@ -314,7 +314,7 @@ function renderUpdate(u) {
       text.textContent = `当前 v${S.update.current}，最新 v${S.update.latest.version}，点「前往下载」获取。`;
     else if (S.update && S.update.checkedAt)
       text.textContent = `当前 v${S.update.current}，已是最新。上次检查 ${new Date(S.update.checkedAt).toLocaleString()}。`;
-    else text.textContent = '启动时和每 6 小时自动检查一次 GitHub Releases；关闭后仍可手动「检查更新」。';
+    else text.textContent = '自动检查 GitHub Releases';
   }
   const go = $('#updGoRelease');
   if (go) {
@@ -340,20 +340,86 @@ async function loadFlows() {
   }
 }
 
+/* 列表渲染：结构性变化（筛选/搜索/清空）整表重绘；SSE 来的新记录/补丁只动对应行。
+ * 以前每条流量都 innerHTML 整表 800 行，高频抓包会掉帧、滚动位置和 hover 状态一起抖。 */
 let renderPending = false;
-function scheduleRender() {
+let renderFullQueued = false;
+const pendingAdds = [];
+const pendingPatches = [];
+
+function queueRenderFrame() {
   if (renderPending) return;
   renderPending = true;
   requestAnimationFrame(() => {
     renderPending = false;
-    renderList();
+    if (renderFullQueued) {
+      renderFullQueued = false;
+      pendingAdds.length = 0;
+      pendingPatches.length = 0;
+      renderList();
+    } else {
+      applyFlowDelta();
+    }
   });
+}
+
+function scheduleRender() {
+  renderFullQueued = true;
+  pendingAdds.length = 0;
+  pendingPatches.length = 0;
+  queueRenderFrame();
+}
+
+function scheduleFlowAdd(flow) {
+  if (renderFullQueued) return; // 本帧会整表重绘，S.flows 里已经包含它
+  pendingAdds.push(flow);
+  queueRenderFrame();
+}
+
+function scheduleFlowPatch(flow) {
+  if (renderFullQueued) return;
+  pendingPatches.push(flow);
+  queueRenderFrame();
+}
+
+function applyFlowDelta() {
+  const list = $('#list');
+  const adds = pendingAdds.splice(0);
+  const patches = pendingPatches.splice(0);
+  if (!adds.length && !patches.length) return;
+  const prevTop = list.scrollTop;
+  const prevHeight = list.scrollHeight;
+
+  if (adds.length) {
+    // 到达顺序是旧→新，逐个 prepend 后正好和 S.flows（新→旧）对齐
+    let html = '';
+    for (const f of adds) html = rowHtml(f) + html;
+    list.insertAdjacentHTML('afterbegin', html);
+    const extra = list.children.length - 800;
+    for (let i = 0; i < extra; i++) list.lastElementChild.remove();
+  }
+  for (const f of patches) {
+    const row = list.querySelector(`.row[data-id="${f.id}"]`);
+    if (!row) continue;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = rowHtml(f);
+    const next = tmp.firstElementChild;
+    if (!next) continue;
+    if (row.classList.contains('sel')) next.classList.add('sel');
+    row.replaceWith(next);
+  }
+  $('#count').textContent = `${S.flows.length} 条`;
+  $('#listEmpty').hidden = S.flows.length > 0;
+  // 顶部插入会把旧内容往下推：不在顶部时补偿高度，视觉上不跳
+  if (prevTop > 0) list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
 }
 
 function renderList() {
   const list = $('#list');
+  const prevTop = list.scrollTop;
   const rows = S.flows.map((f) => rowHtml(f)).join('');
   list.innerHTML = rows;
+  list.scrollTop = prevTop;
   $('#count').textContent = `${S.flows.length} 条`;
   const empty = $('#listEmpty');
   empty.hidden = S.flows.length > 0;
@@ -1304,12 +1370,65 @@ function toCurl(f) {
 
 /* ---------------------------------------------------------------- 操作 */
 
-function openModal(id) {
-  $(id).hidden = false;
-  if (window.ReqLiteJSON) setTimeout(() => window.ReqLiteJSON.relayout(), 30);
+let lastModalFocus = null;
+
+function focusableIn(modal) {
+  return $$('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])', modal).filter(
+    (el) => !el.disabled && el.offsetParent !== null
+  );
 }
+
+function openModal(id) {
+  const modal = $(id);
+  lastModalFocus = document.activeElement;
+  modal.hidden = false;
+  if (window.ReqLiteJSON) setTimeout(() => window.ReqLiteJSON.relayout(), 30);
+  const first = modal.querySelector('[data-autofocus]') || focusableIn(modal)[0];
+  if (first) setTimeout(() => first.focus({ preventScroll: true }), 0);
+}
+
 function closeModals() {
+  // 设置是自动保存的：关窗前把还没到 debounce 时间的改动落下去，避免「点了 ✕ 就等于没改」
+  if (!$('#modalSettings').hidden && settingsDirty) flushSettingsSave();
   $$('.modal').forEach((m) => (m.hidden = true));
+  if (lastModalFocus && lastModalFocus.isConnected) {
+    try {
+      lastModalFocus.focus({ preventScroll: true });
+    } catch (_) {
+      /* 元素已不可聚焦就算了 */
+    }
+  }
+  lastModalFocus = null;
+}
+
+/* 导出：跟随当前筛选条件，后端生成 HAR 1.2（含完整 headers / body） */
+async function exportFlows(format = 'har') {
+  const params = new URLSearchParams();
+  if (S.filter.q) params.set('q', S.filter.q);
+  if (S.filter.status) params.set('status', S.filter.status);
+  if (S.filter.mocked) params.set('mocked', '1');
+  for (const key of ['host', 'ip', 'app', 'route']) {
+    if (S.filter[key]) params.set(key, S.filter[key]);
+  }
+  try {
+    const r = await fetch(`/api/export/${format}?${params.toString()}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const count = Number(r.headers.get('X-Flow-Count') || 0);
+    const ext = format === 'json' ? 'json' : 'har';
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ireq-${stamp}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`已导出 ${count} 条`);
+  } catch (err) {
+    toast('导出失败: ' + err.message);
+  }
 }
 
 function headersToLines(obj) {
@@ -2363,6 +2482,15 @@ function renderLocalProxy() {
         `解密模式  : ${st.safeMode ? '安全模式（本机 HTTPS 透传）' : '正常'}`,
       ].join('\n');
 
+  const stateSummary = $('#lpStateSummary');
+  if (stateSummary) {
+    // 写整句而不是模板拼接：i18n 字典按整句精确匹配，切英文时才不会半翻译
+    const summaryText = st.ours
+      ? (trust && trust.trusted === false ? '已接管 · 根证书未信任' : '已接管 · 正常')
+      : (trust && trust.trusted === false ? '未接管 · 根证书未信任' : '未接管 · 正常');
+    stateSummary.textContent = st.error ? st.error : summaryText;
+  }
+
   const sel = $('#lpService');
   sel.innerHTML = (st.services || []).map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
   if (st.service) sel.value = st.service;
@@ -2446,7 +2574,61 @@ async function copyLocalCmd(which) {
 
 /* ---------------------------------------------------------------- 设置 */
 
+/* 设置统一自动保存：输入停顿 400ms 即落库，关窗/点「完成」时兜底 flush。
+ * 语言、主题、字号、自动更新本来就是即时生效的，这样整页语义才一致。 */
+var settingsDirty = false;
+var settingsSaveTimer = null;
+
+function settingsPayload() {
+  return {
+    passthrough: $('#stPassthrough')
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    mitmPorts: $('#stMitmPorts')
+      .value.split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0),
+    maxFlows: Number($('#stMax').value) || 2000,
+    uaAppMapText: $('#stUaAppMap').value,
+    processMap: $('#stProcessMap').checked,
+  };
+}
+
+async function saveSettings({ silent = false, close = true } = {}) {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = null;
+  settingsDirty = false;
+  try {
+    await api('/api/config', { method: 'PUT', body: settingsPayload() });
+    if (close) closeModals();
+    if (!silent) toast('设置已保存');
+    return true;
+  } catch (err) {
+    settingsDirty = true; // 下次关窗再试一次，不让失败静默丢改动
+    toast('保存失败: ' + err.message);
+    return false;
+  }
+}
+
+function queueSettingsSave() {
+  settingsDirty = true;
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => saveSettings({ silent: true, close: false }), 400);
+}
+
+function flushSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = null;
+  if (!settingsDirty) return Promise.resolve(true);
+  return saveSettings({ silent: true, close: false });
+}
+
 async function openSettings() {
+  // 打开时用服务端值覆盖输入框；直接赋值不触发 input，不会误判成用户改动
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = null;
+  settingsDirty = false;
   const st = await loadStatus();
   // 更新卡片：打开设置时拿最新状态（自动检查可能刚在后台跑完）
   try {
@@ -2504,36 +2686,35 @@ async function loadDiagnostics() {
   }
 }
 
-async function saveSettings() {
-  const passthrough = $('#stPassthrough')
-    .value.split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const mitmPorts = $('#stMitmPorts')
-    .value.split(',')
-    .map((s) => Number(s.trim()))
-    .filter((n) => Number.isInteger(n) && n > 0);
-  try {
-    await api('/api/config', {
-      method: 'PUT',
-      body: {
-        passthrough,
-        mitmPorts,
-        maxFlows: Number($('#stMax').value) || 2000,
-        uaAppMapText: $('#stUaAppMap').value,
-        processMap: $('#stProcessMap').checked,
-      },
-    });
-    closeModals();
-    toast('设置已保存');
-  } catch (err) {
-    toast('保存失败: ' + err.message);
-  }
-}
-
 /* ---------------------------------------------------------------- 事件 */
 
 function bind() {
+  // 弹窗焦点陷阱：Tab 只在最上层弹窗里循环，关闭后焦点回到打开前的位置
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Tab') return;
+      const open = $$('.modal').filter((m) => !m.hidden);
+      if (!open.length) return;
+      const modal = open[open.length - 1];
+      const items = focusableIn(modal);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!modal.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    true
+  );
+
   // 顶栏代理地址：IP / 端口分开复制，⧉ 复制完整，▾ 切换多网卡 / 本机回环
   $('#addrIp').addEventListener('click', () => copyAddr('ip'));
   $('#addrPort').addEventListener('click', () => copyAddr('port'));
@@ -2705,6 +2886,7 @@ function bind() {
     openModal('#modalCa');
   });
   $('#btnSettings').addEventListener('click', openSettings);
+  $('#btnExport').addEventListener('click', () => exportFlows('har'));
   $('#updAuto').addEventListener('change', async (e) => {
     const on = e.target.checked;
     try {
@@ -2736,7 +2918,19 @@ function bind() {
   $('#lpCopyOff').addEventListener('click', () => copyLocalCmd('off'));
   $('#lpCopyTrust').addEventListener('click', copyTrustCmd);
   $('#lpRecheckTrust').addEventListener('click', recheckTrust);
-  $('#stSave').addEventListener('click', saveSettings);
+  ['stPassthrough', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
+    $(`#${id}`).addEventListener('input', queueSettingsSave)
+  );
+  $('#stProcessMap').addEventListener('change', queueSettingsSave);
+  $('#stSave').addEventListener('click', async () => {
+    const dirty = settingsDirty;
+    if (dirty) {
+      const ok = await saveSettings({ silent: true, close: false });
+      if (!ok) return; // 保存失败就留在弹窗里，别把改动悄悄关掉
+      toast('设置已保存');
+    }
+    closeModals();
+  });
   $('#modalSettings').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-block-host]');
     if (!btn) return;
@@ -2747,7 +2941,7 @@ function bind() {
       .filter(Boolean);
     if (!lines.includes(host)) lines.push(host);
     $('#stPassthrough').value = lines.join('\n');
-    await saveSettings();
+    await saveSettings({ silent: true, close: false });
     toast(`已让 ${host} 走透传，重新打开 App 试试`);
     loadDiagnostics();
   });
@@ -3123,7 +3317,7 @@ function bind() {
       if (match) {
         S.flows.unshift(m);
         if (S.flows.length > 800) S.flows.pop();
-        scheduleRender();
+        scheduleFlowAdd(m);
         scheduleFacets();
       }
     } else if (msg.type === 'flow-update') {
@@ -3136,7 +3330,7 @@ function bind() {
         row.process = f.process;
         if (f.deviceKey) row.deviceKey = f.deviceKey;
         if (f.deviceLabel) row.deviceLabel = f.deviceLabel;
-        scheduleRender();
+        scheduleFlowPatch(row);
       }
       if (S.selectedId === f.id && S.selected) {
         S.selected.app = f.app;
@@ -3149,7 +3343,7 @@ function bind() {
       scheduleFacets();
     } else if (msg.type === 'clear') {
       S.flows = [];
-      renderList();
+      scheduleRender();
       scheduleFacets();
     }
   };

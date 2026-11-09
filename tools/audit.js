@@ -1,3 +1,4 @@
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
 (async () => {
   const browser = await chromium.launch({ executablePath: EXEC });
@@ -5,7 +6,7 @@ const { chromium, EXEC } = require('./_pw');
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
   page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-  await page.goto('http://127.0.0.1:9091/', { waitUntil: 'networkidle' });
+  await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(900);
 
   const audit = await page.evaluate(() => {

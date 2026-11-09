@@ -17,7 +17,7 @@ const path = require('path');
 const { chromium, EXEC } = require('./_pw');
 const { seedFlows } = require('./_seed');
 
-const API = `http://127.0.0.1:${Number(process.env.REQLITE_UI_PORT || 9091)}`;
+const { UI: API, PROXY_PORT } = require('./_env');
 const RULE_NAME = '自检-富版规则-' + Date.now();
 const MATCH = '/mockcheck/api/user';
 const TREE_DIR = '自检文件夹';
@@ -37,7 +37,7 @@ const api = async (p, opts) => {
 function proxyGet(path) {
   return new Promise((resolve) => {
     const req = http.request(
-      { host: '127.0.0.1', port: Number(process.env.REQLITE_PROXY_PORT || 9090), method: 'GET', path,
+      { host: '127.0.0.1', port: PROXY_PORT, method: 'GET', path,
         headers: { host: 'mockcheck.test', 'user-agent': 'reqlite-mockcheck' }, timeout: 6000 },
       (res) => {
         let b = '';

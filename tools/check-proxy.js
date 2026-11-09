@@ -1,4 +1,5 @@
 'use strict';
+const { UI_PORT, PROXY_PORT, UI, PROXY_URL, UI_HOST, PROXY_HOST } = require('./_env');
 
 /**
  * 代理行为自检：明文 / 443 解密 / 非 443 透传 / 长保活 / 大上传 / 握手失败诊断
@@ -15,7 +16,7 @@ const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const PROXY = { host: '127.0.0.1', port: 9090 };
+const PROXY = { host: '127.0.0.1', port: PROXY_PORT };
 const UP_HTTP = 8098;
 const UP_TLS = 8443;
 const CA_PATH = path.join(__dirname, '..', 'data', 'ca', 'reqlite-ca.pem');
@@ -102,7 +103,7 @@ function serveUpstreams() {
 async function api(pathname, options = {}) {
   return new Promise((resolve) => {
     const req = http.request(
-      { host: '127.0.0.1', port: 9091, method: options.method || 'GET', path: pathname, headers: { 'content-type': 'application/json' } },
+      { host: '127.0.0.1', port: UI_PORT, method: options.method || 'GET', path: pathname, headers: { 'content-type': 'application/json' } },
       (res) => {
         let d = '';
         res.on('data', (c) => (d += c));

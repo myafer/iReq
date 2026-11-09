@@ -1,0 +1,80 @@
+'use strict';
+
+/**
+ * 一键回归：顺序跑「只读 / 不改系统代理」的自检并汇总。
+ *
+ *   npm run check
+ *   REQLITE_UI_PORT=9294 REQLITE_PROXY_PORT=9293 npm run check
+ *
+ * 刻意排除：
+ *  - check-local-proxy / check-local-ui / check-local-traffic：会短暂切 macOS 系统代理，
+ *    只适合在明确知道后果时手动跑；
+ *  - shot*.js / audit.js / verify-ui.js：截图与人工检查工具，不是断言脚本。
+ */
+const { spawnSync } = require('child_process');
+const path = require('path');
+const { UI } = require('./_env');
+
+const SUITES = [
+  ['i18n 字典', 'check-i18n.js'],
+  ['流量存储', 'check-store.js'],
+  ['DOM 结构', 'check-dom.js'],
+  ['代理转发', 'check-proxy.js'],
+  ['设备识别', 'check-device.js'],
+  ['应用名识别', 'check-app-name.js'],
+  ['分组侧栏', 'check-sidebar.js'],
+  ['空状态', 'check-empty-state.js'],
+  ['滚动条', 'check-scrollbar.js'],
+  ['分栏拖动', 'check-splitters.js'],
+  ['界面字号', 'check-scale.js'],
+  ['Mock 编辑器', 'check-mock-editor.js'],
+  ['应用图标', 'check-app-icon.js'],
+  ['证书信任', 'check-ca-trust.js'],
+  ['代理地址', 'check-address.js'],
+];
+/* e2e.js 是早期只打日志、不做断言的冒烟脚本，且仍按原生 textarea 填 #ruBody
+ * （规则编辑器换成 Monaco 后该节点隐藏，必然超时）——暂不纳入一键回归，脚本保留，
+ * 等改造成真正的断言脚本再收进来。 */
+
+function probe() {
+  return fetch(UI + '/api/status')
+    .then((r) => r.ok)
+    .catch(() => false);
+}
+
+(async () => {
+  if (!(await probe())) {
+    console.error(`✗ 控制台不可达：${UI}`);
+    console.error('  先启动服务，或用 REQLITE_UI_PORT / REQLITE_PROXY_PORT 指向已运行的实例。');
+    process.exit(1);
+  }
+  console.log(`控制台 ${UI}\n`);
+  const results = [];
+  for (const [label, file] of SUITES) {
+    const r = spawnSync(process.execPath, [path.join(__dirname, file)], {
+      encoding: 'utf8',
+      // 个别脚本跑完输出后仍挂着 SSE 连接，超时收尾按输出判定
+      timeout: file === 'check-ca-trust.js' ? 20000 : 90000,
+      env: process.env,
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const fails = (out.match(/❌|FAIL|失败：/g) || []).length;
+    const timedOutButClean = r.signal === 'SIGTERM' && fails === 0 && /\d+\/\d+ 通过|通过：|✅/.test(out);
+    const ok = r.status === 0 || timedOutButClean;
+    const m = out.match(/(\d+)\s*\/\s*(\d+)\s*通过/);
+    const detail = m ? `${m[1]}/${m[2]}` : ok ? '通过' : `失败(${fails})`;
+    results.push([label, ok, detail]);
+    console.log(`${ok ? '✅' : '❌'} ${label.padEnd(14)} ${detail}${timedOutButClean ? ' (超时收尾)' : ''}`);
+    if (!ok) {
+      console.log(`   status=${r.status} signal=${r.signal || '-'} fails=${fails}`);
+      console.log(out.split('\n').filter((l) => /❌|FAIL|Error|失败/.test(l)).slice(0, 4).join('\n'));
+      console.log('   --- tail ---\n' + out.trim().split('\n').slice(-4).join('\n'));
+    }
+  }
+  const passed = results.filter((r) => r[1]).length;
+  console.log(`\n汇总：${passed}/${results.length} 套通过`);
+  process.exitCode = passed === results.length ? 0 : 1;
+})().catch((e) => {
+  console.error(e);
+  process.exitCode = 1;
+});
