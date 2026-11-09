@@ -1,40 +1,42 @@
+[简体中文](README.zh-CN.md) | **English**
+
 # iReq
 
-轻量、跨平台的 HTTP(S) **抓包 / Mock / 重放** 工具。一个 `npm install`，一条命令起服务，浏览器里操作。
+A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm install`, one command to start the server, and you work in the browser.
 
-> 定位：不想为了调一个接口去开 Charles / Reqable 全家桶时用的东西。跨 macOS / Windows / Linux，
-> 纯 Node 实现，无 Electron、无原生依赖。
+> Positioning: the thing to reach for when you want to debug one API and don't want to fire up the whole Charles / Reqable suite. Cross macOS / Windows / Linux,
+> pure Node core with no native dependencies; the optional desktop app wraps the same core in an Electron window.
 
-## 能做什么
+## What it can do
 
-| 能力 | 说明 |
+| Capability | Description |
 | --- | --- |
-| HTTPS 解密 | 首次运行自建根证书，按域名动态签发叶子证书（397 天有效期 + SAN，符合 Apple 要求） |
-| 抓包 | 明文 HTTP 与解密后的 HTTPS 全量记录：方法、URL、头、body、状态、耗时、大小 |
-| 实时看 | 控制台走 SSE 推送，请求完成即时出现在列表里 |
-| 分组边栏 | 自动聚合 **设备 / 应用 / 域名 / 接口结构**，点一下即筛选；可收藏常用筛选为书签 |
-| Mock | 按 方法 + URL（包含 / 通配 / 正则）+ 域名 匹配，返回自定义状态码、头、body，可加延迟模拟弱网 |
-| 重放 | 改 method / URL / header / body 重新发送，结果作为新请求入列并与原请求关联 |
-| 排除指定域名 | 证书固定（pinning）的 App 加进「跳过解密的域名」，走裸隧道透传 |
-| 只解密 HTTP | **默认只解密 443**，其它端口原样透传（MQTT / IMAP / 私有二进制协议不会被破坏）；设置里可加端口 |
-| 连接诊断 | 反复 TLS 握手失败的域名会列出来，一键「加入跳过解密」——这是 App「连不上」的最常见原因 |
-| 落盘 | 当天流量写 `data/flows/flows-YYYY-MM-DD.jsonl`，重启可回看最近 300 条 |
+| HTTPS decryption | Self-generates a root CA on first run, dynamically issues leaf certificates per domain (397-day validity + SAN, meeting Apple's requirements) |
+| Capture | Full records of plaintext HTTP and decrypted HTTPS: method, URL, headers, body, status, duration, size |
+| Live view | Console pushes via SSE; a request appears in the list the moment it completes |
+| Grouped sidebar | Automatically aggregates **device / app / domain / API structure**; one click filters; bookmark frequently used filters |
+| Mock | Matches by method + URL (contains / wildcard / regex) + domain, returns custom status code, headers, body; add delay to simulate a slow network |
+| Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
+| Exclude specific domains | Add certificate-pinned apps to "skip decryption domains" and pass them through as a raw tunnel |
+| Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
+| Connection diagnostics | Domains with repeated TLS handshake failures are listed, with one-click "add to skip decryption" — the most common cause of an app "not connecting" |
+| Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
 
-## 快速开始
+## Quick start
 
 ```bash
 git clone https://github.com/myafer/iReq.git
 cd iReq
-npm install          # 只有 node-forge 一个依赖
-npm start            # 代理 9090，控制台 http://127.0.0.1:9091
+npm install          # only one dependency: node-forge
+npm start            # proxy 9090, console http://127.0.0.1:9091
 ```
 
-不想装 Node？到 [Releases](https://github.com/myafer/iReq/releases) 下载对应平台的单文件可执行程序
-（macOS arm64/x64、Linux x64/arm64、Windows x64，推送 `v*` tag 时 CI 自动打包），运行即起服务。
+Don't want to install Node? Download the single-file executable for your platform from [Releases](https://github.com/myafer/iReq/releases)
+(macOS arm64/x64, Linux x64/arm64, Windows x64; CI auto-packages on a `v*` tag push), and run it to start the server.
 
-首次运行会在 `data/ca/` 生成根证书，然后：
+The first run generates the root CA under `data/ca/`, then:
 
-**macOS（本机调试）**
+**macOS (local debugging)**
 
 ```bash
 sudo security add-trusted-cert -d -r trustRoot \
@@ -43,19 +45,19 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 **iOS**
 
-1. 手机 Wi-Fi 代理指向 `<Mac 的局域网 IP>:9090`
-2. Safari 打开 **`http://<Mac 的局域网 IP>:9090/`**（注意是 `http`，末尾斜杠即可）
-   - 这个页面是代理端口自己应答的安装页，给下载按钮和分平台步骤；**已经配了代理也能打开**（请求会回到代理自身，不会绕圈报错）
-   - 点「下载证书（.cer）」→ 允许下载描述文件
-3. 设置 › 已下载描述文件 › 安装
-4. 设置 › 通用 › 关于本机 › 证书信任设置，打开 **iReq Root CA**（很多人卡在这一步）
+1. Point the phone's Wi-Fi proxy to `<Mac's LAN IP>:9090`
+2. Open **`http://<Mac's LAN IP>:9090/`** in Safari (note it's `http`, a trailing slash is enough)
+   - This page is the install page served by the proxy port itself, giving a download button and per-platform steps; **it works even with the proxy already configured** (the request comes back to the proxy itself, no loop error)
+   - Tap "Download certificate (.cer)" → allow the profile download
+3. Settings › Downloaded Profile › Install
+4. Settings › General › About › Certificate Trust Settings, turn on **iReq Root CA** (many people get stuck here)
 
-> 如果浏览器把地址跳成了 `https://`，会看到「证书错误」——那是**还没装证书**导致的，不是地址写错。
-> 两种解法：手动把地址栏改回 `http://`；或临时关掉 Wi-Fi 代理再打开。实在不行把
-> `data/ca/reqlite-ca.pem` 隔空投送 / 邮件发到手机上点开安装。
+> If the browser jumps the address to `https://`, you'll see a "certificate error" — that's caused by **the certificate not being installed yet**, not a wrong address.
+> Two fixes: manually change the address bar back to `http://`; or temporarily turn the Wi-Fi proxy off and on. If all else fails, AirDrop / email
+> `data/ca/reqlite-ca.pem` to the phone and tap to install it.
 
-**Android**：同样下载证书 → 设置 › 安全 › 加密与凭据 › 安装证书 › CA 证书。
-Android 7+ 的 App 默认只信任系统证书，抓自家 App 请用 debug 包配 `networkSecurityConfig`。
+**Android**: download the certificate the same way → Settings › Security › Encryption & credentials › Install a certificate › CA certificate.
+On Android 7+ apps trust only system certificates by default; to capture your own app, use a debug build with `networkSecurityConfig`.
 
 **Windows / Linux**
 
@@ -66,262 +68,262 @@ certutil -addstore -user Root reqlite-ca.pem          # Windows
 sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates
 ```
 
-命令行参数：
+Command-line arguments:
 
 ```bash
 iReq start [-p 9090] [-u 9091] [-b 0.0.0.0] [--ui-host 127.0.0.1]
               [-d ./data] [--no-persist] [--no-ui] [--passthrough a.com,b.com] [--max-flows 2000]
-iReq ca            # 打印根证书路径
-iReq ca --print    # 输出 PEM
-iReq local status  # 查看本机系统代理
-iReq local on|off  # 接管 / 释放本机系统代理
+iReq ca            # print root CA path
+iReq ca --print    # output PEM
+iReq local status  # show local system proxy
+iReq local on|off  # take over / release local system proxy
 ```
 
-## 代理地址：顶栏那串 `IP:端口`
+## Proxy address: the `IP:port` string in the top bar
 
-顶栏「监听中」旁边显示的是**局域网 IP**（例如 `192.168.1.23:9090`），不是 `127.0.0.1` —— 手机填 `127.0.0.1` 指的是手机自己，永远连不到 Mac 上的代理。
+Next to "Listening" in the top bar is the **LAN IP** (e.g. `192.168.1.23:9090`), not `127.0.0.1` — entering `127.0.0.1` on a phone points to the phone itself and will never reach the proxy on the Mac.
 
 ```
 [ 192.168.1.23 ] : [ 9090 ] │ ▾  ⧉
-   ↑ 点一下复制 IP  ↑ 点一下复制端口   ↑ 切换  ↑ 复制整串
+   ↑ tap to copy IP  ↑ tap to copy port   ↑ switch  ↑ copy whole string
 ```
 
-- **分开复制**：iOS / Android 配 Wi-Fi 代理时要分别填「服务器」和「端口」，直接点胶囊里的 IP 或端口即可，不用再从一整串里挑。
-- **全部复制**：点右侧 `⧉`，得到 `192.168.1.23:9090`。
-- **切换地址**：点 `▾` 打开菜单，会列出每个网卡的局域网地址（带网卡名，如 `局域网 · en1`）和 `127.0.0.1（本机回环）`；菜单里还有三个文字明确的「复制 IP / 复制端口 / 复制完整地址」按钮。抓手机选局域网 IP，抓这台 Mac 自己选 `127.0.0.1`。选择记在 localStorage，刷新后保持。
-- 顶栏、空状态提示、证书弹窗的安装页地址、设置面板共用同一个地址源，切一次全部同步。
-- 窄屏（< 900px）顶栏胶囊会隐藏，但「设置 › 代理地址」里仍有同样三个复制按钮。
-- 服务端 `GET /api/status` 返回 `lan`（IP 数组）和 `lanInfo`（含 `iface` 网卡名，私有网段排前面），脚本化时可直接使用。
+- **Copy separately**: when setting a Wi-Fi proxy on iOS / Android you fill in "Server" and "Port" separately; just tap the IP or port inside the pill, no need to pick them out of one whole string.
+- **Copy all**: tap `⧉` on the right to get `192.168.1.23:9090`.
+- **Switch address**: tap `▾` to open a menu listing each interface's LAN address (with the interface name, e.g. `LAN · en1`) and `127.0.0.1 (loopback)`; the menu also has three clearly labeled "Copy IP / Copy port / Copy full address" buttons. Pick the LAN IP to capture a phone, `127.0.0.1` to capture this Mac itself. The choice is stored in localStorage and persists across reloads.
+- The top bar, the empty-state hint, the install-page address in the certificate dialog, and the settings panel all share the same address source — switch once and everything syncs.
+- On narrow screens (< 900px) the top-bar pill is hidden, but "Settings › Proxy address" still has the same three copy buttons.
+- The server's `GET /api/status` returns `lan` (array of IPs) and `lanInfo` (including the `iface` interface name, private ranges first), ready to use in scripts.
 
-## 抓本机的流量（和手机不一样）
+## Capturing local machine traffic (different from a phone)
 
-**HTTP 代理不是透明的**：手机填了 Wi-Fi 代理就能抓，但本机浏览器 / 桌面 App 默认直连，
-必须把「系统代理」指向 iReq，否则控制台里只会出现手机等外部设备的请求。
-环境变量 `HTTP_PROXY` 只影响 curl / node 这类命令行程序，对 Safari、Chrome、桌面 App 无效
-——「列表里全是别的 IP、就是没有 `127.0.0.1`」就是这个原因。
+**An HTTP proxy is not transparent**: a phone is captured once the Wi-Fi proxy is set, but local browsers / desktop apps connect directly by default,
+so you must point the "system proxy" at iReq, otherwise the console will only show requests from external devices such as phones.
+The `HTTP_PROXY` environment variable only affects command-line programs like curl / node and has no effect on Safari, Chrome, or desktop apps
+— that's exactly why "the list is full of other IPs but never `127.0.0.1`".
 
-最省事：控制台右上「设置 › 本机抓包」点 **接管本机**，或点顶栏的 `本机未接管` 快捷入口。
-命令行等价操作：
+Easiest: in the console's top-right "Settings › Local capture" click **Take over local**, or click the `Local traffic not captured` shortcut in the top bar.
+Equivalent command-line operations:
 
 ```bash
-iReq local status     # 看当前系统代理指向哪里
-iReq local on         # 接管
-iReq local off        # 释放，精确还原原始配置
+iReq local status     # show where the current system proxy points
+iReq local on         # take over
+iReq local off        # release, restore the original config exactly
 ```
 
-开启时会把 Web / 安全 Web 代理都指向 `127.0.0.1:9090`，并把
-`localhost / 127.0.0.1 / ::1 / *.local` 加进绕过列表（否则控制台自己的请求会绕回代理形成自环）。
-原始配置备份在 `data/system-proxy-backup.json`，**服务正常退出时自动还原**；进程被强杀就手动执行
-`iReq local off`。macOS 走 `networksetup`（实测无需 sudo）；Windows / Linux 不自动改系统设置，
-在设置面板里有可复制的命令。
+Enabling points both the Web / Secure Web proxy at `127.0.0.1:9090` and adds
+`localhost / 127.0.0.1 / ::1 / *.local` to the bypass list (otherwise the console's own requests loop back into the proxy).
+The original config is backed up in `data/system-proxy-backup.json` and **restored automatically on a clean exit**; if the process is killed, run
+`iReq local off` manually. macOS uses `networksetup` (tested to need no sudo); Windows / Linux don't change system settings automatically —
+copiable commands are in the settings panel.
 
-抓 HTTPS 还要把根证书**加进本机钥匙串并设为「始终信任」**，这一步比看上去容易漏，见下一节。
-仍看不到就展开设置面板里的「手动设置 / 还是看不到？」：Chrome 的 QUIC(HTTP/3) 会绕过代理、
-证书固定的 App 会握手失败、命令行程序需显式设 `HTTP_PROXY / HTTPS_PROXY=http://127.0.0.1:9090`。
+To capture HTTPS you also need to **add the root CA to the local Keychain and set it to "Always Trust"** — this step is easier to miss than it looks; see the next section.
+If you still see nothing, expand "Manual setup / Still nothing?" in the settings panel: Chrome's QUIC(HTTP/3) bypasses the proxy,
+certificate-pinned apps fail the handshake, and command-line programs need an explicit `HTTP_PROXY / HTTPS_PROXY=http://127.0.0.1:9090`.
 
-## 排障：Chrome 报「您的连接不是私密连接」/ 列表一直是空的
+## Troubleshooting: Chrome says "Your connection is not private" / the list stays empty
 
-这两个症状经常连着出现，但根因不同：
+These two symptoms often appear together but have different root causes:
 
-| 症状 | 原因 |
+| Symptom | Cause |
 | --- | --- |
-| 接管本机后所有 HTTPS 站点报证书错误 | 本机**没有信任 iReq 的根证书**，浏览器收到的是 iReq 动态签发的自签证书 |
-| 不报错了，但列表里一条请求都没有 | 系统代理没开 / 服务没在跑 / 或命中了「安全模式」把 HTTPS 原样透传了 |
+| After taking over local, all HTTPS sites report a certificate error | The machine **does not trust iReq's root CA**; the browser receives a self-signed certificate dynamically issued by iReq |
+| No error anymore, but not a single request in the list | System proxy is off / the service isn't running / "safe mode" passed HTTPS through untouched |
 
-**「装了证书」不等于「信任了证书」**。双击 `.pem` 导入钥匙串只是「安装」，
-信任设置仍是默认的「使用系统默认值」，Chrome 照样不认。装过 Reqable / Proxyman 的 CA 也没用 ——
-它们的公钥和 iReq 不是同一张证书。一次做完安装 + 信任（用户域，通常免 sudo）：
+**"Installed the certificate" ≠ "trusted the certificate"**. Double-clicking a `.pem` to import it into the Keychain is only "install" —
+the trust setting is still the default "Use System Defaults", and Chrome still rejects it. Having installed Reqable / Proxyman's CA doesn't help either —
+their public keys aren't the same certificate as iReq's. Do install + trust in one go (user domain, usually no sudo):
 
 ```bash
 security add-trusted-cert -r trustRoot \
   -k "$HOME/Library/Keychains/login.keychain-db" \
-  "/绝对路径/iReq/data/ca/reqlite-ca.pem"
+  "/absolute/path/iReq/data/ca/reqlite-ca.pem"
 ```
 
-控制台「设置 › 本机抓包」会显示真实状态和这条命令（路径已填好），点「复制信任命令」即可；
-执行完点「重新检测」。命令行核验（退出码 0 才是真的被信任）：
+The console's "Settings › Local capture" shows the real status and this command (with the path filled in); click "Copy trust command" to grab it;
+after running it click "Re-check". Command-line verification (exit code 0 means it's really trusted):
 
 ```bash
-security verify-cert -c /绝对路径/iReq/data/ca/reqlite-ca.pem -p basic -L; echo $?
+security verify-cert -c /absolute/path/iReq/data/ca/reqlite-ca.pem -p basic -L; echo $?
 security dump-trust-settings | grep -A2 'iReq'
 ```
 
-⚠️ **别给 `add-trusted-cert` 加 `-p ssl`**：那会生成「仅 SSL 策略」的受限信任
-（`Number of trust settings : 1 / Policy OID: SSL`），`verify-cert` 仍判未信任，浏览器照样报错。
-Reqable CA 那种 `Number of trust settings : 0`（无策略约束）才是对的。
+⚠️ **Don't add `-p ssl` to `add-trusted-cert`**: that creates a restricted "SSL-only policy" trust
+(`Number of trust settings : 1 / Policy OID: SSL`); `verify-cert` still reports untrusted and the browser still errors.
+Reqable CA's `Number of trust settings : 0` (no policy constraint) is the correct one.
 
-**安全模式**：工具启动时用 `verify-cert` 检测信任状态。如果发现「未信任 + 系统代理由本工具接管」，
-本机回环地址的 443 会**自动原样透传**而不是解密 —— 网站照常打开，只是看不到 HTTPS 明文；
-列表里会留下一条带「透传」标记的 CONNECT 记录和修复说明，不会变成空列表让人以为工具坏了。
-信任根证书后点「重新检测」即自动恢复解密，无需重启。这个保护只作用于「本机 + 系统代理接管」：
-手机等远程设备、以及显式 `--proxy` 的开发/自检流量照常解密。
+**Safe mode**: on startup the tool uses `verify-cert` to check trust status. If it finds "untrusted + the system proxy is taken over by this tool",
+port 443 on the local loopback address is **automatically passed through untouched** instead of being decrypted — sites open normally, you just don't see HTTPS plaintext;
+the list keeps one CONNECT record with a "passthrough" marker and repair instructions, so it doesn't turn into an empty list that makes you think the tool is broken.
+After trusting the root CA, click "Re-check" to resume decryption automatically, no restart needed. This protection applies only to "local + system proxy taken over":
+remote devices such as phones, and development / self-check traffic using an explicit `--proxy`, are decrypted as usual.
 
-其它常见「看不到」：`scutil --proxy` 里 `HTTPEnable/HTTPSEnable` 是 0（代理没开，点「接管本机」）、
-`lsof -nP -iTCP:9090 -sTCP:LISTEN` 无输出（服务没在跑，`node bin/ireq.js start`）、
-控制台有筛选条件没清、Chrome 走 QUIC 绕过代理。
+Other common "nothing shows up" cases: `HTTPEnable/HTTPSEnable` is 0 in `scutil --proxy` (proxy off, click "Take over local"),
+no output from `lsof -nP -iTCP:9090 -sTCP:LISTEN` (service not running, `node bin/ireq.js start`),
+a filter left active in the console, or Chrome bypassing the proxy via QUIC.
 
-## 应用名是怎么来的
+## Where app names come from
 
-早期「应用」一列只靠 User-Agent 猜：UA 是 `demo-app/2.0.0 (iPhone; iOS 17.0)` 还看得懂，
-换成 `okhttp/4.9`、`CFNetwork` 这类通用库就只剩「OkHttp 4」，看着像没识别到。现在按三种来源依次取：
+Originally the "App" column was guessed only from the User-Agent: a UA like `demo-app/2.0.0 (iPhone; iOS 17.0)` is readable,
+but generic libraries such as `okhttp/4.9` or `CFNetwork` leave only "OkHttp 4", which looks like it wasn't recognized. Now three sources are tried in order:
 
-| 来源 | 适用范围 | 结果 | 标记 |
+| Source | Applies to | Result | Marker |
 | --- | --- | --- | --- |
-| **本机真实进程** | macOS 上从本机发起的连接 | `Google Chrome` / `DingTalk` / `汽水音乐` / `curl`，与 UA 无关 | 侧栏绿点，详情显示 PID + 可执行路径 |
-| **UA 别名** | 手机等远程设备、或关掉进程识别时 | 用户自己写的业务名，如 `我的App` | 侧栏黄点 |
-| **UA 推断** | 兜底 | `demo-app 2.0.0`、`OkHttp 4` | 无点 |
+| **Real local process** | Connections originating from this machine on macOS | `Google Chrome` / `DingTalk` / `Music App` / `curl`, independent of UA | Green dot in sidebar, details show PID + executable path |
+| **UA alias** | Remote devices such as phones, or when process detection is off | A business name you write yourself, e.g. `MyApp` | Yellow dot in sidebar |
+| **UA inference** | Fallback | `demo-app 2.0.0`, `OkHttp 4` | No dot |
 
-本机那条是核心：连接的另一端就在同一台机器上，`lsof -nP -iTCP -F pcn` 能按客户端 **TCP 源端口**
-查到 PID 和进程名，再从可执行文件里取 `.app` 名（Chrome Helper / WebKit.WebContent 会归到主应用）。
-HTTPS 解密后 `req.socket` 变成 `TLSSocket`，所以 CONNECT 时把原始 socket 的端口记下来一路传递。
-只有 `clientIp` 是回环地址时才做关联，**手机流量绝不会被误标成本机的 App**。
+The local one is the core: the other end of the connection is on the same machine, so `lsof -nP -iTCP -F pcn` can look up the PID and process name from the client **TCP source port**,
+then read the `.app` name from the executable (Chrome Helper / WebKit.WebContent are folded into the main app).
+After HTTPS decryption `req.socket` becomes a `TLSSocket`, so the original socket's port is recorded at CONNECT time and carried all the way through.
+Association happens only when `clientIp` is a loopback address, so **phone traffic is never mislabeled as a local app**.
 
-`lsof` 快照是异步的（约 40–60ms）：第一条请求可能先显示 UA 推断的名字，几十毫秒后通过 SSE
-`flow-update` 自动换成真实进程名；回填会追加一条轻量 JSONL patch，重启后不会退化成「OkHttp 4」。
+The `lsof` snapshot is async (~40–60ms): the first request may briefly show the UA-inferred name, then automatically switch to the real process name via an SSE
+`flow-update` a few dozen milliseconds later; the backfill appends a lightweight JSONL patch, so it won't degrade back to "OkHttp 4" after a restart.
 
-**手机为什么还是没有 App 名？** HTTP 代理只看得到设备 IP，拿不到对端的进程/包名，这是协议层面的限制
-（Reqable 在手机代理模式下同样只能靠 UA，或靠设备端 VPN 配合）。解决办法是在
-**设置 › 应用识别 › UA → 应用名** 里写映射，每行一条：
+**Why do phones still have no app name?** An HTTP proxy only sees the device IP, not the peer's process / package name — a protocol-level limitation
+(Reqable in phone-proxy mode likewise can only rely on UA, or on a device-side VPN). The fix is to write a mapping in
+**Settings › App identification › UA → App name**, one per line:
 
 ```
-demo-app/2.0=我的App
-okhttp=示例 App
-CFNetwork=我的 iOS 客户端
+demo-app/2.0=MyApp
+okhttp=Sample App
+CFNetwork=My iOS Client
 ```
 
-关键词按子串匹配（不区分大小写），别名优先于内置推断，只对新抓到的请求生效。
-不想查本机进程也可以在同一面板取消勾选「识别本机真实进程」，等价于
-`PUT /api/config {"processMap": false}`。非 macOS 系统不提供进程关联，只走 UA 推断 + 别名。
+Keywords are matched as substrings (case-insensitive); aliases take priority over built-in inference and apply only to newly captured requests.
+If you don't want local process lookup, uncheck "Identify real local processes" in the same panel — equivalent to
+`PUT /api/config {"processMap": false}`. Non-macOS systems have no process association and use only UA inference + aliases.
 
-## 应用图标是怎么来的
+## Where app icons come from
 
-侧栏「应用」每一项、请求列表第二行、详情「应用 / 设备」行都会带图标，按三层依次兜底：
+Every item in the sidebar's "App" group, the second line of the request list, and the "App / Device" row in details carry an icon, with three fallback layers:
 
-| 层级 | 来源 | 例子 |
+| Layer | Source | Examples |
 | --- | --- | --- |
-| **真实 App 图标** | macOS 上按应用名找到 `.app`，读 `Info.plist` 的图标文件，用系统自带 `plutil` + `sips` 转成 128px PNG，缓存在 `data/app-icons/` | Chrome、微信、钉钉、Safari、VS Code、Playwright 的 Chrome for Testing |
-| **内置 SVG** | 前端自带常见应用 / 平台图标，纯本地、离线可用 | Chrome、Firefox、Safari、Edge、微信、企业微信、钉钉、Postman、Figma、Flutter、OkHttp、Alamofire、CFNetwork、curl、Node、iOS / Android / Windows… |
-| **默认图标** | 其它所有名字：主题中性色的首字母色块（浅灰底深灰字 / 深灰底浅灰字，深浅主题自适应，不再随机彩色） | `demo-app 2.0.0`、`reader 3.2.1`，以及手机 App 拿不到包名时 |
+| **Real app icon** | On macOS, find the `.app` by app name, read the icon file from `Info.plist`, convert it to a 128px PNG using the built-in `plutil` + `sips`, cached in `data/app-icons/` | Chrome, WeChat, DingTalk, Safari, VS Code, Playwright's Chrome for Testing |
+| **Built-in SVG** | The frontend ships common app / platform icons, purely local, works offline | Chrome, Firefox, Safari, Edge, WeChat, WeCom, DingTalk, Postman, Figma, Flutter, OkHttp, Alamofire, CFNetwork, curl, Node, iOS / Android / Windows… |
+| **Default icon** | All other names: a theme-neutral initial-letter color block (light gray on dark / dark gray on light, adapts to light/dark theme, no more random colors) | `demo-app 2.0.0`, `reader 3.2.1`, and phone apps when no package name is available |
 
-- 图标走 `GET /api/app-icons?names=A,B` 批量解析，只转一次（缓存文件按 bundle 路径哈希，同一 App 的不同名字复用一张图），
-  生成的文件由 `/app-icon/<hash>.png` 提供，文件名有白名单校验，不接受路径穿越。
-- 不在 `/Applications` 标准目录里的 App（例如 Playwright 自带浏览器），会从流量里记录的**可执行文件路径**补登记；
-  异步识别晚于首屏时，前端每 12 秒自动重试最多 3 次，图标会从默认图自动换成真实图。
-- **选中 / 筛选时图标不闪动**：真实图标的 URL 一旦解析过，后续渲染（点击选中、侧栏筛选、SSE 重绘）
-  都在生成 DOM 时直接内联 `<img>`，不存在「先色块、再换真图」的两段式替换。
-- 设备分组也带图标：本机用电脑、手机用手机、其它 IP 用地球，底色统一走主题中性色（`--ic-device`），
-  形状区分设备类型；应用名来源（本机进程 / UA 别名 / UA 推断）悬停侧栏条目即可看到。
-- 非 macOS、命令行工具、手机 App 都拿不到本机图标，自动落到内置 / 默认图标，**不会显示破图**；
-  真实图片加载失败也会退回原图。鼠标悬停图标可看到它是「本机应用图标」还是「默认图标」。
+- Icons are batch-resolved via `GET /api/app-icons?names=A,B`, converted only once (cache files hashed by bundle path, different names of the same app reuse one image),
+  served by `/app-icon/<hash>.png`; the filename is validated against a whitelist and path traversal is rejected.
+- Apps not under the standard `/Applications` directory (e.g. Playwright's bundled browser) are registered from the **executable path** recorded in the traffic;
+  when async detection lands after first paint, the frontend auto-retries up to 3 times every 12 seconds, and the icon switches from the default to the real one automatically.
+- **Icons don't flicker when selecting / filtering**: once a real icon's URL is resolved, subsequent renders (selection, sidebar filter, SSE redraw)
+  inline the `<img>` directly when building the DOM — there's no two-stage "color block first, then swap in the real image".
+- Device groups also have icons: a computer for local, a phone for phones, a globe for other IPs, with a unified theme-neutral base color (`--ic-device`),
+  the shape distinguishing device type; hover a sidebar item to see the app-name source (local process / UA alias / UA inference).
+- Non-macOS systems, command-line tools, and phone apps can't get local icons and fall back to built-in / default icons, **no broken images**;
+  if a real image fails to load it falls back to the original. Hover an icon to see whether it's a "local app icon" or a "default icon".
 
-## 控制台
+## Console
 
-- **顶栏代理地址**：默认局域网 IP，IP / 端口 / 整串分别可复制，▾ 切换多网卡与本机回环（见上节）
-- **列表**：方法、路径、域名、状态、耗时；`MOCK` / `REPLAY` / `WS` / `透传` 角标区分来源
-- **详情**：概览 / 请求 / 响应 / 原始四个页签，JSON 自动格式化 + 语法着色，
-  请求体和响应体都有「结构化 / 原始 / 展开全部 / 折叠全部 / 复制」工具条：结构化视图把
-  格式化和树合为一体——展开时是带缩进和着色的格式化 JSON，点 ▸ 收起某层显示 `{ … N 键 }` 摘要；
-  结构化视图带行号（折叠后自动重排），body 区块可一键全屏（Esc 退出）
-- **二进制 body**：图片（png / jpeg / gif / webp / bmp / ico，按魔数嗅探，不信任 Content-Type）直接渲染**预览**；
-  其它二进制给**完整 Base64 文本**（不再只截前 4KB）与 **Hex dump**（前 4KB，offset + hex + ASCII）两种视图，
-  均可复制 / **下载**（文件名取自路径并按类型补扩展名）
-- **头区块**：请求头 / 响应头逐行 hover 高亮，**点行即复制** `name: value`；关键头（host / content-type / authorization / cookie 等）着色提示；区块工具条「复制全部」（每行 `name: value`）/「复制 JSON」（整个头对象）
-- **原文页签**：请求 / 响应报文带**行号**，点任意行复制该行；工具条「复制全部」（含 body）/「仅状态行和头」；二进制 body 在原文中省略并给出指引提示
-- **操作**：重放、Mock 此请求、复制 cURL、复制响应体
-- **规则**：富版编辑器（见下节），增删改、启停、排序、搜索、复制、JSON 导入导出
-- **JSON 编辑器**：内置 **Monaco Editor 0.52.2**（VS Code 同款内核），本地 vendor 化不依赖 CDN，
-  断网可用；语法高亮、错误红线（真 JSON worker 校验）、括号匹配、代码折叠、自动补全、
-  格式化 / 压缩 / 全屏，深浅主题和界面字号同步；加载失败自动退回原生 textarea，功能不丢
-- **分组边栏**（左侧）：设备、应用（本机显示真实进程名，远程按 UA / 别名，见上节）、域名、接口结构
-  （`GET /api/v1/lesson/:id/card` 这种归一化路径，多段 id 会压成 `*`）。点条目即筛选，可折叠分组；
-  应用 / 设备都带图标（真实 App 图标 → 内置 SVG → 默认色块，见「应用图标是怎么来的」）；
-  **收藏**存的是"筛选条件"而不是某条请求，请求被挤出内存后书签照样能用
-- **设备分组**：回环 `127.0.0.1` / `::1` 和本机所有网卡 IP（含 VPN 虚拟网卡）合并成一个 **「本机」**，
-  不再拆成两台设备；标签由 IP 判定、与 UA 无关，所以不会随新请求在
-  `iOS 127.0.0.1` / `未知 127.0.0.1` 之间闪跳。远程设备按 IP 单独成组，
-  平台名取该设备出现最多的一种，没有 UA 就只显示 IP（不写「未知」）。
-  点「本机」会筛出所有本机来源；详情显示「本机 · 原始 IP」，老书签里的具体 IP 仍然可用
-- **搜索**：URL / 方法 / 状态码 / 应用 / 设备 IP / 「本机」；筛选：错误、JSON、Mock
-- **字号**：顶栏 `A− / A+` 按 5% 步进（85%–160%），点中间的百分比一键回 100%，选择记在 localStorage
-- **栏宽**：分组边栏 / 请求列表 / 详情之间的两根竖线都能左右拖（悬停变蓝并可看到握把），
-  双击复位，聚焦后 `← →` 微调 16px（Shift 48px）、`Home` 复位；宽度记在 localStorage，
-  有上下限保护，窗口变小时会重新夹紧，窄屏改上下布局时自动隐藏手柄
-- 快捷键：`⌘K` 搜，`↑ ↓` 切请求，`Esc` 关弹窗；右上角切换深浅色
+- **Top-bar proxy address**: LAN IP by default, IP / port / whole string each copiable, ▾ switches multiple interfaces and local loopback (see above)
+- **List**: method, path, domain, status, duration; `MOCK` / `REPLAY` / `WS` / `Passthrough` badges distinguish the source
+- **Details**: four tabs — Overview / Request / Response / Raw — with auto-formatted, syntax-highlighted JSON;
+  both request and response bodies have a "Structured / Raw / Expand all / Collapse all / Copy" toolbar: the structured view merges
+  formatting and tree into one — expanded shows indented, colored JSON, clicking ▸ collapses a level into a `{ … N keys }` summary;
+  the structured view has line numbers (re-numbered after collapsing), and the body block can go fullscreen with one click (Esc to exit)
+- **Binary body**: images (png / jpeg / gif / webp / bmp / ico, sniffed by magic number, not trusting Content-Type) render a **preview** directly;
+  other binaries get a **full Base64 text** (no longer just the first 4KB) and a **Hex dump** (first 4KB, offset + hex + ASCII) as two views,
+  both copiable / **downloadable** (filename taken from the path with an extension added by type)
+- **Header block**: request / response headers highlight on hover line by line, **click a line to copy** `name: value`; key headers (host / content-type / authorization / cookie, etc.) are color-hinted; the block toolbar has "Copy all" (one `name: value` per line) / "Copy JSON" (the whole header object)
+- **Raw tab**: request / response messages with **line numbers**, click any line to copy it; toolbar "Copy all" (incl. body) / "Status line and headers only"; binary bodies are omitted in raw view with a hint pointing elsewhere
+- **Actions**: replay, Mock this request, copy cURL, copy response body
+- **Rules**: rich editor (see below) — add / edit / delete, enable / disable, reorder, search, copy, JSON import / export
+- **JSON editor**: built-in **Monaco Editor 0.52.2** (the same engine as VS Code), vendored locally with no CDN dependency,
+  works offline; syntax highlighting, error squiggles (real JSON worker validation), bracket matching, code folding, autocomplete,
+  format / minify / fullscreen, light/dark theme and UI font size in sync; falls back to a native textarea on load failure with no feature loss
+- **Grouped sidebar** (left): device, app (real process name locally, UA / alias remotely, see above), domain, API structure
+  (a normalized path like `GET /api/v1/lesson/:id/card`, multi-segment ids collapsed to `*`). Click an item to filter, groups are collapsible;
+  app / device both have icons (real app icon → built-in SVG → default color block, see "Where app icons come from");
+  **bookmarks store "filter conditions", not a specific request** — a bookmark still works after the request is pushed out of memory
+- **Device grouping**: loopback `127.0.0.1` / `::1` and all local interface IPs (including VPN virtual interfaces) are merged into one **"Local"**,
+  no longer split into two devices; the label is determined by IP, independent of UA, so it won't flicker between
+  `iOS 127.0.0.1` / `Unknown 127.0.0.1` as new requests arrive. Remote devices are grouped by IP individually,
+  the platform name is the most frequent one seen for that device, and with no UA only the IP is shown (no "Unknown").
+  Clicking "Local" filters all local sources; details show "Local · original IP", and specific IPs in old bookmarks still work
+- **Search**: URL / method / status code / app / device IP / "Local"; filters: errors, JSON, Mock
+- **Font size**: top-bar `A− / A+` steps by 5% (85%–160%), click the middle percentage to reset to 100%, choice stored in localStorage
+- **Column widths**: the two vertical dividers between the grouped sidebar / request list / details can both be dragged left/right (turn blue on hover with a visible grip),
+  double-click to reset, after focusing use `← →` to nudge 16px (Shift 48px), `Home` to reset; widths stored in localStorage,
+  with upper/lower bounds, re-clamped when the window shrinks, handles auto-hidden in the stacked layout on narrow screens
+- Shortcuts: `⌘K` search, `↑ ↓` switch requests, `Esc` close dialogs; light/dark toggle in the top-right
 
-## Mock 规则编辑器
+## Mock rule editor
 
-点顶栏「规则」→「+ 新建规则」，或在请求详情点「Mock 此请求」（自动带入真实响应体）。
+Click "Rules" → "+ New rule" in the top bar, or click "Mock this request" in request details (which pre-fills the real response body).
 
-| 标签页 | 能做什么 |
+| Tab | What it does |
 | --- | --- |
-| ① 匹配条件 | 名称 / 备注；方法、包含 / 通配符 / 正则三种匹配方式、限定域名；**匹配测试器**默认收起，点开展开后输入真实 URL 实时显示命中与不命中的原因（方法 / 域名 / 表达式哪一步没过） |
-| ② 响应设置 | 状态码 + 延迟的常用预设 chip 与滑块；Content-Type 下拉；**可视化响应头表格**（增删行、一键 CORS、原始文本双向同步） |
-| ③ 响应体 | Monaco 编辑器，工具栏有格式化 / 压缩 / 校验 / 复制 / 导入文件 / 清空 / 全屏；底部状态条显示 JSON 是否有效、错误行号、字节数、光标行列；编辑器下方「我的模板」浮层：**自定义模板**的存 / 选 / 删（localStorage 持久化、同名覆盖），点一下替换响应体并联动状态码 |
-| ④ 预览 / 测试 | 客户端实际收到的 HTTP 报文预览（状态行 + 头 + 着色 body）、可折叠 JSON 结构树、全部展开 / 折叠 |
+| ① Match conditions | Name / note; method; three match modes — contains / wildcard / regex — with an optional domain restriction; the **match tester** is collapsed by default, expand it and enter a real URL to see live why it hits or misses (which step — method / domain / expression — failed) |
+| ② Response settings | Preset chips and a slider for common status code + delay values; Content-Type dropdown; a **visual response header table** (add/remove rows, one-click CORS, two-way sync with raw text) |
+| ③ Response body | Monaco editor with a toolbar for format / minify / validate / copy / import file / clear / fullscreen; a bottom status bar shows whether the JSON is valid, the error line number, byte count, cursor line/column; below the editor is a "My Templates" popover: save / select / delete **custom templates** (persisted in localStorage, same-name overwrite), one click replaces the response body and syncs the status code |
+| ④ Preview / test | A preview of the actual HTTP message the client receives (status line + headers + colored body), a collapsible JSON structure tree, expand all / collapse all |
 
-`note` 和 `bodyType` 会随规则一起存进 `data/rules.json`。
+`note` and `bodyType` are stored with the rule in `data/rules.json`.
 
-- 响应体**不强制合法 JSON**：切到「纯文本 / HTML / XML」就跳过校验，写任意内容都能存；JSON 模式下语法错会拦下保存并跳转到错误行。
-- 规则列表支持搜索、复制副本、上移 / 下移调优先级、启停、编辑、删除；**导出 JSON** 可复制 / 下载，
-  **导入 JSON** 粘贴规则数组，需点两次确认才覆盖（避免误操作）。
-- 快捷键：响应体里 `⌘⇧F` 格式化、`⌘F` 查找；全屏时 `Esc` 先退出全屏。
-- 「另存为副本」「删除规则」只在编辑已有规则时出现；「Mock 此请求」进来的规则默认按路径包含匹配。
+- The response body **doesn't have to be valid JSON**: switch to "Plain text / HTML / XML" to skip validation and save any content; in JSON mode a syntax error blocks saving and jumps to the error line.
+- The rule list supports search, duplicate, move up / down to change priority, enable / disable, edit, delete; **Export JSON** can be copied / downloaded,
+  **Import JSON** pastes a rule array and requires two confirmations before overwriting (to avoid accidents).
+- Shortcuts: `⌘⇧F` format in the response body, `⌘F` find; in fullscreen `Esc` exits fullscreen first.
+- "Save as copy" and "Delete rule" appear only when editing an existing rule; rules opened via "Mock this request" default to path-contains matching.
 
-## 一些设计取舍
+## Some design trade-offs
 
-- **抓包开关与 Mock 解耦**：关掉「抓包」只是不记录，规则照样生效，方便只看行为不看日志。
-- **Body 上限 2MB**：超出截断并打标，避免一条大文件响应把内存吃穿。
-- **上游证书默认不校验**（`rejectUnauthorized: false`）：企业代理、自签名测试环境能直接抓，代价是工具本身不能当作安全边界。
-- **ALPN 只谈 `http/1.1`**：Node 内置 http 服务器不解析 h2 帧，客户端会退回 1.1。**强制 h2 的接口（gRPC、部分 HTTP/2-only 服务）会连不上**，这是与 Reqable 的已知差距。
-- **只解密 443（可配）**：其它端口走裸隧道。把非 HTTP 协议（MQTT 8883、IMAP 993…）也解密会让 App 直接连不上，这是"Reqable 能用、iReq 不能用"的典型原因。
-- **请求体流式转发**：边收边转，8MB chunked 上传也不会卡住；同时旁路记录（最多 2MB）。
-- **保活 65s**：Node 默认 5s，App 复用连接时容易撞上刚被关掉的 socket，表现为"偶发连不上"。
-- **自环保护**：目标地址若指向代理自己，`GET /`、`/ca.pem`、`/ca.cer` 会作为本机安装页应答；
-  其它请求返回 `508 Loop Detected`，防止无限自我转发。用 `https://` 打开代理端口会明确回 403 并提示改用 `http://`。
-- **WebSocket**：识别并记录建连，帧内容做裸隧道透传，不解密。
-- **默认只监听本机控制台**（127.0.0.1），代理监听 0.0.0.0 以便手机连。控制台无鉴权，公用网络下别改成 0.0.0.0。
-- **清空会归档当日抓包**：点「清空」不只清内存，还会把当天的 `flows-YYYY-MM-DD.jsonl` 改名为
-  `.cleared-<时间戳>`。否则重启时恢复历史会把刚清掉的记录全部「复活」。归档文件不会被自动加载，
-  要事后翻查可以手动打开；不想要的话直接删掉即可。
-- **接管本机系统代理，退出必须精确还原**：只把代理 state 置 off 是不够的，macOS 关闭态下仍会保留
-  `Server/Port`，以及我们加的绕过域名 —— 用户下次手动开代理就会连到已经停掉的 iReq。
-  所以开启前把完整快照存盘，释放时连 host/port、绕过域名一起写回；`localhost / 127.0.0.1 / ::1 / *.local`
-  必须绕过，否则控制台自己的请求会绕回代理形成自环。
+- **Capture toggle decoupled from Mock**: turning off "capture" only stops recording, rules still apply — handy when you care about behavior, not logs.
+- **2MB body cap**: larger bodies are truncated and flagged, so one big file response can't eat all the memory.
+- **Upstream certificates not verified by default** (`rejectUnauthorized: false`): corporate proxies and self-signed test environments just work, at the cost of the tool not being a security boundary.
+- **ALPN negotiates `http/1.1` only**: Node's built-in http server doesn't parse h2 frames, so clients fall back to 1.1. **Services that force h2 (gRPC, some HTTP/2-only services) won't connect** — a known gap vs Reqable.
+- **Decrypt 443 only (configurable)**: other ports use a raw tunnel. Decrypting non-HTTP protocols too (MQTT 8883, IMAP 993…) would make apps fail to connect — the classic "Reqable works, iReq doesn't" cause.
+- **Streaming request bodies**: forwarded as they arrive, so an 8MB chunked upload won't stall; recorded on the side at the same time (up to 2MB).
+- **Keep-alive 65s**: Node's default is 5s; apps reusing connections tend to hit a just-closed socket, showing up as "occasionally can't connect".
+- **Self-loop protection**: if the target points at the proxy itself, `GET /`, `/ca.pem`, `/ca.cer` are served as the local install page;
+  other requests return `508 Loop Detected` to prevent infinite self-forwarding. Opening the proxy port with `https://` returns a clear 403 telling you to use `http://`.
+- **WebSocket**: the handshake is detected and recorded, frames pass through as a raw tunnel, no decryption.
+- **Console listens on localhost only by default** (127.0.0.1), while the proxy listens on 0.0.0.0 so phones can connect. The console has no auth — don't change it to 0.0.0.0 on a public network.
+- **Clear also archives today's capture**: clicking "Clear" doesn't just clear memory, it also renames the day's `flows-YYYY-MM-DD.jsonl` to
+  `.cleared-<timestamp>`. Otherwise restoring history on restart would "resurrect" everything you just cleared. Archived files aren't auto-loaded,
+  open them manually to look back later; if you don't want them, just delete them.
+- **Taking over the local system proxy means the exit must restore it exactly**: just setting the proxy state to off isn't enough — macOS keeps
+  `Server/Port` even when off, plus the bypass domains we added — so the next time the user manually enables the proxy it connects to an already-stopped iReq.
+  So a full snapshot is saved to disk before enabling, and on release the host/port and bypass domains are written back together; `localhost / 127.0.0.1 / ::1 / *.local`
+  must be bypassed, otherwise the console's own requests loop back into the proxy.
 
-## 目录结构
-
-```
-bin/iReq.js      CLI 入口 / 参数解析 / 启动横幅
-src/ca.js           根证书与按域名签发叶子证书（node-forge）
-src/ca-trust.js     macOS 根证书信任状态检测 + 免 sudo 信任命令（verify-cert / 钥匙串）
-src/proxy.js        MITM 核心：CONNECT、TLS 握手、转发、录制、Mock 响应
-src/derive.js       从 UA / 路径派生 设备、应用、接口结构；UA 别名与源端口提取
-src/process-map.js  macOS：TCP 源端口 → PID → 真实应用名（lsof 快照 + 缓存）
-src/app-icon.js     macOS：应用名 → .app → 真实图标 PNG（plutil + sips，缓存 + 路径白名单）
-src/local-address.js 本机地址归一（回环 / ::ffff: / 所有网卡 IP → local）
-src/bookmarks.js    收藏（书签）存储（data/bookmarks.json）
-src/rules.js        Mock 规则匹配引擎（data/rules.json）
-src/store.js        流量存储（内存环形 + JSONL 落盘 + SSE 事件）
-src/replay.js       重放
-src/server.js       REST API + 静态页面
-src/system-proxy.js 本机系统代理接管（状态/开关/备份恢复，macOS networksetup）
-public/             控制台（原生 JS，无框架）；app-icons.js 内置 SVG 图标 + 真实图标回填
-tools/              开发自检脚本（_seed.js 负责造测试流量，见「开发自检」）
-```
-
-## API（脚本化时可用）
+## Directory structure
 
 ```
-GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]、proxyPort、caTrust、safeMode
+bin/iReq.js      CLI entry / arg parsing / startup banner
+src/ca.js            Root CA and per-domain leaf certificate issuance (node-forge)
+src/ca-trust.js     macOS root CA trust detection + sudo-free trust command (verify-cert / Keychain)
+src/proxy.js        MITM core: CONNECT, TLS handshake, forwarding, recording, Mock responses
+src/derive.js       Derives device, app, API structure from UA / path; UA aliases and source-port extraction
+src/process-map.js  macOS: TCP source port → PID → real app name (lsof snapshot + cache)
+src/app-icon.js     macOS: app name → .app → real icon PNG (plutil + sips, cache + path whitelist)
+src/local-address.js Local address normalization (loopback / ::ffff: / all interface IPs → local)
+src/bookmarks.js    Bookmark storage (data/bookmarks.json)
+src/rules.js        Mock rule matching engine (data/rules.json)
+src/store.js        Traffic storage (in-memory ring + JSONL persistence + SSE events)
+src/replay.js       Replay
+src/server.js       REST API + static pages
+src/system-proxy.js Local system proxy takeover (status/on-off/backup-restore, macOS networksetup)
+public/             Console (vanilla JS, no framework); app-icons.js built-in SVG icons + real icon backfill
+tools/              Dev self-check scripts (_seed.js generates test traffic, see "Development self-checks")
+```
+
+## API (for scripting)
+
+```
+GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, iface}], proxyPort, caTrust, safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
 GET    /api/facets              { flows, hosts, apps, devices, routes }
-GET    /api/app-icons?names=A,B   按应用名批量找真实图标 → { "A": {url, bundle}, "B": null }
-GET    /app-icon/<hash>.png      图标文件（仅 data/app-icons/ 里的 hash 文件名）
+GET    /api/app-icons?names=A,B   Batch-find real icons by app name → { "A": {url, bundle}, "B": null }
+GET    /app-icon/<hash>.png      Icon file (only hash filenames inside data/app-icons/)
 GET    /api/diagnostics         { tlsFailures: [{host, count, error}], tunneled, stats }
-GET    /api/system-proxy        本机系统代理状态 + 可复制的 on/off 命令 + caTrust/safeMode
-POST   /api/system-proxy        { enabled: true|false, service? } 接管 / 释放
-GET    /api/ca-trust            本机根证书信任状态 + 可复制的信任命令（带 30s 缓存）
-POST   /api/ca-trust            强制重新检测并同步给代理（信任后恢复 HTTPS 解密）
+GET    /api/system-proxy        Local system proxy status + copiable on/off commands + caTrust/safeMode
+POST   /api/system-proxy        { enabled: true|false, service? } take over / release
+GET    /api/ca-trust            Local root CA trust status + copiable trust command (with 30s cache)
+POST   /api/ca-trust            Force re-check and sync to proxy (resumes HTTPS decryption after trust)
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
 GET    /api/flows/:id
 DELETE /api/flows
@@ -332,84 +334,84 @@ PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
 GET    /api/config  PUT /api/config   { capture, passthrough: [], mitmPorts: [443], maxFlows,
-                                        processMap: true, uaAppMapText: "okhttp=我的App" }
-GET    /api/events                SSE：flow / flow-update / clear
-                                  （flow-update 是本机进程名异步回填，只有 app/appSource/process 变化）
-GET    /ca.pem                    根证书（控制台与代理端口都提供）
+                                        processMap: true, uaAppMapText: "okhttp=MyApp" }
+GET    /api/events                SSE: flow / flow-update / clear
+                                  (flow-update is the async local process name backfill, only app/appSource/process change)
+GET    /ca.pem                    Root CA (served by both the console and the proxy port)
 ```
 
-例：从脚本里造一条 500 的 Mock
+Example: create a 500 Mock from a script
 
 ```bash
 curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json' -d '{
-  "name": "服务端异常", "method": "GET", "urlMatch": "/api/v1/home", "status": 500,
+  "name": "Server error", "method": "GET", "urlMatch": "/api/v1/home", "status": 500,
   "headers": {"content-type":"application/json"}, "body": "{\"code\":500}"
 }'
 ```
 
-## 开发自检
+## Development self-checks
 
-服务起来后（`node bin/ireq.js start`）可直接跑。UI 类脚本都通过 `tools/_seed.js` 自己经代理造测试流量，
-不依赖控制台里恰好有数据，脚本末尾会打印逐条 ✅/❌：
+With the service running (`node bin/ireq.js start`) you can run these directly. UI scripts all generate test traffic through the proxy themselves via `tools/_seed.js`,
+so they don't depend on the console happening to have data; each script prints a per-item ✅/❌ at the end:
 
 ```bash
-node tools/check-store.js        # 落盘 / 重启恢复 / 清空不复活（纯单元，用临时目录）
-node tools/check-proxy.js        # 明文转发、非 443 透传、8MB 流式上传、保活复用、MITM、证书固定诊断、抓包开关
-node tools/check-dom.js          # 静态检查 app.js 引用的 #id 是否都存在
-node tools/check-empty-state.js  # 空状态显隐、列表/详情字号、表头对齐
-node tools/check-scale.js        # 85%–160% 缩放、上下限、刷新保持、裁切与溢出
-node tools/check-sidebar.js      # 五组边栏、筛选、收藏书签、折叠、窄屏抽屉
-node tools/check-splitters.js    # 两根竖分割线：拖拽 / 命中区 / 夹紧 / 持久化 / 复位 / 键盘（30 项）
-node tools/check-device.js       # 127 + 本机网卡 IP 合并成「本机」/ 标签不闪跳 / 筛选与详情一致（40 项）
-node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版规则表单 / 真实 Mock 命中 / 导入导出 / 详情着色（60 项）
-node tools/check-scrollbar.js    # 深浅色滚动条（白条回归）
-node tools/verify-ui.js          # 顶栏按钮 / 弹窗 / 证书地址
-node tools/check-local-proxy.js  # 系统代理开启/恢复往返（scutil 验证真的生效）
-node tools/check-local-ui.js     # 控制台「本机抓包」按钮点击往返
-node tools/check-local-traffic.js# 端到端：本机浏览器请求真的进列表（clientIp=127.0.0.1）
-node tools/check-app-name.js     # 本机真实进程名 / HTTPS 解密 / UA 别名 / 远程不误标 / 异步回填
-node tools/check-app-icon.js     # 本机 .app 图标提取 / PNG 缓存 / API / 三层兜底 / 渲染 / 选中不闪动（56 项）
-node tools/check-ca-trust.js     # 信任检测 / 安全模式分支 / 透传留痕 / 引导 UI（42 项）
-node tools/check-address.js      # 顶栏默认局域网 IP / 三种复制 / 切换持久化 / 各处同步 / 深色与窄屏（35 项）
+node tools/check-store.js        # persistence / restart recovery / clear doesn't resurrect (pure unit, temp dir)
+node tools/check-proxy.js        # plaintext forwarding, non-443 passthrough, 8MB streaming upload, keep-alive reuse, MITM, pinning diagnostics, capture toggle
+node tools/check-dom.js          # statically check that every #id referenced by app.js exists
+node tools/check-empty-state.js  # empty state show/hide, list/detail font size, header alignment
+node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, clipping and overflow
+node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
+node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
+node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
+node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (60 items)
+node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
+node tools/verify-ui.js          # top-bar buttons / dialogs / certificate address
+node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)
+node tools/check-local-ui.js     # console "Local capture" button click round-trip
+node tools/check-local-traffic.js# end-to-end: local browser requests really enter the list (clientIp=127.0.0.1)
+node tools/check-app-name.js     # real local process name / HTTPS decryption / UA alias / remote not mislabeled / async backfill
+node tools/check-app-icon.js     # local .app icon extraction / PNG cache / API / three-layer fallback / rendering / no flicker on select (56 items)
+node tools/check-ca-trust.js     # trust detection / safe mode branch / passthrough trace / guidance UI (42 items)
+node tools/check-address.js      # top-bar default LAN IP / three copy ways / switch persistence / sync everywhere / dark and narrow screens (35 items)
 ```
 
-`check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；
-`check-app-name.js` 会临时关掉进程识别并写入一条 UA 别名，finally 里还原。
-`check-ca-trust.js` 不改系统设置、不动真实 `data/`：临时目录里另起一个独立代理验证安全模式。
-`check-address.js` 只读服务端状态，空状态用页面内存里的 `S.flows` 临时触发，不改真实流量数据。
-`check-splitters.js` 只改浏览器 localStorage（独立 context，不污染你自己的控制台设置），不动代理状态。
-`check-device.js` 会用本机网卡 IP 作为 TCP 源地址打一条真实请求，另外单元部分用临时目录。
-`check-mock-editor.js` 会新建测试规则、复制 / 排序 / 启停它、造一组自检流量，并用真实代理请求验证
-Mock 命中；finally 里删除测试规则、恢复原有规则顺序、清空测试流量（归档保留）。
-`check-app-icon.js` 的单元部分在临时目录里生成图标、结束时删掉；API / UI 部分只造测试流量并清空，
-真实服务的 `data/app-icons/` 缓存会保留（首次解析某个 App 时生成，之后直接复用）。
-⚠️ `check-local-proxy.js` / `check-local-ui.js` **要求运行前系统代理是关闭态**（它们自己开启再精确还原）；
-如果控制台正在「接管本机」，先 `POST /api/system-proxy {"enabled":false}` 释放，跑完再
-`POST /api/system-proxy {"enabled":true}` 接管，否则会被判为前置状态不符。
-三个 `check-local-*.js` 会**短暂把系统代理切到 9090**（约 1–3 秒）并在 finally 里精确还原，
-跑之前确保 iReq 服务在监听，别中途强杀脚本。
+`check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;
+`check-app-name.js` temporarily disables process detection and writes a UA alias, restoring them in a finally block.
+`check-ca-trust.js` doesn't change system settings or touch the real `data/`: it spins up a separate proxy in a temp dir to verify safe mode.
+`check-address.js` only reads server state; the empty state is triggered via the page's in-memory `S.flows`, without touching real traffic data.
+`check-splitters.js` only changes browser localStorage (an isolated context, so it won't pollute your own console settings) and leaves the proxy state alone.
+`check-device.js` sends one real request using a local interface IP as the TCP source address; the unit part uses a temp dir.
+`check-mock-editor.js` creates a test rule, copies / reorders / toggles it, generates a set of self-check traffic, and verifies
+Mock hits with a real proxy request; in a finally block it deletes the test rule, restores the original rule order, and clears test traffic (archive kept).
+The unit part of `check-app-icon.js` generates icons in a temp dir and deletes them at the end; the API / UI parts only generate and clear test traffic,
+and the real service's `data/app-icons/` cache is kept (generated on first resolution of an app, reused afterwards).
+⚠️ `check-local-proxy.js` / `check-local-ui.js` **require the system proxy to be off before running** (they turn it on and restore it exactly themselves);
+if the console is currently "Taking over local", first release with `POST /api/system-proxy {"enabled":false}`, then re-take over with
+`POST /api/system-proxy {"enabled":true}` after the run, otherwise it'll be judged as a wrong precondition.
+The three `check-local-*.js` will **briefly switch the system proxy to 9090** (about 1–3 seconds) and restore it exactly in a finally block;
+make sure the iReq service is listening before running, and don't kill the script midway.
 
-## 安装说明（macOS 首次打开）
+## Installation notes (first launch on macOS)
 
-iReq 目前没有苹果开发者证书签名 / 公证，从 GitHub Releases 下载的 macOS 包首次打开会提示
-**「“iReq”已损坏，无法打开」**——这是 Gatekeeper 对未公证应用的拦截，应用本身没问题。
-把 app 拖进「应用程序」后在终端执行一次：
+iReq is currently not signed / notarized with an Apple Developer certificate, so the macOS package downloaded from GitHub Releases will show
+**"iReq" is damaged and can't be opened** on first launch — Gatekeeper's quarantine flag on an unnotarized app; the app itself is fine.
+After dragging the app into "Applications", run this once in a terminal:
 
 ```bash
 xattr -cr /Applications/iReq.app
 ```
 
-之后即可正常打开。Windows（SmartScreen）与 Linux AppImage 如有类似提示，同理允许运行即可。
+It will then open normally. Windows (SmartScreen) and Linux AppImage may show similar prompts; just allow it to run the same way.
 
-## 已知限制
+## Known limitations
 
-- 落盘的 JSONL 含请求/响应体（单条最多 2MB），大流量场景文件增长较快；`--no-persist` 可关掉落盘。
-- 长连接流式响应（SSE / chunked）会实时转发，但记录在响应结束后才落库。
-- HTTP/2 不会被解帧，走 1.1 回退。
-- 不做 WebSocket 帧级解密、不做 HAR 导出（需要的话可以加）。
-- **手机等远程设备拿不到进程/包名**，只能按 UA 推断或用 UA 别名标注（见「应用名是怎么来的」）。
-- 本机进程识别只在 macOS 有；Linux / Windows 需要各自实现 `netstat + /proc` / `GetExtendedTcpTable`。
-  建立后立刻关闭的极短连接可能赶不上 `lsof` 快照，会保持 UA 推断的应用名。
+- The persisted JSONL includes request/response bodies (up to 2MB each), so files grow quickly under heavy traffic; use `--no-persist` to disable persistence.
+- Long-lived streaming responses (SSE / chunked) are forwarded in real time, but only recorded after the response ends.
+- HTTP/2 is not deframed; it falls back to 1.1.
+- No WebSocket frame-level decryption, no HAR export (can be added if needed).
+- **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see "Where app names come from").
+- Local process detection is macOS-only; Linux / Windows would each need `netstat + /proc` / `GetExtendedTcpTable`.
+  Very short connections that close immediately may miss the `lsof` snapshot and keep the UA-inferred app name.
 
 ## License
 

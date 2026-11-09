@@ -7,7 +7,7 @@
  * - 单实例锁：二次启动唤起已有窗口
  */
 
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const net = require('net');
 
@@ -16,6 +16,32 @@ const pkg = require('../package.json');
 let mainWindow = null;
 let running = null; // createApp() 返回的内核句柄
 let quitting = false;
+
+/* 原生菜单文案：默认跟随系统语言（非中文系统一律英文），网页里切换语言时实时同步 */
+const MENU_LABELS = {
+  'zh-CN': {
+    about: '关于 iReq', hide: '隐藏 iReq', hideOthers: '隐藏其他', unhide: '全部显示', quit: '退出 iReq',
+    edit: '编辑', undo: '撤销', redo: '重做', cut: '剪切', copy: '复制', paste: '粘贴', selectAll: '全选',
+    view: '视图', reload: '重新加载', forceReload: '强制重新加载', devTools: '开发者工具',
+    actualSize: '实际大小', zoomIn: '放大', zoomOut: '缩小', fullscreen: '全屏',
+    window: '窗口', minimize: '最小化', close: '关闭', startFailed: 'iReq 启动失败', startFailedLog: '[iReq] 启动失败:',
+  },
+  en: {
+    about: 'About iReq', hide: 'Hide iReq', hideOthers: 'Hide Others', unhide: 'Show All', quit: 'Quit iReq',
+    edit: 'Edit', undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', selectAll: 'Select All',
+    view: 'View', reload: 'Reload', forceReload: 'Force Reload', devTools: 'Toggle Developer Tools',
+    actualSize: 'Actual Size', zoomIn: 'Zoom In', zoomOut: 'Zoom Out', fullscreen: 'Toggle Full Screen',
+    window: 'Window', minimize: 'Minimize', close: 'Close', startFailed: 'iReq failed to start', startFailedLog: '[iReq] Failed to start:',
+  },
+};
+let menuLang = (app.getLocale() || '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+const L = (key) => (MENU_LABELS[menuLang] || MENU_LABELS.en)[key];
+function syncMenuLang(lang) {
+  if (lang !== 'en' && lang !== 'zh-CN') return;
+  if (lang === menuLang) return;
+  menuLang = lang;
+  setupMenu();
+}
 
 /** 偏好端口可用则返回原值，被占用则退避为随机端口（0 = 系统分配）
  *  host 必须与实际服务绑定的地址一致：探测地址和绑定地址家族不同时，
@@ -49,6 +75,7 @@ function createWindow(uiPort) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
       spellcheck: false,
     },
   });
@@ -60,6 +87,13 @@ function createWindow(uiPort) {
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${uiPort}/`);
+  // 首次启动按网页里保存的语言重建菜单（没有保存值时保持系统语言判断）
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents
+      .executeJavaScript("localStorage.getItem('reqlite-lang')")
+      .then((saved) => syncMenuLang(saved))
+      .catch(() => {});
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -74,46 +108,46 @@ function setupMenu() {
           {
             label: app.name,
             submenu: [
-              { role: 'about', label: '关于 iReq' },
+              { role: 'about', label: L('about') },
               { type: 'separator' },
-              { role: 'hide', label: '隐藏 iReq' },
-              { role: 'hideOthers', label: '隐藏其他' },
-              { role: 'unhide', label: '全部显示' },
+              { role: 'hide', label: L('hide') },
+              { role: 'hideOthers', label: L('hideOthers') },
+              { role: 'unhide', label: L('unhide') },
               { type: 'separator' },
-              { role: 'quit', label: '退出 iReq' },
+              { role: 'quit', label: L('quit') },
             ],
           },
         ]
       : []),
     {
-      label: '编辑',
+      label: L('edit'),
       submenu: [
-        { role: 'undo', label: '撤销' },
-        { role: 'redo', label: '重做' },
+        { role: 'undo', label: L('undo') },
+        { role: 'redo', label: L('redo') },
         { type: 'separator' },
-        { role: 'cut', label: '剪切' },
-        { role: 'copy', label: '复制' },
-        { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' },
+        { role: 'cut', label: L('cut') },
+        { role: 'copy', label: L('copy') },
+        { role: 'paste', label: L('paste') },
+        { role: 'selectAll', label: L('selectAll') },
       ],
     },
     {
-      label: '视图',
+      label: L('view'),
       submenu: [
-        { role: 'reload', label: '重新加载' },
-        { role: 'forceReload', label: '强制重新加载' },
-        { role: 'toggleDevTools', label: '开发者工具' },
+        { role: 'reload', label: L('reload') },
+        { role: 'forceReload', label: L('forceReload') },
+        { role: 'toggleDevTools', label: L('devTools') },
         { type: 'separator' },
-        { role: 'resetZoom', label: '实际大小' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
+        { role: 'resetZoom', label: L('actualSize') },
+        { role: 'zoomIn', label: L('zoomIn') },
+        { role: 'zoomOut', label: L('zoomOut') },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: '全屏' },
+        { role: 'togglefullscreen', label: L('fullscreen') },
       ],
     },
     {
-      label: '窗口',
-      submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭' }],
+      label: L('window'),
+      submenu: [{ role: 'minimize', label: L('minimize') }, { role: 'close', label: L('close') }],
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -132,6 +166,7 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     setupMenu();
+    ipcMain.on('reqlite-lang', (_e, lang) => syncMenuLang(lang));
     try {
       const { createApp } = require('../src/app');
       running = await createApp({
@@ -143,8 +178,8 @@ if (!gotLock) {
       const info = await running.start({ withUi: true });
       createWindow(info.uiPort);
     } catch (err) {
-      console.error('[iReq] 启动失败:', (err && err.stack) || err);
-      dialog.showErrorBox('iReq 启动失败', String((err && err.stack) || err));
+      console.error(L('startFailedLog'), (err && err.stack) || err);
+      dialog.showErrorBox(L('startFailed'), String((err && err.stack) || err));
       app.exit(1);
     }
   });

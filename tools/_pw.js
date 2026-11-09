@@ -37,16 +37,32 @@ function findCore() {
   throw new Error('找不到 playwright-core：请执行 npm i -D playwright-core，或设置 PLAYWRIGHT_CORE 指向模块目录');
 }
 
-const { chromium } = require(findCore());
+const { chromium: rawChromium } = require(findCore());
 
 let EXEC = process.env.CHROME_PATH;
 if (!EXEC) {
   try {
-    const builtin = chromium.executablePath();
+    const builtin = rawChromium.executablePath();
     EXEC = fs.existsSync(builtin) ? builtin : undefined;
   } catch (_) {
     EXEC = undefined;
   }
 }
+
+/* 自检脚本的断言基于中文界面：默认让浏览器报中文 locale，i18n 引擎据此选中文。
+ * 需要测英文时显式传 { locale: 'en-US' } 即可覆盖。 */
+const chromium = {
+  launch: async (opts) => {
+    const browser = await rawChromium.launch(opts);
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = (o = {}) => newContext({ locale: process.env.REQLITE_PW_LOCALE || 'zh-CN', ...o });
+    browser.newPage = async (o = {}) => {
+      const ctx = await browser.newContext(o);
+      return ctx.newPage();
+    };
+    return browser;
+  },
+};
+
 // EXEC 为 undefined 时，launch 会用 Playwright 自带的默认路径
 module.exports = { chromium, EXEC };

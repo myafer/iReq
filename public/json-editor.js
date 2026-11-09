@@ -25,6 +25,9 @@
   let currentTheme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   let currentScale = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1.3;
 
+/* 编辑器自己生成的 UI 文案也走同一套字典（只用精确/模式匹配，不碰内容） */
+const tr = (s) => (window.ReqLiteI18N ? window.ReqLiteI18N.t(s, true) : s);
+
   const esc = (s) =>
     String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
@@ -217,13 +220,13 @@
     fallback.className = 'je-fallback';
     fallback.spellcheck = false;
     fallback.value = initial;
-    fallback.setAttribute('aria-label', o.ariaLabel || '内容编辑');
+    fallback.setAttribute('aria-label', tr(o.ariaLabel || '内容编辑'));
     fallback.hidden = true;
     host.appendChild(fallback);
 
     const loading = document.createElement('div');
     loading.className = 'je-loading';
-    loading.textContent = '正在加载编辑器…';
+    loading.textContent = tr('正在加载编辑器…');
     host.appendChild(loading);
 
     const slot = document.createElement('div');
@@ -398,7 +401,7 @@
           contextmenu: true,
           quickSuggestions: { other: true, comments: false, strings: false },
           suggestOnTriggerCharacters: true,
-          ariaLabel: o.ariaLabel || 'JSON 编辑器',
+          ariaLabel: tr(o.ariaLabel || 'JSON 编辑器'),
           scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
         });
         ctrl.ready = true;
@@ -543,7 +546,7 @@
       if (!entries.length) {
         return `<div class="jt-leaf" style="${pad}">${keyHtml}<span class="jt-punct">${open}${close}</span>${comma}</div>`;
       }
-      const label = isArr ? `${entries.length} 项` : `${entries.length} 键`;
+      const label = tr(isArr ? `${entries.length} 项` : `${entries.length} 键`);
       const kids = entries
         .map(([k, val], i) => render(val, isArr ? null : k, depth + 1, i === entries.length - 1))
         .join('');

@@ -69,6 +69,7 @@
           <button class="btn icon ghost" id="fontUp" aria-label="增大字号">A+</button>
         </div>
         <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
+        <button class="btn icon" id="btnLang" title="Switch interface language">EN</button>
       </div>
     </header>
 
@@ -561,6 +562,19 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <button class="btn icon ghost" data-close>✕</button>
         </div>
         <div class="modal-body">
+          <div class="addr-card" data-no-i18n>
+            <div class="addr-card-top">
+              <h3>Language / 界面语言</h3>
+            </div>
+            <p class="hint">Switches instantly and is saved for the next launch. / 立即生效，下次打开保持选择。</p>
+            <div class="addr-card-row">
+              <select id="stLang" class="input mono">
+                <option value="en">English</option>
+                <option value="zh-CN">简体中文</option>
+              </select>
+            </div>
+          </div>
+
           <div class="addr-card">
             <div class="addr-card-top">
               <h3>代理地址</h3>
@@ -692,6 +706,8 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
 
     <div class="toast" id="toast" hidden></div>
     <input type="file" id="fileInput" accept=".json,.txt,application/json" hidden />
+    <script src="/i18n-en.js"></script>
+    <script src="/i18n.js"></script>
     <script src="/app-icons.js"></script>
     <script src="/json-editor.js"></script>
     <script src="/app.js"></script>
