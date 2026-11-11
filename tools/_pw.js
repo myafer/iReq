@@ -49,13 +49,51 @@ if (!EXEC) {
   }
 }
 
+/* 顶栏的低频按钮已收进「更多」/「更多筛选」菜单。自检脚本里大量使用 page.click('#btnCa')
+ * 这类选择器，统一在测试侧补一步「先展开对应菜单」，避免每个脚本各改一遍。
+ * 只对落在折叠菜单里的目标生效，其它选择器行为完全不变。 */
+function decoratePage(page) {
+  if (page.__reqliteDecorated) return page;
+  const origClick = page.click.bind(page);
+  page.click = async (selector, options) => {
+    try {
+      const where = await page.evaluate((s) => {
+        const el = document.querySelector(s);
+        if (!el) return '';
+        if (el.closest('#moreMenu')) return 'top';
+        if (el.closest('#filterMoreMenu')) return 'filter';
+        return '';
+      }, selector);
+      if (where) {
+        const menuId = where === 'top' ? '#moreMenu' : '#filterMoreMenu';
+        const trigger = where === 'top' ? '#btnMore' : '#btnFilterMore';
+        const opened = await page.evaluate((id) => {
+          const m = document.querySelector(id);
+          return !!m && !m.hidden;
+        }, menuId);
+        if (!opened) await origClick(trigger);
+      }
+    } catch (_) {
+      /* 复杂选择器 / 页面尚未就绪时按原行为处理 */
+    }
+    return origClick(selector, options);
+  };
+  Object.defineProperty(page, '__reqliteDecorated', { value: true, configurable: true });
+  return page;
+}
+
 /* 自检脚本的断言基于中文界面：默认让浏览器报中文 locale，i18n 引擎据此选中文。
  * 需要测英文时显式传 { locale: 'en-US' } 即可覆盖。 */
 const chromium = {
   launch: async (opts) => {
     const browser = await rawChromium.launch(opts);
-    const newContext = browser.newContext.bind(browser);
-    browser.newContext = (o = {}) => newContext({ locale: process.env.REQLITE_PW_LOCALE || 'zh-CN', ...o });
+    const rawNewContext = browser.newContext.bind(browser);
+    browser.newContext = async (o = {}) => {
+      const ctx = await rawNewContext({ locale: process.env.REQLITE_PW_LOCALE || 'zh-CN', ...o });
+      const rawNewPage = ctx.newPage.bind(ctx);
+      ctx.newPage = async () => decoratePage(await rawNewPage());
+      return ctx;
+    };
     browser.newPage = async (o = {}) => {
       const ctx = await browser.newContext(o);
       return ctx.newPage();

@@ -19,9 +19,11 @@ const path = require('path');
 const zlib = require('zlib');
 const { URL } = require('url');
 const { randomUUID } = require('crypto');
+const { EventEmitter } = require('events');
 const { clientIpOf, clientPortOf, platformOf, appOf, aliasOf, routeOf } = require('./derive');
 const { ProcessMap } = require('./process-map');
 const { deviceKeyOf, deviceLabelOf } = require('./local-address');
+const { normalize: normalizeNetworkSim, resolve: resolveNetworkSim, throttleTransform } = require('./network-sim');
 
 const MAX_BODY_CAPTURE = 2 * 1024 * 1024; // 每个 body 最多记录 2MB
 const TEXTUAL_RE =
@@ -94,8 +96,9 @@ class BodyCapture {
   }
 }
 
-class ProxyServer {
+class ProxyServer extends EventEmitter {
   constructor({ port = 9090, host = '0.0.0.0', ca, store, rules, config = {}, processMap } = {}) {
+    super();
     this.port = port;
     this.host = host;
     this.ca = ca;
@@ -109,11 +112,14 @@ class ProxyServer {
     if (cfg.capture === undefined) cfg.capture = true;
     if (!Array.isArray(cfg.passthrough)) cfg.passthrough = [];
     if (!Array.isArray(cfg.mitmPorts)) cfg.mitmPorts = [443];
+    cfg.networkSim = normalizeNetworkSim(cfg.networkSim);
     this.config = cfg;
     this.connections = new Set();
     this.stats = { total: 0, mocked: 0, errors: 0, bytes: 0, tunneled: 0, tlsFailed: 0, safeTunneled: 0 };
     // 握手失败的域名：客户端不认我们的证书（证书固定 / App 自带校验），提示用户加白名单
     this.tlsFailures = new Map();
+    // CONNECT 阶段拿不到 UA，靠历史 flow 把 host / IP 关联到应用名，规则才能命中手机 / 模拟器
+    this.appHints = { byHost: new Map(), byIp: new Map() };
   }
 
   start() {
@@ -198,6 +204,70 @@ class ProxyServer {
     return { decrypt: true, reason: 'mitm' };
   }
 
+  // ------------------------------------------------------------ 网络模拟
+
+  /** CONNECT 只有 host + 源端口，UA 还拿不到：本机查进程，远程用历史 flow 学到的 host / IP 关联 */
+  _simFact(req, host, socket) {
+    const meta = this._appMeta(req);
+    const ip = meta.clientIp || clientIpOf(req) || (socket && socket.remoteAddress) || '';
+    let app = String(meta.app || '');
+    const unknown = !app || /未知|未识别|unknown/i.test(app);
+    if (unknown && host) app = this.appHints.byHost.get(String(host).toLowerCase()) || app;
+    if (unknown && ip) app = this.appHints.byIp.get(String(ip).toLowerCase()) || app;
+    return { app, host, ip, deviceLabel: meta.deviceLabel || '' };
+  }
+
+  _simConnectRecord(req, host, port, sim) {
+    if (this.config.capture === false) return;
+    const text =
+      sim.mode === 'offline'
+        ? 'iReq 断网模拟：连接已重置'
+        : `iReq 超时模拟：挂起 ${sim.timeoutMs}ms 后断开`;
+    try {
+      this._record({
+        method: 'CONNECT',
+        url: `https://${host}${port === 443 ? '' : ':' + port}/`,
+        scheme: 'https',
+        host,
+        path: '/',
+        status: 0,
+        duration: sim.mode === 'timeout' ? sim.timeoutMs : 0,
+        reqHeaders: { ...(req.headers || {}) },
+        resHeaders: {},
+        reqBody: '',
+        resBody: '',
+        ...this._appMeta(req),
+        route: 'CONNECT /',
+        error: text,
+        simMode: sim.mode,
+        simRule: sim.rule.match,
+      });
+    } catch (_) {
+      /* 记录失败绝不能影响模拟本身 */
+    }
+  }
+
+  /** 断网 = 立刻重置连接（贴近真实断网）；超时 = 不回 200，挂到时限再断 */
+  _simBlockConnect(req, socket, host, port, sim) {
+    this._simConnectRecord(req, host, port, sim);
+    if (sim.mode === 'offline') {
+      try {
+        socket.destroy();
+      } catch (_) {
+        /* noop */
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        socket.destroy();
+      } catch (_) {
+        /* noop */
+      }
+    }, sim.timeoutMs);
+    socket.on('close', () => clearTimeout(timer));
+  }
+
   _handleConnect(req, clientSocket, head) {
     const [host, port] = splitHostPort(req.url);
     clientSocket.on('error', () => {});
@@ -219,6 +289,13 @@ class ProxyServer {
           msg
       );
       return;
+    }
+
+    const sim = resolveNetworkSim(this.config.networkSim, this._simFact(req, host, clientSocket));
+    // 断网 / 超时必须在 CONNECT 这一层拦掉：等 TLS 握手失败再拦，客户端看到的就变成证书错误了。
+    // 弱网交给请求层做延迟 + 限速（透传隧道例外，见下面）。
+    if (sim && sim.mode !== 'weak') {
+      return this._simBlockConnect(req, clientSocket, host, port, sim);
     }
 
     const decision = this._shouldDecrypt(host, port, clientSocket.remoteAddress);
@@ -254,14 +331,32 @@ class ProxyServer {
         }
       }
       this.stats.tunneled += 1;
-      const upstream = net.connect(port, host, () => {
-        clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-        if (head && head.length) upstream.write(head);
-        upstream.pipe(clientSocket);
-        clientSocket.pipe(upstream);
-      });
-      upstream.on('error', () => clientSocket.destroy());
-      clientSocket.on('close', () => upstream.destroy());
+      const establish = () => {
+        const upstream = net.connect(port, host, () => {
+          clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+          if (head && head.length) upstream.write(head);
+          if (sim && sim.mode === 'weak') {
+            // 透传隧道看不到明文请求，只能在字节层做延迟 + 限速
+            const down = throttleTransform(sim.kbps);
+            const up = throttleTransform(sim.kbps);
+            upstream.pipe(down).pipe(clientSocket);
+            clientSocket.pipe(up).pipe(upstream);
+            clientSocket.on('close', () => {
+              down.destroy();
+              up.destroy();
+            });
+          } else {
+            upstream.pipe(clientSocket);
+            clientSocket.pipe(upstream);
+          }
+        });
+        upstream.on('error', () => clientSocket.destroy());
+        clientSocket.on('close', () => upstream.destroy());
+      };
+      if (sim && sim.mode === 'weak' && sim.latencyMs > 0) {
+        const timer = setTimeout(establish, sim.latencyMs);
+        clientSocket.on('close', () => clearTimeout(timer));
+      } else establish();
       return;
     }
 
@@ -316,12 +411,19 @@ class ProxyServer {
         }
         // 只有"握手根本没成"才算失败；握手成功但没发请求多半是预连接，不算问题
         if (!established) {
-          this._noteTlsFailure(host, port, new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'));
+          // close 和 error 可能都触发，同一条连接只算一次
+          if (!tlsSocket.__tlsFailureNoted) {
+            tlsSocket.__tlsFailureNoted = true;
+            this._noteTlsFailure(host, port, new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'));
+          }
         }
       }
     });
     tlsSocket.on('error', (err) => {
-      if (!secure) this._noteTlsFailure(host, port, err);
+      if (!secure && !tlsSocket.__tlsFailureNoted) {
+        tlsSocket.__tlsFailureNoted = true;
+        this._noteTlsFailure(host, port, err);
+      }
       try {
         clientSocket.destroy();
       } catch (_) {
@@ -365,6 +467,8 @@ class ProxyServer {
     rec.error = String((err && err.message) || err).slice(0, 160);
     rec.lastAt = Date.now();
     this.tlsFailures.set(host, rec);
+    // 实时推给控制台：握手失败直接出现在主列表，不必去设置页翻诊断区
+    this.emit('tls-failure', { ...rec });
   }
 
   /** 诊断信息：握手失败的域名，可直接拿来加进「跳过解密的域名」 */
@@ -621,14 +725,70 @@ class ProxyServer {
       return;
     }
 
+    // 网络模拟：这里已能看到完整 URL / UA，比 CONNECT 阶段识别应用更准
+    const sim = resolveNetworkSim(this.config.networkSim, this._simFact(req, target.hostname, req.socket));
+    if (sim && sim.mode !== 'weak') return this._simBlockHttp(ctx, sim);
+    // 弱网的限速参数随 ctx 传给 _forward；延迟放在真正发起请求之前
+    ctx.sim = sim && sim.mode === 'weak' ? sim : null;
+
     // Mock 与「抓包开关」解耦：关掉记录时规则依旧生效
-    const rule = this.rules.match({
-      method: req.method,
-      url: target.toString(),
-      host: target.hostname,
-    });
-    if (rule) return this._replyMock(ctx, rule);
-    this._forward(ctx);
+    const run = () => {
+      const rule = this.rules.match({
+        method: req.method,
+        url: target.toString(),
+        host: target.hostname,
+      });
+      if (rule) return this._replyMock(ctx, rule);
+      this._forward(ctx);
+    };
+    if (ctx.sim && ctx.sim.latencyMs > 0) {
+      const timer = setTimeout(run, ctx.sim.latencyMs);
+      req.on('aborted', () => clearTimeout(timer));
+      req.socket.on('close', () => clearTimeout(timer));
+    } else run();
+  }
+
+  /** 断网：直接重置连接；超时：不写任何响应，挂到时限再断 */
+  _simBlockHttp(ctx, sim) {
+    const { req, meta, startedAt } = ctx;
+    const text =
+      sim.mode === 'offline'
+        ? 'iReq 断网模拟：连接已重置'
+        : `iReq 超时模拟：挂起 ${sim.timeoutMs}ms 后断开`;
+    if (this.config.capture !== false) {
+      this._record({
+        ...meta,
+        reqBody: '',
+        reqSize: 0,
+        resHeaders: {},
+        resBody: '',
+        resSize: 0,
+        status: 0,
+        statusText: '',
+        duration: sim.mode === 'timeout' ? sim.timeoutMs : elapsed(startedAt),
+        error: text,
+        simMode: sim.mode,
+        simRule: sim.rule.match,
+      });
+    }
+    if (sim.mode === 'offline') {
+      try {
+        req.socket.destroy();
+      } catch (_) {
+        /* noop */
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        req.socket.destroy();
+      } catch (_) {
+        /* noop */
+      }
+    }, sim.timeoutMs);
+    req.on('aborted', () => clearTimeout(timer));
+    req.socket.on('close', () => clearTimeout(timer));
+    req.resume();
   }
 
   _replyMock(ctx, rule) {
@@ -679,7 +839,7 @@ class ProxyServer {
   }
 
   _forward(ctx) {
-    const { req, res, target, startedAt, reqCapture, meta } = ctx;
+    const { req, res, target, startedAt, reqCapture, meta, sim } = ctx;
     const isSecure = target.protocol === 'https:';
     const transport = isSecure ? https : http;
 
@@ -733,12 +893,12 @@ class ProxyServer {
         }
       }
 
-      upRes.on('data', (chunk) => {
+      const writeChunk = (chunk) => {
         res.write(chunk);
         this.stats.bytes += chunk.length;
         if (this.config.capture) resCapture.push(chunk);
-      });
-      upRes.on('end', () => {
+      };
+      const finishResponse = () => {
         res.end();
         if (!this.config.capture) return;
         const digest = resCapture.digest();
@@ -758,8 +918,19 @@ class ProxyServer {
           status: upRes.statusCode,
           statusText: upRes.statusMessage || '',
           duration: elapsed(startedAt),
+          ...(sim ? { simMode: 'weak', simRule: sim.rule.match } : {}),
         });
-      });
+      };
+      if (sim) {
+        // 弱网：响应体按目标带宽分片放行，不整体缓冲，大响应也不会撑爆内存
+        const throttle = throttleTransform(sim.kbps);
+        throttle.on('data', writeChunk);
+        throttle.on('end', finishResponse);
+        upRes.pipe(throttle);
+      } else {
+        upRes.on('data', writeChunk);
+        upRes.on('end', finishResponse);
+      }
       upRes.on('error', (err) => {
         res.destroy();
         this._fail(ctx, err);
@@ -819,6 +990,14 @@ class ProxyServer {
       flow.deviceLabel = deviceLabelOf(flow.clientIp, flow.platform);
     }
     const saved = this.store.add(flow);
+
+    // CONNECT 阶段没有 UA：把应用名记到 host / IP 上，后续同域名、同设备的连接
+    // 也能被「按应用」的模拟规则命中（手机、模拟器尤其依赖这条兜底）。
+    const learned = String(flow.app || '');
+    if (learned && !/未知|未识别|unknown/i.test(learned)) {
+      if (flow.host) this.appHints.byHost.set(String(flow.host).toLowerCase(), learned);
+      if (flow.clientIp) this.appHints.byIp.set(String(flow.clientIp).toLowerCase(), learned);
+    }
 
     // lsof 快照是异步的：连接刚建立时的第一个请求可能还没解析到进程。
     // 拿到结果后回填 + 推 SSE，列表和侧栏里的应用名会自动换成真实 App 名。

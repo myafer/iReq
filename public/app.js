@@ -4,14 +4,27 @@
 
 const S = {
   flows: [],
+  /* 握手失败的域名（按 host 聚合）：直接出现在主列表，不再藏在设置页 */
+  tlsFailures: [],
   selectedId: null,
   selected: null,
   detailTab: 'overview',
   filter: { q: '', status: '', mocked: false, host: '', ip: '', app: '', route: '' },
   rules: [],
-  rulesDir: '', /* 文件树当前选中的目录（'' = 根） */
+  rulesDir: localStorage.getItem('reqlite-rule-dir') || '', /* 文件树当前选中的目录（'' = 根），跨开关保留 */
   rulesTreeOpen: new Set(JSON.parse(localStorage.getItem('reqlite-rule-dirs') || '[]')),
+  rulesTreeError: '',
+  rulesActivePath: '', /* 当前打开的规则在树里的路径 */
+  ruleFromTree: false, /* 编辑器是否从规则工作区打开（关闭时回到工作区） */
+  /* VSCode 式多标签编辑区：{ key, id, name, dir, data, pane, dirty, fromWorkspace } */
+  ruleTabs: [],
+  activeRuleTab: null,
+  ruleTabSeq: 0,
+  loadingRuleTab: false, /* 载入标签时抑制「未保存」标记 */
+  showRuleBody: localStorage.getItem('reqlite-rule-show-body') === '1',
   status: {},
+  /* 网络模拟规则（会话级，服务端不落盘） */
+  networkSim: { enabled: true, latencyMs: 800, kbps: 64, timeoutMs: 30000, rules: [] },
   editingRule: null,
   bodyView: {},
   facets: { hosts: [], apps: [], devices: [], routes: [] },
@@ -277,6 +290,8 @@ async function loadStatus() {
     $('#connText').textContent = '监听中';
     $('#capture').checked = st.capture;
     $('#ruleCount').textContent = st.rules;
+    S.networkSim = normalizeNetSim(st.networkSim);
+    syncNetBadge();
     applyAddr();
     renderUpdate(st.update);
     return st;
@@ -391,10 +406,14 @@ function applyFlowDelta() {
   const prevHeight = list.scrollHeight;
 
   if (adds.length) {
-    // 到达顺序是旧→新，逐个 prepend 后正好和 S.flows（新→旧）对齐
+    // 到达顺序是旧→新，逐个 prepend 后正好和 S.flows（新→旧）对齐。
+    // 顶部若有握手失败诊断行，要插在它们后面，别把诊断行挤下去。
     let html = '';
     for (const f of adds) html = rowHtml(f) + html;
-    list.insertAdjacentHTML('afterbegin', html);
+    const tlsRows = $$('.row.tls', list);
+    const anchor = tlsRows.length ? tlsRows[tlsRows.length - 1] : null;
+    if (anchor) anchor.insertAdjacentHTML('afterend', html);
+    else list.insertAdjacentHTML('afterbegin', html);
     const extra = list.children.length - 800;
     for (let i = 0; i < extra; i++) list.lastElementChild.remove();
   }
@@ -408,8 +427,8 @@ function applyFlowDelta() {
     if (row.classList.contains('sel')) next.classList.add('sel');
     row.replaceWith(next);
   }
-  $('#count').textContent = `${S.flows.length} 条`;
-  $('#listEmpty').hidden = S.flows.length > 0;
+  $('#count').textContent = `${list.children.length} 条`;
+  $('#listEmpty').hidden = list.children.length > 0;
   // 顶部插入会把旧内容往下推：不在顶部时补偿高度，视觉上不跳
   if (prevTop > 0) list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
 }
@@ -417,21 +436,32 @@ function applyFlowDelta() {
 function renderList() {
   const list = $('#list');
   const prevTop = list.scrollTop;
-  const rows = S.flows.map((f) => rowHtml(f)).join('');
-  list.innerHTML = rows;
+  const tlsOnly = S.filter.status === 'tls';
+  // 默认「全部」视图把诊断行置顶；一旦用了搜索 / 侧栏 / 错误 / JSON / Mock 筛选，
+  // 就只按条件渲染真实流量，免得诊断行混进筛选结果里说不清。
+  const tlsRows = tlsOnly || tlsInDefaultView() ? tlsVisible() : [];
+  list.innerHTML =
+    tlsRows.map(tlsRowHtml).join('') + (tlsOnly ? '' : S.flows.map(rowHtml).join(''));
   list.scrollTop = prevTop;
-  $('#count').textContent = `${S.flows.length} 条`;
+  $('#count').textContent = `${list.children.length} 条`;
   const empty = $('#listEmpty');
-  empty.hidden = S.flows.length > 0;
-  if (!S.flows.length) {
+  empty.hidden = list.children.length > 0;
+  if (!list.children.length) {
     const filtering =
       activeFilterKeys().length > 0 || !!S.filter.status || !!S.filter.mocked || !!S.filter.q;
     const title = empty.querySelector('.empty-title');
     const hint = empty.querySelector('.empty-hint');
-    if (title) title.textContent = filtering ? '没有匹配的请求' : '还没有流量';
+    if (title)
+      title.textContent = tlsOnly
+        ? '没有握手失败的域名'
+        : filtering
+        ? '没有匹配的请求'
+        : '还没有流量';
     if (hint) {
       const a = currentAddr();
-      hint.innerHTML = filtering
+      hint.innerHTML = tlsOnly
+        ? '客户端不信任根证书、或端口跑的不是 HTTP 时，连不上的域名会实时出现在这里。'
+        : filtering
         ? '换个条件，或点上方已选筛选的 × 取消。'
         : `<b>抓本机</b>：右上「设置 › 本机抓包」一键接管系统代理（顶栏也有快捷入口）；<br>` +
           `<b>抓手机 / 其它设备</b>：Wi-Fi 代理指向 <code id="emptyProxy">${esc(addrFull(a))}</code>（IP / 端口可在顶栏分别复制），然后刷新页面。`;
@@ -443,11 +473,16 @@ function renderList() {
 
 function rowHtml(f) {
   const p = f.path || f.url || '';
+  const trSim = (s) =>
+    window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? window.ReqLiteI18N.t(s, true) : s;
   const badges = [
     f.mocked ? '<span class="tag mock">MOCK</span>' : '',
     f.replayOf ? '<span class="tag replay">REPLAY</span>' : '',
     f.ws ? '<span class="tag">WS</span>' : '',
     f.tunneled ? '<span class="tag tunnel">透传</span>' : '',
+    f.simMode
+      ? `<span class="tag sim ${esc(f.simMode)}">${esc(trSim(NET_MODES[f.simMode] || f.simMode))}</span>`
+      : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -465,6 +500,74 @@ function rowHtml(f) {
     <span class="st ${statusClass(f.status)}">${esc(stText)}</span>
     <span class="tm ${f.duration > 800 ? 'slow' : ''}">${f.duration === undefined ? '' : fmtTime(f.duration)}</span>
   </div>`;
+}
+
+/* -------------------------------------------------- 握手失败（连接层诊断行）
+ * 这类事件发生在 TLS 握手阶段，连 HTTP 请求都没发出来，不能算一条 flow：
+ * 不进 store、不进 HAR 导出、也不参与统计。按域名聚合成一行放进主列表，
+ * 证书固定的 App 疯狂重试时只更新次数，不会把列表刷屏。 */
+const TLS_ROW_PREFIX = 'tls:';
+
+function tlsVisible() {
+  return S.tlsFailures.slice().sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+}
+
+function tlsInDefaultView() {
+  return !S.filter.status && !S.filter.mocked && activeFilterKeys().length === 0;
+}
+
+function syncTlsBadge() {
+  const b = $('#tlsCount');
+  if (!b) return;
+  b.hidden = S.tlsFailures.length === 0;
+  b.textContent = String(S.tlsFailures.length);
+}
+
+function tlsRowHtml(f) {
+  return `<div class="row tls" data-id="${esc(TLS_ROW_PREFIX + f.host)}">
+    <span class="m tls">TLS</span>
+    <span class="cellurl">
+      <div class="p">${esc(f.host)}</div>
+      <div class="h"><span class="hl">${Number(f.count) || 1} 次握手失败</span><span class="hint">客户端不认证书，或端口不是 HTTP</span></div>
+    </span>
+    <span class="st fail">FAIL</span>
+    <span class="tm">${fmtClock(f.lastAt)}</span>
+  </div>`;
+}
+
+function upsertTlsFailure(rec) {
+  if (!rec || !rec.host) return;
+  const i = S.tlsFailures.findIndex((f) => f.host === rec.host);
+  if (i >= 0) S.tlsFailures[i] = rec;
+  else S.tlsFailures.unshift(rec);
+  syncTlsBadge();
+  // 诊断行数很少、变化也不频繁，整表重绘比再维护一套增量逻辑可靠
+  scheduleRender();
+}
+
+async function loadTlsFailures() {
+  try {
+    const d = await api('/api/diagnostics');
+    S.tlsFailures = Array.isArray(d.tlsFailures) ? d.tlsFailures.slice() : [];
+    syncTlsBadge();
+  } catch (_) {
+    /* 诊断不可用就算了 */
+  }
+}
+
+/** 详情里的「加入跳过解密」：直接改配置，不再要求用户先打开设置页 */
+async function addPassthroughHost(host) {
+  try {
+    const cfg = await api('/api/config');
+    const lines = (cfg.passthrough || []).map((s) => String(s).trim()).filter(Boolean);
+    if (!lines.includes(host)) lines.push(host);
+    await api('/api/config', { method: 'PUT', body: { passthrough: lines } });
+    const field = $('#stPassthrough');
+    if (field) field.value = lines.join('\n');
+    toast(`已让 ${host} 走透传，重新打开 App 试试`);
+  } catch (err) {
+    toast('加入白名单失败: ' + err.message);
+  }
 }
 
 /* ---------------------------------------------------------------- 分组边栏 */
@@ -558,9 +661,14 @@ function facetGroupHtml(section) {
               : src === 'ua'
               ? ' · 由 User-Agent 推断'
               : '';
+          const netHit = section.key === 'apps' ? netRuleFor(it.key) : null;
+          const netDot =
+            section.key === 'apps'
+              ? `<span class="net-dot ${netHit ? 'on' : ''}" data-net-app="${esc(it.key)}" title="${esc(netTr('断网开关'))}" role="button" tabindex="-1"></span>`
+              : '';
           return `<button class="sitem ${S.filter[section.filterKey] === it.key ? 'on' : ''}"
           data-facet="${section.filterKey}" data-value="${esc(it.key)}" title="${esc(it.label + tip)}">
-        <span class="lbl">${wrap}${esc(it.label)}</span><span class="cnt">${it.count}</span>
+        <span class="lbl">${wrap}${esc(it.label)}</span>${netDot}<span class="cnt">${it.count}</span>
       </button>`;
         })
         .join('')
@@ -723,6 +831,7 @@ function clearFacet(key) {
 }
 
 function syncFilters() {
+  syncFilterMore();
   renderChips();
   renderSide();
   loadFlows();
@@ -984,6 +1093,16 @@ async function selectFlow(id) {
   if (!id) return;
   S.selectedId = id;
   $$('.row').forEach((r) => r.classList.toggle('sel', r.dataset.id === id));
+  // 握手失败行不是 flow，详情数据就在前端的聚合记录里，不必请求 /api/flows/:id
+  if (id.startsWith(TLS_ROW_PREFIX)) {
+    const host = id.slice(TLS_ROW_PREFIX.length);
+    const rec = S.tlsFailures.find((f) => f.host === host);
+    if (!rec) return;
+    S.selected = { kind: 'tls', ...rec };
+    S.detailTab = 'overview';
+    renderDetail();
+    return;
+  }
   try {
     const flow = await api('/api/flows/' + id);
     S.selected = flow;
@@ -1049,10 +1168,37 @@ function rawTextOf(f, side) {
   return lines;
 }
 
+/** 握手失败行的详情：给出原因和一键透传，不用再绕到设置页 */
+function renderTlsDetail(pane, f) {
+  pane.innerHTML = `
+    <div class="dhead tls-dhead">
+      <div class="dline">
+        <span class="dmethod tls">TLS</span>
+        <span class="durl">${esc(f.host)}</span>
+      </div>
+      <div class="dmeta">
+        <span class="st fail">连接失败</span>
+        <span>端口 <b>${esc(f.port || 443)}</b></span>
+        <span>次数 <b>${Number(f.count) || 1}</b></span>
+        <span>${fmtClock(f.lastAt)}</span>
+        <span class="dactions">
+          <button class="btn primary" data-block-host="${esc(f.host)}">加入跳过解密</button>
+        </span>
+      </div>
+    </div>
+    <div class="dbody tls-dbody">
+      <div class="sec"><div class="sec-head">失败原因</div><p class="hint tls-error">${esc(f.error || '—')}</p></div>
+      <div class="sec"><div class="sec-head">说明</div>
+        <p class="hint">客户端不认 iReq 的根证书（证书固定 / 自带校验），或这个端口跑的不是 HTTP。加入「跳过解密的域名」后改为原样透传，App 能连上，但看不到明文。</p>
+      </div>
+    </div>`;
+}
+
 function renderDetail() {
   const f = S.selected;
   const pane = $('#detail');
   if (!f) return;
+  if (f.kind === 'tls') return renderTlsDetail(pane, f);
 
   const tabs = [
     ['overview', '概览'],
@@ -1086,6 +1232,7 @@ function renderDetail() {
         <span class="dactions">
           <button class="btn" id="actReplay">重放</button>
           <button class="btn" id="actMock">Mock 此请求</button>
+          <button class="btn ghost" id="actNet">网络 ▾</button>
           <button class="btn ghost" id="actStar">☆ 收藏</button>
           <button class="btn ghost" id="actCurl">复制 cURL</button>
         </span>
@@ -1118,7 +1265,8 @@ function renderDetail() {
   });
 
   $('#actReplay')?.addEventListener('click', openReplay);
-  $('#actMock')?.addEventListener('click', () => openRuleForm(fromFlowRule(f)));
+  $('#actMock')?.addEventListener('click', () => openQuickMock(f));
+  $('#actNet')?.addEventListener('click', (e) => openFlowNetMenu(e, f));
   $('#actStar')?.addEventListener('click', () => bookmarkFlow(f));
   $('#actCurl')?.addEventListener('click', () => {
     navigator.clipboard
@@ -1390,7 +1538,13 @@ function openModal(id) {
 function closeModals() {
   // 设置是自动保存的：关窗前把还没到 debounce 时间的改动落下去，避免「点了 ✕ 就等于没改」
   if (!$('#modalSettings').hidden && settingsDirty) flushSettingsSave();
+  // 网络面板同理；只在真的编辑过时 flush，避免从没打开过的空面板把规则清空
+  if (!$('#modalNetwork').hidden && netDirty) {
+    clearTimeout(netTimer);
+    putNetSim(netFromPanel(), true);
+  }
   $$('.modal').forEach((m) => (m.hidden = true));
+  closeAllPopups();
   if (lastModalFocus && lastModalFocus.isConnected) {
     try {
       lastModalFocus.focus({ preventScroll: true });
@@ -1399,6 +1553,213 @@ function closeModals() {
     }
   }
   lastModalFocus = null;
+}
+
+/* ------------------------------------------------------------ 网络模拟 */
+
+const NET_MODES = { offline: '断网', weak: '弱网', timeout: '超时' };
+const NET_DEFAULTS = { enabled: true, latencyMs: 800, kbps: 64, timeoutMs: 30000, rules: [] };
+let netTimer = null;
+let netDirty = false;
+
+/** 动态插入的 option / placeholder / 候选 chip 不会被静态扫描覆盖，显式走字典 */
+function netTr(s) {
+  return window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? window.ReqLiteI18N.t(s, true) : s;
+}
+
+function netNum(v, fallback) {
+  if (v === '' || v === null || v === undefined) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** 空 match 的「正在输入」行要留在 UI 里，所以这里不过滤 */
+function normalizeNetSim(raw) {
+  const s = raw && typeof raw === 'object' ? raw : {};
+  const rules = (Array.isArray(s.rules) ? s.rules : []).map((r, i) => ({
+    id: String((r && r.id) || 'r' + (i + 1)),
+    match: String((r && r.match) || '').trim(),
+    mode: NET_MODES[r && r.mode] ? r.mode : 'offline',
+  }));
+  return {
+    enabled: s.enabled !== false,
+    latencyMs: netNum(s.latencyMs, NET_DEFAULTS.latencyMs),
+    kbps: netNum(s.kbps, NET_DEFAULTS.kbps),
+    timeoutMs: netNum(s.timeoutMs, NET_DEFAULTS.timeoutMs),
+    rules,
+  };
+}
+
+function currentNetSim() {
+  return normalizeNetSim(S.networkSim);
+}
+
+function netRuleFor(name) {
+  const t = String(name || '').toLowerCase();
+  return currentNetSim().rules.find((r) => {
+    const m = r.match.toLowerCase();
+    return !!r.match && (m === t || m === 'app:' + t);
+  });
+}
+
+function syncNetBadge() {
+  const sim = currentNetSim();
+  const n = sim.enabled ? sim.rules.filter((r) => r.match).length : 0;
+  const b = $('#netCount');
+  if (b) {
+    b.hidden = n === 0;
+    b.textContent = String(n);
+  }
+  const btn = $('#btnNetwork');
+  if (btn) btn.classList.toggle('net-on', n > 0);
+}
+
+async function putNetSim(sim, immediate = false) {
+  S.networkSim = normalizeNetSim(sim);
+  syncNetBadge();
+  renderSide();
+  clearTimeout(netTimer);
+  const send = async () => {
+    netDirty = false;
+    try {
+      await api('/api/config', { method: 'PUT', body: { networkSim: S.networkSim } });
+    } catch (_) {
+      /* 服务暂时不可用就保留本地状态，下次改动再试 */
+    }
+  };
+  if (immediate) return send();
+  netTimer = setTimeout(send, 400);
+}
+
+function netFromPanel() {
+  const sim = currentNetSim();
+  sim.enabled = $('#netEnabled').checked;
+  sim.latencyMs = netNum($('#netLatency').value, NET_DEFAULTS.latencyMs);
+  sim.kbps = netNum($('#netKbps').value, NET_DEFAULTS.kbps);
+  sim.timeoutMs = netNum($('#netTimeout').value, NET_DEFAULTS.timeoutMs);
+  sim.rules = $$('#netRules .net-rule')
+    .map((row, i) => ({
+      id: row.dataset.netId || 'r' + (i + 1),
+      match: row.querySelector('.net-match').value.trim(),
+      mode: row.querySelector('.net-mode').value,
+    }))
+    .filter((r) => r.match);
+  return sim;
+}
+
+function netRuleHtml(r) {
+  return `<div class="net-rule" data-net-id="${esc(r.id)}">
+    <input class="input mono net-match" value="${esc(r.match)}" placeholder="${esc(netTr('应用名 / 域名 / IP / *'))}" spellcheck="false" />
+    <select class="input net-mode">
+      <option value="offline"${r.mode === 'offline' ? ' selected' : ''}>${netTr('断网')}</option>
+      <option value="weak"${r.mode === 'weak' ? ' selected' : ''}>${netTr('弱网')}</option>
+      <option value="timeout"${r.mode === 'timeout' ? ' selected' : ''}>${netTr('超时')}</option>
+    </select>
+    <button class="btn ghost icon" data-net-del="${esc(r.id)}" title="${esc(netTr('删除规则'))}">✕</button>
+  </div>`;
+}
+
+function renderNetPanel() {
+  const sim = currentNetSim();
+  $('#netEnabled').checked = sim.enabled;
+  $('#netLatency').value = sim.latencyMs;
+  $('#netKbps').value = sim.kbps;
+  $('#netTimeout').value = sim.timeoutMs;
+  $('#netRules').innerHTML = sim.rules.length
+    ? sim.rules.map(netRuleHtml).join('')
+    : `<div class="net-empty">${netTr('还没有规则。点上面的应用 / 域名，或「添加规则」。')}</div>`;
+  const apps = (S.facets.apps || []).slice(0, 8).map((x) => ({
+    match: 'app:' + x.key,
+    label: x.label || x.key,
+    kind: netTr('应用'),
+  }));
+  const hosts = (S.facets.hosts || []).slice(0, 8).map((x) => ({
+    match: 'host:' + x.key,
+    label: x.key,
+    kind: netTr('域名'),
+  }));
+  const chips = [{ match: '*', label: netTr('全部流量'), kind: '' }, ...apps, ...hosts];
+  $('#netChips').innerHTML = chips
+    .map(
+      (x) =>
+        `<button class="net-chip" data-net-quick="${esc(x.match)}" title="${esc(netTr('加一条断网规则'))}">${x.kind ? `<i>${x.kind}</i>` : ''}${esc(x.label)}</button>`
+    )
+    .join('');
+  syncNetBadge();
+  renderSide();
+}
+
+async function openNetwork() {
+  try {
+    const cfg = await api('/api/config');
+    S.networkSim = normalizeNetSim(cfg.networkSim);
+  } catch (_) {
+    /* 保留本地状态 */
+  }
+  renderNetPanel();
+  openModal('#modalNetwork');
+}
+
+async function netQuickAdd(match, mode = 'offline') {
+  const sim = netFromPanel();
+  if (!sim.rules.some((r) => r.match === match)) {
+    sim.rules.push({ id: 'r' + Date.now().toString(36), match, mode });
+  }
+  sim.enabled = true;
+  await putNetSim(sim, true);
+  renderNetPanel();
+}
+
+/** 侧栏应用行的一键开关：面板没打开过时不能读面板 DOM，否则会读到空规则 */
+async function toggleNetApp(name) {
+  const sim = $('#modalNetwork').hidden ? currentNetSim() : netFromPanel();
+  const t = String(name).toLowerCase();
+  const hit = sim.rules.find((r) => r.match.toLowerCase() === t || r.match.toLowerCase() === 'app:' + t);
+  sim.rules = hit ? sim.rules.filter((r) => r !== hit) : sim.rules;
+  if (!hit) sim.rules.push({ id: 'r' + Date.now().toString(36), match: 'app:' + name, mode: 'offline' });
+  sim.enabled = true;
+  await putNetSim(sim, true);
+  renderNetPanel();
+}
+
+function bindNetwork() {
+  $('#btnNetwork').addEventListener('click', openNetwork);
+  $('#modalNetwork').addEventListener('input', () => {
+    netDirty = true;
+    putNetSim(netFromPanel());
+  });
+  $('#netRules').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-net-del]');
+    if (!del) return;
+    const sim = netFromPanel();
+    sim.rules = sim.rules.filter((r) => r.id !== del.dataset.netDel);
+    await putNetSim(sim, true);
+    renderNetPanel();
+  });
+  $('#netChips').addEventListener('click', async (e) => {
+    const chip = e.target.closest('[data-net-quick]');
+    if (!chip) return;
+    await netQuickAdd(chip.dataset.netQuick);
+    toast('已添加断网规则：' + chip.dataset.netQuick);
+  });
+  $('#netAdd').addEventListener('click', () => {
+    const sim = netFromPanel();
+    sim.rules.push({ id: 'r' + Date.now().toString(36), match: '', mode: 'offline' });
+    S.networkSim = normalizeNetSim(sim);
+    renderNetPanel();
+    const last = $('#netRules .net-rule:last-child .net-match');
+    if (last) last.focus();
+  });
+  $('#netAllOff').addEventListener('click', async () => {
+    await netQuickAdd('*');
+    toast('已对全部流量开启断网');
+  });
+  $('#netClear').addEventListener('click', async () => {
+    const sim = netFromPanel();
+    sim.rules = [];
+    await putNetSim(sim, true);
+    renderNetPanel();
+  });
 }
 
 /* 导出：跟随当前筛选条件，后端生成 HAR 1.2（含完整 headers / body） */
@@ -2065,7 +2426,8 @@ function ioDownload() {
   toast('已下载规则 JSON');
 }
 
-function openRuleForm(rule) {
+function openRuleForm(rule, fromTree, opts) {
+  S.loadingRuleTab = true;
   mountEditorsOnce();
   const r = rule || {};
   S.editingRule = r.id ? r : null;
@@ -2108,12 +2470,16 @@ function openRuleForm(rule) {
   $('#ruHint').textContent = r.host ? `只拦截 ${r.host} 的请求` : '';
   renderTemplates();
   setTmplPicker(false);
-  switchRuleTab('match');
+  switchRuleTab((opts && opts.pane) || 'match');
   updateAllRuleUI();
+  S.ruleFromTree = !!fromTree;
+  const back = $('#ruBackRules');
+  if (back) back.hidden = !S.ruleFromTree;
   openModal('#modalRule');
   setTimeout(() => {
     if (JE()) JE().relayout();
     $('#ruMatch').focus();
+    S.loadingRuleTab = false;
   }, 40);
 }
 
@@ -2143,8 +2509,9 @@ async function saveRule(asCopy) {
     } else {
       await api('/api/rules', { method: 'POST', body: payload });
     }
-    closeModals();
-    await Promise.all([loadRules(), loadStatus()]);
+    if (S.ruleFromTree) await closeActiveRuleTab({ force: true });
+    else { closeModals(); await loadRules(); }
+    await loadStatus();
     toast(asCopy ? '已另存为副本' : '规则已保存，立即生效');
   } catch (err) {
     toast('保存失败: ' + err.message);
@@ -2155,40 +2522,101 @@ async function loadRules() {
   S.rules = await api('/api/rules');
   $('#ruleCount').textContent = S.rules.length;
   $('#rulesCount').textContent = S.rules.length ? `(${S.rules.length})` : '';
+  await loadTree(); /* 先拿树：选中的目录可能已被外部编辑器删掉 */
+  if (S.rulesDir && !treeHasDir(S.rulesTreeData && S.rulesTreeData.tree, S.rulesDir)) {
+    setRulesDir('');
+    renderTree();
+  }
   renderRules();
-  loadTree(); /* 文件树跟随刷新（不阻塞列表） */
+  updateWorkspaceChrome();
+}
+
+/* 目录前缀匹配：选中文件夹时递归显示子文件夹里的规则 */
+function ruleInDir(r, dir) {
+  if (!dir) return true;
+  const d = String(r.dir || '');
+  return d === dir || d.startsWith(dir + '/');
+}
+
+function ruleMatches(r, q) {
+  if (!q) return true;
+  return [r.name, r.note, r.urlMatch, r.host, r.method, String(r.status), r.body, r.dir]
+    .join(' ')
+    .toLowerCase()
+    .includes(q);
+}
+
+function ruleQuery() {
+  return ($('#rulesSearch') ? $('#rulesSearch').value : '').trim().toLowerCase();
+}
+
+function setRulesDir(dir) {
+  S.rulesDir = dir || '';
+  localStorage.setItem('reqlite-rule-dir', S.rulesDir);
+}
+
+function treeHasDir(nodes, dir) {
+  if (!dir || !Array.isArray(nodes)) return false;
+  for (const n of nodes) {
+    if (n.type !== 'dir') continue;
+    if (n.path === dir) return true;
+    if (treeHasDir(n.children, dir)) return true;
+  }
+  return false;
+}
+
+function rulesEmptyHtml(q) {
+  if (q) {
+    return `<div class="rules-empty">没有匹配「${esc(q)}」的规则<br><button type="button" class="btn ghost" data-empty="clear">清除搜索</button></div>`;
+  }
+  if (!S.rules.length) {
+    return `<div class="rules-empty">还没有规则<br>点「+ 新建规则」，或抓一条请求后点「Mock 此请求」最快<br><button type="button" class="btn primary" data-empty="new">+ 新建规则</button></div>`;
+  }
+  return `<div class="rules-empty">这个文件夹里还没有规则<br><button type="button" class="btn primary" data-empty="new">+ 在此新建规则</button> <button type="button" class="btn ghost" data-empty="all">查看全部</button></div>`;
 }
 
 function renderRules() {
   const box = $('#rulesList');
   if (!box) return;
   const crumb = $('#rulesDirCrumb');
+  const q = ruleQuery();
   if (crumb) {
     if (S.rulesDir) {
       crumb.hidden = false;
       crumb.innerHTML = `<span class="rt-crumb-path">📁 ${esc(S.rulesDir)}</span><button type="button" class="btn ghost" id="rtCrumbBack">返回全部</button>`;
       const back = $('#rtCrumbBack');
-      if (back) back.onclick = () => { S.rulesDir = ''; renderRules(); renderTree(); };
+      if (back) back.onclick = () => { setRulesDir(''); renderRules(); renderTree(); };
     } else {
       crumb.hidden = true;
     }
   }
-  if (!S.rules.length) {
-    box.innerHTML = '<div class="rules-empty">还没有规则。左侧「+ 规则」新建，或抓一条请求后点「Mock 此请求」最快。</div>';
-    return;
+  const list = S.rules.filter((r) => ruleInDir(r, S.rulesDir) && ruleMatches(r, q));
+  const foot = $('#rulesFootHint');
+  if (foot) {
+    foot.textContent = S.rulesDir
+      ? `当前文件夹 ${list.length} 条 / 共 ${S.rules.length} 条规则`
+      : q ? `共 ${S.rules.length} 条规则，匹配 ${list.length} 条` : `共 ${S.rules.length} 条规则`;
   }
-  const q = ($('#rulesSearch') ? $('#rulesSearch').value : '').trim().toLowerCase();
-  const list = S.rules.filter((r) =>
-    (!S.rulesDir || r.dir === S.rulesDir) &&
-    (!q || [r.name, r.note, r.urlMatch, r.host, r.method, String(r.status), r.body].join(' ').toLowerCase().includes(q))
-  );
   if (!list.length) {
-    box.innerHTML = `<div class="rules-empty">没有匹配「${esc(q || S.rulesDir)}」的规则</div>`;
+    box.innerHTML = rulesEmptyHtml(q);
+    box.onclick = (e) => {
+      const btn = e.target.closest('[data-empty]');
+      if (!btn) return;
+      const a = btn.dataset.empty;
+      if (a === 'clear') $('#rulesSearch').value = ''; else if (a === 'all') setRulesDir('');
+      else if (a === 'new') { newRuleInDir(S.rulesDir); return; }
+      renderRules();
+      renderTree();
+    };
+    box.onchange = null;
     return;
   }
   box.innerHTML = list
     .map((r) => {
       const preview = String(r.body || '').replace(/\s+/g, ' ').slice(0, 150);
+      const rel = S.rulesDir && String(r.dir || '').startsWith(S.rulesDir + '/')
+        ? String(r.dir).slice(S.rulesDir.length + 1) + '/'
+        : r.dir ? r.dir + '/' : '';
       return `<div class="rule ${r.enabled ? '' : 'off'}" data-id="${esc(r.id)}">
       <div class="rule-top">
         <label class="mini-switch"><input type="checkbox" data-toggle ${r.enabled ? 'checked' : ''} title="启用 / 停用" /><span></span></label>
@@ -2199,7 +2627,7 @@ function renderRules() {
           <button class="btn ghost" data-act="del">删除</button>
         </span>
       </div>
-      <div class="rule-match">${esc(r.method)} · ${esc(r.matchMode)} · ${esc(r.urlMatch || '(任意)')}${r.host ? ' @ ' + esc(r.host) : ''}${r.dir ? ` · <span class="rule-dir">${esc(r.dir)}/</span>` : ''}</div>
+      <div class="rule-match">${esc(r.method)} · ${esc(r.matchMode)} · ${esc(r.urlMatch || '(任意)')}${r.host ? ' @ ' + esc(r.host) : ''}${rel ? ` · <span class="rule-dir" title="${esc(r.dir || '')}">${esc(rel)}</span>` : ''}</div>
       <div class="rule-tags">
         <span class="rule-tag st">${esc(r.status)} ${esc(STATUS_TEXT[r.status] || '')}</span>
         <span class="rule-tag delay">延迟 ${Number(r.delayMs) || 0}ms</span>
@@ -2220,16 +2648,16 @@ function renderRules() {
     const rule = S.rules.find((r) => r.id === id);
     const act = btn.dataset.act;
     if (act === 'edit') {
-      closeModals();
-      openRuleForm(rule);
+      openRuleFromTree(rule);
     } else if (act === 'del') {
+      if (!confirm(`确定删除规则「${rule.name || '未命名规则'}」？不可恢复。`)) return;
       await api('/api/rules/' + id, { method: 'DELETE' });
-      await Promise.all([loadRules(), loadTree(), loadStatus()]);
+      await Promise.all([loadRules(), loadStatus()]);
       toast('规则已删除');
     } else if (act === 'dup') {
       const { id: _id, createdAt, ...rest } = rule;
       await api('/api/rules', { method: 'POST', body: { ...rest, name: (rule.name || '未命名规则') + ' 副本' } });
-      await Promise.all([loadRules(), loadTree(), loadStatus()]);
+      await Promise.all([loadRules(), loadStatus()]);
       toast('已复制规则');
     }
   };
@@ -2247,52 +2675,69 @@ function renderRules() {
 async function loadTree() {
   try {
     S.rulesTreeData = await api('/api/rules/tree');
-    renderTree();
-  } catch (_) {
-    /* 服务端老版本没有 tree 接口，忽略 */
+    S.rulesTreeError = '';
+  } catch (err) {
+    S.rulesTreeData = { tree: [] };
+    S.rulesTreeError = err.message || '读取失败';
   }
+  renderTree();
+}
+
+/* 搜索时树与右侧列表同步收敛：命中的规则（或其祖先目录）才显示 */
+function treeNodeMatches(n, q) {
+  if (!q) return true;
+  const hay = n.type === 'rule'
+    ? [n.name, n.rule && n.rule.name, n.rule && n.rule.urlMatch, n.rule && n.rule.host].join(' ')
+    : String(n.name || '');
+  if (hay.toLowerCase().includes(q)) return true;
+  return (n.children || []).some((c) => treeNodeMatches(c, q));
 }
 
 function renderTree() {
   const box = $('#rulesTree');
   if (!box) return;
+  const scroll = box.scrollTop;
+  box.classList.toggle('hide-body', !S.showRuleBody);
   const tree = S.rulesTreeData && S.rulesTreeData.tree;
-  box.innerHTML = tree && tree.length ? renderTreeNode(tree, 0) : '<div class="rt-empty">rules 目录还是空的<br>用「+ 规则」或抓包页的「Mock 此请求」创建</div>';
+  if (S.rulesTreeError) {
+    box.innerHTML = `<div class="rt-empty rt-error">文件树读取失败：${esc(S.rulesTreeError)}</div>`;
+  } else if (tree && tree.length) {
+    const html = renderTreeNode(tree, 0, ruleQuery());
+    box.innerHTML = html.trim() ? html : '<div class="rt-empty">没有匹配的规则</div>';
+  } else {
+    box.innerHTML = '<div class="rt-empty">rules 目录还是空的<br>用「+ 规则」或抓包页的「Mock 此请求」创建</div>';
+  }
   bindTreeEvents(box);
+  box.scrollTop = scroll; /* 展开 / 选中 / 刷新后保留滚动位置 */
 }
 
-function renderTreeNode(nodes, depth) {
+function renderTreeNode(nodes, depth, q) {
   return nodes
+    .filter((n) => treeNodeMatches(n, q))
     .map((n) => {
       if (n.type === 'dir') {
-        const open = S.rulesTreeOpen.has(n.path);
+        const open = q ? true : S.rulesTreeOpen.has(n.path);
         return `<div class="rt-node">
-        <div class="rt-row rt-dir ${S.rulesDir === n.path ? 'active' : ''}" data-path="${esc(n.path)}" data-type="dir" style="--d:${depth}" draggable="true">
+        <div class="rt-row rt-dir ${S.rulesDir === n.path ? 'active' : ''}" data-path="${esc(n.path)}" data-type="dir" data-name="${esc(n.name)}" title="${esc(n.path)}" tabindex="0" role="treeitem" aria-expanded="${open}" style="--d:${depth}" draggable="true">
           <span class="rt-caret" data-caret="${esc(n.path)}">${open ? '▾' : '▸'}</span>
           <span class="rt-icon">▤</span>
           <span class="rt-name">${esc(n.name)}</span>
-          <span class="rt-ops">
-            <button type="button" data-op="new-rule" title="在此文件夹里新建规则">＋</button>
-            <button type="button" data-op="rename" title="重命名">✎</button>
-            <button type="button" data-op="del" title="删除文件夹（含全部规则）">✕</button>
-          </span>
+          <span class="rt-ops"><button type="button" data-op="menu" title="更多操作">⋯</button></span>
         </div>
-        ${open ? `<div class="rt-kids">${renderTreeNode(n.children, depth + 1)}</div>` : ''}
+        ${open ? `<div class="rt-kids">${renderTreeNode(n.children || [], depth + 1, q)}</div>` : ''}
       </div>`;
       }
       if (n.type === 'rule') {
+        const active = S.rulesActivePath === n.path;
         return `<div class="rt-node">
-        <div class="rt-row rt-rule" data-path="${esc(n.path)}" data-type="rule" data-id="${esc(n.rule.id)}" style="--d:${depth}" draggable="true">
+        <div class="rt-row rt-rule ${active ? 'active' : ''}" data-path="${esc(n.path)}" data-type="rule" data-id="${esc(n.rule.id)}" data-name="${esc(n.name)}" title="${esc(n.path)}" tabindex="0" role="treeitem" aria-selected="${active}" style="--d:${depth}" draggable="true">
           <span class="rt-icon ${n.rule.enabled ? 'on' : 'off'}">${n.rule.enabled ? '◉' : '○'}</span>
           <span class="rt-name">${esc(n.name)}${n.rule.enabled ? '' : ' <i class="rt-offtag">停用</i>'}</span>
-          <span class="rt-ops">
-            <button type="button" data-op="rename" title="重命名">✎</button>
-            <button type="button" data-op="del" title="删除规则">✕</button>
-          </span>
+          <span class="rt-ops"><button type="button" data-op="menu" title="更多操作">⋯</button></span>
         </div>
         ${(n.children || [])
           .map(
-            (b) => `<div class="rt-row rt-bodyfile" data-path="${esc(b.path)}" data-type="body" data-rule-id="${esc(n.rule.id)}" style="--d:${depth + 1}">
+            (b) => `<div class="rt-row rt-bodyfile" data-path="${esc(b.path)}" data-type="body" data-rule-id="${esc(n.rule.id)}" data-name="${esc(b.name)}" title="${esc(b.path)}" tabindex="0" role="treeitem" style="--d:${depth + 1}">
           <span class="rt-icon">≡</span><span class="rt-name">${esc(b.name)}</span>
         </div>`
           )
@@ -2309,27 +2754,30 @@ function bindTreeEvents(box) {
 
   box.ondragstart = (e) => {
     const row = e.target.closest('.rt-row');
-    if (!row) return;
+    if (!row || row.dataset.type === 'body') return;
     dragFrom = row.dataset.path;
     e.dataTransfer.effectAllowed = 'move';
     try { e.dataTransfer.setData('text/plain', dragFrom); } catch (_) { /* ok */ }
   };
 
   box.ondragover = (e) => {
-    const dir = e.target.closest('.rt-dir, .rt-tree');
-    if (dir) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (dir.classList) dir.classList.add('drop-hover');
-    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    box.querySelectorAll('.drop-hover').forEach((el) => el.classList.remove('drop-hover'));
+    const dir = e.target.closest('.rt-dir');
+    if (dir) dir.classList.add('drop-hover');
+    else box.classList.add('drop-root'); /* 拖到空白处 = 移到根目录，高亮整棵树 */
   };
   box.ondragleave = (e) => {
-    const dir = e.target.closest('.rt-dir, .rt-tree');
-    if (dir) dir.classList.remove('drop-hover');
+    if (!box.contains(e.relatedTarget)) {
+      box.querySelectorAll('.drop-hover').forEach((el) => el.classList.remove('drop-hover'));
+      box.classList.remove('drop-root');
+    }
   };
   box.ondrop = async (e) => {
     e.preventDefault();
     box.querySelectorAll('.drop-hover').forEach((el) => el.classList.remove('drop-hover'));
+    box.classList.remove('drop-root');
     const dir = e.target.closest('.rt-dir');
     const toDir = dir ? dir.dataset.path : '';
     const from = dragFrom || e.dataTransfer.getData('text/plain');
@@ -2337,7 +2785,7 @@ function bindTreeEvents(box) {
     if (!from) return;
     try {
       const out = await api('/api/rules/move', { method: 'POST', body: { from, toDir } });
-      if (S.rulesDir && out.path && !out.path.includes('/')) S.rulesDir = '';
+      if (S.rulesDir && out.path && !out.path.includes('/')) setRulesDir('');
       await loadRules();
       toast('已移动到 ' + (toDir || '根目录'));
     } catch (err) {
@@ -2359,62 +2807,374 @@ function bindTreeEvents(box) {
     const row = e.target.closest('.rt-row');
     if (op && row) {
       e.stopPropagation();
-      await treeOp(op.dataset.op, row);
+      if (op.dataset.op === 'menu') {
+        const r = op.getBoundingClientRect();
+        openTreeRowMenu(row, r.left, r.bottom);
+      } else await treeOp(op.dataset.op, row);
       return;
     }
     if (!row) return;
-    if (row.dataset.type === 'dir') {
-      S.rulesDir = row.dataset.path;
-      if (!S.rulesTreeOpen.has(S.rulesDir)) {
-        S.rulesTreeOpen.add(S.rulesDir);
-        localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
-      }
-      renderRules();
-      renderTree();
-    } else if (row.dataset.type === 'rule') {
-      const rule = S.rules.find((r) => r.id === row.dataset.id);
-      if (rule) {
-        closeModals();
-        openRuleForm(rule);
-      }
-    } else if (row.dataset.type === 'body') {
-      // 双击 body 文件 → 打开所属规则的编辑器并切到 body 页签
-      const rule = S.rules.find((r) => r.id === row.dataset.ruleId);
-      if (rule) {
-        closeModals();
-        openRuleForm(rule);
-        switchRuleTab('body');
-        toast('正在编辑响应体（保存后写入 ' + row.dataset.path + '）');
-      }
-    }
+    activateTreeRow(row);
   };
+
+  box.oncontextmenu = (e) => {
+    const row = e.target.closest('.rt-row');
+    if (!row) return;
+    e.preventDefault();
+    openTreeRowMenu(row, e.clientX, e.clientY);
+  };
+
+  /* 键盘可达：↑↓ 移动、→← 展开折叠、Enter 打开、F2 重命名、Delete 删除 */
+  box.onkeydown = (e) => {
+    const rows = [...box.querySelectorAll('.rt-row')].filter((r) => r.offsetParent !== null);
+    const cur = e.target.closest('.rt-row');
+    const i = cur ? rows.indexOf(cur) : -1;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (next) next.focus();
+      return;
+    }
+    if (!cur) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      activateTreeRow(cur);
+      return;
+    }
+    if (e.key === 'ArrowRight' && cur.dataset.type === 'dir') {
+      e.preventDefault();
+      if (!S.rulesTreeOpen.has(cur.dataset.path)) {
+        S.rulesTreeOpen.add(cur.dataset.path);
+        localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+        renderTree();
+        focusTreePath(cur.dataset.path);
+      }
+      return;
+    }
+    if (e.key === 'ArrowLeft' && cur.dataset.type === 'dir') {
+      e.preventDefault();
+      if (S.rulesTreeOpen.has(cur.dataset.path)) {
+        S.rulesTreeOpen.delete(cur.dataset.path);
+        localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+        renderTree();
+        focusTreePath(cur.dataset.path);
+      } else {
+        const parent = cur.dataset.path.split('/').slice(0, -1).join('/');
+        if (parent) focusTreePath(parent);
+      }
+      return;
+    }
+    if (e.key === 'F2') { e.preventDefault(); treeOp('rename', cur); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); treeOp('del', cur); }
+  };
+}
+
+function focusTreePath(p) {
+  const box = $('#rulesTree');
+  if (!box) return;
+  const el = [...box.querySelectorAll('.rt-row')].find((r) => r.dataset.path === p);
+  if (el) el.focus();
+}
+
+/** 树行的就近菜单：⋯ 按钮与右键共用，替代原来只在 hover 出现的 ＋/✎/✕ */
+function openTreeRowMenu(row, x, y) {
+  const p = row.dataset.path;
+  const type = row.dataset.type;
+  const name = row.dataset.name || p.split('/').pop();
+  const items = [];
+  if (type === 'dir') {
+    items.push(['new-rule', '＋ 在此新建规则']);
+    items.push(['new-dir', '＋ 在此新建子文件夹']);
+    items.push(['open', '筛选到此文件夹']);
+  } else if (type === 'rule') {
+    items.push(['open', '编辑这条规则']);
+    items.push(['open-body', '编辑响应体']);
+  } else {
+    items.push(['open', '编辑响应体']);
+  }
+  if (type === 'rule' || type === 'dir') items.push(['rename', '重命名']);
+  items.push(['copy', '复制文件路径']);
+  if (type === 'rule' || type === 'dir') items.push(['del', '删除']);
+  showCtxMenu(
+    x,
+    y,
+    `<div class="ctx-title">${esc(name)}</div>` +
+      items
+        .map(([op, label]) => `<button class="ctx-item" data-rt="${op}" data-rt-path="${esc(p)}" data-rt-type="${type}" data-rt-rule-id="${esc(row.dataset.ruleId || row.dataset.id || '')}">${esc(label)}</button>`)
+        .join('')
+  );
+}
+
+function activateTreeRow(row) {
+  if (row.dataset.type === 'dir') {
+    setRulesDir(row.dataset.path);
+    if (!S.rulesTreeOpen.has(S.rulesDir)) {
+      S.rulesTreeOpen.add(S.rulesDir);
+      localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+    }
+    renderRules();
+    renderTree();
+  } else if (row.dataset.type === 'rule') {
+    const rule = S.rules.find((r) => r.id === row.dataset.id);
+    if (rule) {
+      S.rulesActivePath = row.dataset.path;
+      openRuleFromTree(rule);
+    }
+  } else if (row.dataset.type === 'body') {
+    const rule = S.rules.find((r) => r.id === row.dataset.ruleId);
+    if (rule) {
+      openRuleFromTree(rule, 'body');
+      toast('正在编辑响应体（保存后写入 ' + row.dataset.path + '）');
+    }
+  }
+}
+
+/* ------------------------------------------- VSCode 式多标签编辑区 */
+
+function currentRuleTab() {
+  return S.ruleTabs.find((t) => t.key === S.activeRuleTab) || null;
+}
+
+function ruleTabKey(rule) {
+  return rule && rule.id ? 'r:' + rule.id : 'n:' + (++S.ruleTabSeq);
+}
+
+/** 打开（或激活）一条规则的标签页：工作区始终留在背景，不再弹第二个窗 */
+function openRuleTab(rule, opts) {
+  const o = opts || {};
+  const r = rule || {};
+  const key = ruleTabKey(r);
+  let tab = S.ruleTabs.find((t) => t.key === key);
+  const existed = !!tab;
+  if (!tab) {
+    tab = {
+      key,
+      id: r.id || null,
+      data: r,
+      name: r.name || '未命名规则',
+      dir: r.dir || S.rulesDir || '',
+      pane: o.pane || 'match',
+      dirty: false,
+      fromWorkspace: !!o.fromWorkspace,
+    };
+    S.ruleTabs.push(tab);
+  }
+  // 编辑器嵌在工作区里：工作区必须可见。不走 openModal 以免抢焦点。
+  if ($('#modalRules').hidden) $('#modalRules').hidden = false;
+  if (existed && S.activeRuleTab === key) {
+    if (o.pane) { tab.pane = o.pane; switchRuleTab(o.pane); }
+    updateWorkspaceChrome();
+    return tab;
+  }
+  if (o.pane) tab.pane = o.pane;
+  activateRuleTab(key);
+  return tab;
+}
+
+/** 切换标签前把当前表单存回内存，未保存的内容不会丢 */
+function snapshotActiveTab() {
+  const tab = currentRuleTab();
+  if (!tab || S.loadingRuleTab || $('#modalRule').hidden) return;
+  try {
+    tab.data = { ...collectRule(), id: tab.id, dir: tab.dir };
+    tab.name = tab.data.name || '未命名规则';
+    const on = $('#ruTabs .on');
+    tab.pane = on ? on.dataset.rutab : 'match';
+  } catch (_) { /* 表单还没挂载好就先不快照 */ }
+}
+
+function activateRuleTab(key) {
+  if (S.activeRuleTab && S.activeRuleTab !== key && !$('#modalRule').hidden) snapshotActiveTab();
+  const tab = S.ruleTabs.find((t) => t.key === key);
+  if (!tab) { showRuleWelcome(); return; }
+  S.activeRuleTab = key;
+  S.loadingRuleTab = true;
+  openRuleForm(tab.data, tab.fromWorkspace, { pane: tab.pane });
+  // tab.dirty 必须保留：切回来的是「快照里的未保存内容」，不能假装已保存
+  renderRuleTabs();
+  updateWorkspaceChrome();
+}
+
+function markActiveTabDirty() {
+  if (S.loadingRuleTab) return;
+  const tab = currentRuleTab();
+  if (!tab || tab.dirty) return;
+  tab.dirty = true;
+  renderRuleTabs();
+  updateWorkspaceChrome();
+}
+
+function renderRuleTabs() {
+  const box = $('#ruleTabs');
+  if (!box) return;
+  box.innerHTML =
+    S.ruleTabs
+      .map(
+        (t) => `<button type="button" class="ws-tab ${t.key === S.activeRuleTab ? 'active' : ''}" data-rt-key="${esc(t.key)}" role="tab" title="${esc(t.name)}.rule.json">
+      <span class="fico">◈</span><span class="fname">${esc(t.name)}</span>
+      ${t.dirty ? '<span class="dirty" title="未保存"></span>' : ''}
+      <span class="x" data-rt-close="${esc(t.key)}" title="关闭标签">✕</span>
+    </button>`
+      )
+      .join('') +
+    '<button type="button" class="ws-tab-add" data-rt-add title="新建规则标签">＋</button><span class="fill"></span>';
+  const open = $('#wsOpenEditors');
+  const list = $('#wsOpenList');
+  if (open && list) {
+    open.hidden = !S.ruleTabs.length;
+    $('#wsOpenCount').textContent = S.ruleTabs.length;
+    list.innerHTML = S.ruleTabs
+      .map(
+        (t) => `<div class="ws-open-item ${t.key === S.activeRuleTab ? 'active' : ''}" data-rt-key="${esc(t.key)}" title="${esc(t.name)}.rule.json">
+      <span style="color:var(--mock)">◈</span>
+      <span class="oname">${esc(t.name)}.rule.json</span>
+      ${t.dirty ? '<span class="dot" title="未保存"></span>' : ''}
+      <button type="button" class="x" data-rt-close="${esc(t.key)}" title="关闭标签">✕</button>
+    </div>`
+      )
+      .join('');
+  }
+}
+
+function showRuleWelcome() {
+  S.activeRuleTab = null;
+  $('#modalRule').hidden = true;
+  const w = $('#ruleWelcome');
+  if (w) w.hidden = false;
+  renderRuleTabs();
+  updateWorkspaceChrome();
+}
+
+function closeRuleTab(key, opts) {
+  const o = opts || {};
+  const idx = S.ruleTabs.findIndex((t) => t.key === key);
+  if (idx < 0) return;
+  const tab = S.ruleTabs[idx];
+  if (tab.dirty && !o.force && !confirm(netTr('还没保存，确定关闭标签？'))) return;
+  S.ruleTabs.splice(idx, 1);
+  if (S.activeRuleTab === key) {
+    S.activeRuleTab = null;
+    const next = S.ruleTabs[Math.min(idx, S.ruleTabs.length - 1)];
+    if (next) activateRuleTab(next.key);
+    else showRuleWelcome();
+  } else {
+    renderRuleTabs();
+  }
+  updateWorkspaceChrome();
+}
+
+async function closeActiveRuleTab(opts) {
+  if (S.activeRuleTab) closeRuleTab(S.activeRuleTab, opts);
+  else showRuleWelcome();
+  await loadRules();
+}
+
+/** 关闭整个编辑器视图（保留名字供旧路径 / 命令面板使用） */
+async function closeRuleEditor() {
+  S.ruleTabs = [];
+  S.activeRuleTab = null;
+  S.ruleFromTree = false;
+  showRuleWelcome();
+  await loadRules();
+}
+
+function updateWorkspaceChrome() {
+  const tab = currentRuleTab();
+  const file = tab ? tab.name + '.rule.json' : '';
+  const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+  set('#wsCurrentFile', file);
+  const isEn = !!(window.ReqLiteI18N && window.ReqLiteI18N.isEn());
+  const tabUnit = isEn ? (S.ruleTabs.length === 1 ? 'tab' : 'tabs') : '个标签';
+  set('#wsStatusTabs', S.ruleTabs.length + ' ' + tabUnit);
+  set('#wsStatusDir', S.rulesDir ? '📁 ' + S.rulesDir : netTr('全部规则'));
+  set('#wsStatusSave', tab && tab.dirty ? netTr('● 未保存') : netTr('手动保存'));
+  set('#wsSideCount', S.rules.length + ' ' + netTr('条规则'));
+  const crumbs = $('#ruleBreadcrumb');
+  if (crumbs) {
+    const parts = [netTr('规则')].concat(tab && tab.dir ? tab.dir.split('/') : [], file ? [file] : []);
+    crumbs.innerHTML = parts
+      .map((p, i) => (i ? '<span class="sep">›</span>' : '') + (i === parts.length - 1 ? `<b>${esc(p)}</b>` : `<span>${esc(p)}</span>`))
+      .join('');
+  }
+  const w = $('#ruleWelcome');
+  if (w) w.hidden = !!tab;
+  if (!tab) $('#modalRule').hidden = true;
+}
+
+/** 打开规则工作区 */
+async function openRuleWorkspace() {
+  await loadRules();
+  openModal('#modalRules');
+  updateWorkspaceChrome();
+}
+
+/** 从规则工作区打开：直接在右侧开标签，工作区（树 / 目录 / 搜索）原样留在背景 */
+function openRuleFromTree(rule, tab) {
+  return openRuleTab(rule || {}, { fromWorkspace: true, pane: tab });
+}
+
+function newRuleInDir(dir) {
+  setRulesDir(dir || '');
+  if (dir && !S.rulesTreeOpen.has(dir)) {
+    S.rulesTreeOpen.add(dir);
+    localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+  }
+  openRuleFromTree(null);
+}
+
+async function newDirIn(dir) {
+  const name = prompt('新文件夹名称：', '新文件夹');
+  if (!name) return;
+  try {
+    await api('/api/rules/fs', { method: 'POST', body: { type: 'dir', dir: dir || '', name } });
+    const p = (dir ? dir + '/' : '') + name;
+    S.rulesTreeOpen.add(p);
+    localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+    await loadRules();
+    toast('已新建文件夹 ' + name);
+  } catch (err) {
+    toast('新建失败：' + err.message);
+  }
 }
 
 async function treeOp(op, row) {
   const p = row.dataset.path;
+  const type = row.dataset.type;
   try {
     if (op === 'new-rule') {
-      const name = prompt('新规则名称：', '新规则');
-      if (!name) return;
-      await api('/api/rules/fs', { method: 'POST', body: { type: 'rule', dir: p, name } });
-      S.rulesDir = p;
-      if (!S.rulesTreeOpen.has(p)) S.rulesTreeOpen.add(p);
-      localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
-      await loadRules();
-      toast('已在 ' + p + ' 下新建规则');
+      newRuleInDir(type === 'dir' ? p : p.split('/').slice(0, -1).join('/'));
+    } else if (op === 'new-dir') {
+      await newDirIn(type === 'dir' ? p : p.split('/').slice(0, -1).join('/'));
+    } else if (op === 'open') {
+      activateTreeRow(row);
+    } else if (op === 'open-body') {
+      const rule = S.rules.find((r) => r.id === (row.dataset.ruleId || row.dataset.id));
+      if (rule) openRuleFromTree(rule, 'body');
+    } else if (op === 'copy') {
+      try { await navigator.clipboard.writeText(p); } catch (_) { /* 非安全上下文时退化为只提示 */ }
+      toast('已复制路径：' + p);
     } else if (op === 'rename') {
       const cur = p.split('/').pop();
       const name = prompt('重命名为：', cur);
       if (!name || name === cur) return;
-      await api('/api/rules/move', { method: 'POST', body: { from: p, newName: name } });
-      if (S.rulesDir && !S.rulesDir.startsWith(p.split('/').slice(0, -1).join('/'))) S.rulesDir = '';
+      const out = await api('/api/rules/move', { method: 'POST', body: { from: p, newName: name } });
+      /* 旧路径下的选中目录与展开态必须一起迁移，否则面包屑指向已不存在的目录 */
+      if (S.rulesDir === p || S.rulesDir.startsWith(p + '/')) {
+        setRulesDir((out.path || p) + S.rulesDir.slice(p.length));
+      }
+      const nextOpen = new Set();
+      S.rulesTreeOpen.forEach((d) =>
+        nextOpen.add(d === p || d.startsWith(p + '/') ? (out.path || p) + d.slice(p.length) : d)
+      );
+      S.rulesTreeOpen = nextOpen;
+      localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...nextOpen]));
       await loadRules();
       toast('已重命名');
     } else if (op === 'del') {
-      const kids = row.dataset.type === 'dir' ? '文件夹里的全部规则' : '这条规则';
+      const kids = type === 'dir' ? '文件夹里的全部规则' : '这条规则';
       if (!confirm(`确定删除「${p}」？\n将删除${kids}，不可恢复。`)) return;
       await api('/api/rules/file?path=' + encodeURIComponent(p), { method: 'DELETE' });
-      if (S.rulesDir && (S.rulesDir === p || S.rulesDir.startsWith(p + '/'))) S.rulesDir = '';
+      if (S.rulesDir && (S.rulesDir === p || S.rulesDir.startsWith(p + '/'))) setRulesDir('');
       await loadRules();
       toast('已删除');
     }
@@ -2646,7 +3406,6 @@ async function openSettings() {
   $('#appIdStat').textContent = pm.supported
     ? `lsof 快照 ${ps.refreshes || 0} 次 · 解析到 ${ps.resolved || 0} 个连接 · 未命中 ${ps.missed || 0}`
     : '当前系统不提供本机进程关联（仅 macOS 支持），远程设备请用上方 UA 别名标注。';
-  loadDiagnostics();
   loadLocalProxy();
   $('#stMax').value = st.store ? st.store.maxFlows : 2000;
   const infoAddr = currentAddr();
@@ -2661,29 +3420,6 @@ async function openSettings() {
   ].join('\n');
   applyAddr();
   openModal('#modalSettings');
-}
-
-async function loadDiagnostics() {
-  try {
-    const d = await api('/api/diagnostics');
-    const wrap = $('#stDiagWrap');
-    const box = $('#stDiag');
-    if (!wrap || !box) return;
-    // 只展示"反复失败"的域名：单次失败多半是预连接被中断，不是真问题
-    const list = (d.tlsFailures || []).filter((f) => f.count >= 2);
-    wrap.hidden = list.length === 0;
-    box.innerHTML = list
-      .map(
-        (f) => `<div class="diag-item">
-          <span class="mono">${esc(f.host)}</span>
-          <span class="hint">${f.count} 次握手失败</span>
-          <button class="btn ghost" data-block-host="${esc(f.host)}">加入跳过解密</button>
-        </div>`
-      )
-      .join('');
-  } catch (_) {
-    /* 诊断不可用就算了 */
-  }
 }
 
 /* ---------------------------------------------------------------- 事件 */
@@ -2758,6 +3494,12 @@ function bind() {
     const row = e.target.closest('.row');
     if (row) selectFlow(row.dataset.id);
   });
+  $('#list').addEventListener('contextmenu', (e) => {
+    const row = e.target.closest('.row');
+    if (!row) return;
+    e.preventDefault();
+    openRowMenu(e.clientX, e.clientY, row.dataset.id);
+  });
 
   let searchTimer;
   $('#search').addEventListener('input', (e) => {
@@ -2769,6 +3511,12 @@ function bind() {
 
   // 分组边栏
   $('#sideBody').addEventListener('click', async (e) => {
+    const nd = e.target.closest('[data-net-app]');
+    if (nd) {
+      e.stopPropagation();
+      openNetModeMenu(e, 'app:' + nd.dataset.netApp, nd.dataset.netApp);
+      return;
+    }
     const del = e.target.closest('[data-del-bookmark]');
     if (del) {
       e.stopPropagation();
@@ -2829,12 +3577,23 @@ function bind() {
   bindSplitter('list');
 
   $('#filters').addEventListener('click', (e) => {
-    const btn = e.target.closest('button');
+    if (e.target.closest('#btnFilterMore')) {
+      toggleMoreMenu('filter');
+      return;
+    }
+    const btn = e.target.closest('button[data-status], button[data-mocked]');
     if (!btn) return;
-    $$('#filters button').forEach((b) => b.classList.remove('on'));
+    $$('#filters button[data-status], #filters button[data-mocked]').forEach((b) => b.classList.remove('on'));
     btn.classList.add('on');
     S.filter.status = btn.dataset.status || '';
     S.filter.mocked = btn.dataset.mocked === '1';
+    syncFilterMore();
+    if (S.filter.status === 'tls' || S.filter.mocked) toggleMoreMenu('filter', false);
+    // 握手失败是连接层诊断，不在 flow store 里，后端不认这个筛选值
+    if (S.filter.status === 'tls') {
+      renderList();
+      return;
+    }
     loadFlows();
   });
 
@@ -2845,22 +3604,20 @@ function bind() {
 
   $('#btnClear').addEventListener('click', async () => {
     await api('/api/flows', { method: 'DELETE' });
+    // 诊断记录也一起清，否则点了「清空」列表里还留着几行
+    await api('/api/diagnostics', { method: 'DELETE' }).catch(() => {});
     S.selectedId = null;
     S.selected = null;
     $('#detail').innerHTML = detailEmptyHtml;
     S.flows = [];
+    S.tlsFailures = [];
+    syncTlsBadge();
     renderList();
     toast('已清空');
   });
 
-  $('#btnRules').addEventListener('click', async () => {
-    await loadRules();
-    openModal('#modalRules');
-  });
-  $('#ruNew').addEventListener('click', () => {
-    closeModals();
-    openRuleForm({});
-  });
+  $('#btnRules').addEventListener('click', openRuleWorkspace);
+  $('#ruNew').addEventListener('click', () => newRuleInDir(S.rulesDir));
   $('#ruSave').addEventListener('click', () => saveRule(false));
   $('#btnCa').addEventListener('click', async () => {
     const st = await loadStatus();
@@ -2883,10 +3640,11 @@ function bind() {
       '\n\n# 备用：系统域，需要 sudo\n' +
       `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${p}"` +
       '\n\n# 注意：别加 -p ssl，那会变成「仅 SSL 策略」的受限信任，浏览器仍不认';
-    openModal('#modalCa');
+    await openConnect(2);
   });
-  $('#btnSettings').addEventListener('click', openSettings);
+  $('#btnSettings').addEventListener('click', () => openConnect(0));
   $('#btnExport').addEventListener('click', () => exportFlows('har'));
+  bindNetwork();
   $('#updAuto').addEventListener('change', async (e) => {
     const on = e.target.checked;
     try {
@@ -2931,19 +3689,10 @@ function bind() {
     }
     closeModals();
   });
-  $('#modalSettings').addEventListener('click', async (e) => {
+  // 「加入跳过解密」在诊断行详情里，用全局委托，详情面板重建后也不用重绑
+  document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-block-host]');
-    if (!btn) return;
-    const host = btn.dataset.blockHost;
-    const lines = $('#stPassthrough')
-      .value.split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!lines.includes(host)) lines.push(host);
-    $('#stPassthrough').value = lines.join('\n');
-    await saveSettings({ silent: true, close: false });
-    toast(`已让 ${host} 走透传，重新打开 App 试试`);
-    loadDiagnostics();
+    if (btn) addPassthroughHost(btn.dataset.blockHost);
   });
   $('#rpSend').addEventListener('click', sendReplay);
 
@@ -2966,9 +3715,11 @@ function bind() {
   $('#ruSaveCopy').addEventListener('click', () => saveRule(true));
   $('#ruDelete').addEventListener('click', async () => {
     if (!S.editingRule) return;
+    if (!confirm(`确定删除规则「${S.editingRule.name || '未命名规则'}」？不可恢复。`)) return;
     await api('/api/rules/' + S.editingRule.id, { method: 'DELETE' });
-    closeModals();
-    await Promise.all([loadRules(), loadStatus()]);
+    if (S.ruleFromTree) await closeActiveRuleTab({ force: true });
+    else { closeModals(); await loadRules(); }
+    await loadStatus();
     toast('规则已删除');
   });
 
@@ -3075,30 +3826,28 @@ function bind() {
     setTmplPicker(false);
   });
 
-  $('#rulesSearch').addEventListener('input', renderRules);
+  $('#rulesSearch').addEventListener('input', () => { renderRules(); renderTree(); });
   $('#rulesImport').addEventListener('click', () => openJsonIO('import'));
   $('#rulesExport').addEventListener('click', () => openJsonIO('export'));
   /* 文件树工具栏：在当前选中目录里新建 */
-  $('#rtNewRule').addEventListener('click', () => treeOp('new-rule', { dataset: { path: S.rulesDir, type: 'dir' } }));
-  $('#rtNewDir').addEventListener('click', async () => {
-    const name = prompt('新文件夹名称：', '新文件夹');
-    if (!name) return;
+  $('#rtNewRule').addEventListener('click', () => newRuleInDir(S.rulesDir));
+  $('#rtNewDir').addEventListener('click', () => newDirIn(S.rulesDir));
+  $('#rtRefresh').addEventListener('click', async () => {
     try {
-      await api('/api/rules/fs', { method: 'POST', body: { type: 'dir', dir: S.rulesDir, name } });
-      const p = S.rulesDir ? S.rulesDir + '/' + name : name;
-      S.rulesTreeOpen.add(p);
-      localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
       await loadRules();
-      toast('已创建文件夹 ' + p);
+      toast(S.rulesTreeError ? '扫描完成，但文件树读取失败：' + S.rulesTreeError : '已重新扫描 rules 目录');
     } catch (err) {
-      toast('创建失败：' + err.message);
+      toast('扫描失败：' + err.message);
     }
   });
-  $('#rtRefresh').addEventListener('click', async () => {
-    await loadRules();
-    toast('已重新扫描 rules 目录');
+  $('#rtToggleBody').addEventListener('click', () => {
+    S.showRuleBody = !S.showRuleBody;
+    localStorage.setItem('reqlite-rule-show-body', S.showRuleBody ? '1' : '0');
+    $('#rtToggleBody').setAttribute('aria-pressed', String(S.showRuleBody));
+    $('#rulesTree').classList.toggle('hide-body', !S.showRuleBody);
   });
-  $('#rulesExport').addEventListener('click', () => openJsonIO('export'));
+  $('#rtToggleBody').setAttribute('aria-pressed', String(S.showRuleBody));
+  $('#ruBackRules').addEventListener('click', () => closeActiveRuleTab());
   $('#ioFormat').addEventListener('click', () => { if (RU.ioBody && RU.ioBody.format()) toast('已格式化'); });
   $('#ioCopy').addEventListener('click', () => copyText(RU.ioBody ? RU.ioBody.getValue() : $('#jsonIoSource').value, '规则 JSON 已复制'));
   $('#ioDownload').addEventListener('click', ioDownload);
@@ -3217,9 +3966,11 @@ function bind() {
   $$('.modal').forEach((m) => {
     m.addEventListener('click', (e) => {
       if (e.target === m || e.target.closest('[data-close]')) {
-        // 导入/导出是从规则列表上叠出来的，关它要回到规则列表；
-        // 其它弹窗都是先 closeModals 再打开的单层弹窗，保持全关语义。
+        // 编辑器现在嵌在工作区里面：它内部的点击不能外溢成「关掉整个工作区」。
+        if (m.id === 'modalRules' && e.target.closest('#modalRule')) return;
+        // 导入/导出只关自己；编辑器 ✕ 只关当前标签；其余弹窗保持「全关」语义。
         if (m.id === 'modalJsonIO') m.hidden = true;
+        else if (m.id === 'modalRule' && S.ruleFromTree) closeActiveRuleTab();
         else closeModals();
       }
     });
@@ -3241,14 +3992,37 @@ function bind() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    const meta = e.metaKey || e.ctrlKey;
+    const ws = !$('#modalRules').hidden;
+    const editing = ws && !$('#modalRule').hidden;
+    const key = e.key.toLowerCase();
+    if (meta && key === 'k') {
       e.preventDefault();
-      $('#search').focus();
-      $('#search').select();
+      openCmdPalette();
+    } else if (meta && key === 's' && editing) {
+      e.preventDefault();
+      saveRule(false);
+    } else if (meta && key === 'w' && ws) {
+      e.preventDefault();
+      if (editing) closeActiveRuleTab();
+      else closeModals();
+    } else if (meta && /^[1-9]$/.test(e.key) && ws) {
+      const t = S.ruleTabs[Number(e.key) - 1];
+      if (t) { e.preventDefault(); activateRuleTab(t.key); }
     } else if (e.key === 'Escape') {
+      if (closeAllPopups()) {
+        e.preventDefault();
+        return;
+      }
+      if (ws) {
+        e.preventDefault();
+        if (editing) closeActiveRuleTab();
+        else closeModals();
+        return;
+      }
       closeModals();
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      if (document.activeElement === $('#search')) return;
+      if (document.activeElement === $('#search') || document.activeElement === $('#cmdInput')) return;
       const idx = S.flows.findIndex((f) => f.id === S.selectedId);
       const next =
         e.key === 'ArrowDown'
@@ -3262,6 +4036,9 @@ function bind() {
       }
     }
   });
+
+  bindSimpleUI();
+  bindRuleWorkspace();
 
   // 实时流
   const es = new EventSource('/api/events');
@@ -3286,6 +4063,9 @@ function bind() {
         replayOf: f.replayOf,
         error: f.error,
         ws: f.ws,
+        tunneled: f.tunneled,
+        simMode: f.simMode,
+        simRule: f.simRule,
         clientIp: f.clientIp,
         deviceKey: f.deviceKey,
         deviceLabel: f.deviceLabel,
@@ -3317,7 +4097,8 @@ function bind() {
       if (match) {
         S.flows.unshift(m);
         if (S.flows.length > 800) S.flows.pop();
-        scheduleFlowAdd(m);
+        // 「握手失败」视图只渲染诊断行，别把新流量插进 DOM
+        if (S.filter.status !== 'tls') scheduleFlowAdd(m);
         scheduleFacets();
       }
     } else if (msg.type === 'flow-update') {
@@ -3341,6 +4122,21 @@ function bind() {
         renderDetail();
       }
       scheduleFacets();
+    } else if (msg.type === 'tls-failure') {
+      upsertTlsFailure(msg.failure);
+    } else if (msg.type === 'tls-clear') {
+      S.tlsFailures = [];
+      syncTlsBadge();
+      scheduleRender();
+    } else if (msg.type === 'network-sim') {
+      // 别的窗口改了规则：同步角标和侧栏开关；正在输入时不重绘面板，避免打断编辑
+      S.networkSim = normalizeNetSim(msg.sim);
+      const panel = $('#modalNetwork');
+      if (!panel.hidden && !panel.querySelector('input:focus, select:focus')) renderNetPanel();
+      else {
+        syncNetBadge();
+        renderSide();
+      }
     } else if (msg.type === 'clear') {
       S.flows = [];
       scheduleRender();
@@ -3355,6 +4151,465 @@ function bind() {
     $('#dot').className = 'dot on';
     $('#connText').textContent = '监听中';
   };
+}
+
+/* -------------------------------------------- 精简交互层：功能不删，只收路径 */
+
+/** 顶栏「更多」与筛选「更多」互斥展开；force 可强制开 / 关 */
+function toggleMoreMenu(which, force) {
+  const top = which !== 'filter';
+  const menu = $(top ? '#moreMenu' : '#filterMoreMenu');
+  const trigger = $(top ? '#btnMore' : '#btnFilterMore');
+  const other = $(top ? '#filterMoreMenu' : '#moreMenu');
+  const otherTrigger = $(top ? '#btnFilterMore' : '#btnMore');
+  if (!menu) return;
+  const open = typeof force === 'boolean' ? force : menu.hidden;
+  if (open && other) {
+    other.hidden = true;
+    if (otherTrigger) otherTrigger.setAttribute('aria-expanded', 'false');
+  }
+  menu.hidden = !open;
+  if (trigger) trigger.setAttribute('aria-expanded', String(open));
+  if (open) closeCtxMenu();
+}
+
+function closeCtxMenu() {
+  const m = $('#ctxMenu');
+  if (m) m.hidden = true;
+}
+
+/** 关掉所有轻量浮层；返回是否真的关了东西（Esc 用来决定要不要继续关弹窗） */
+function closeAllPopups() {
+  let closed = false;
+  for (const [menuId, triggerId] of [
+    ['moreMenu', 'btnMore'],
+    ['filterMoreMenu', 'btnFilterMore'],
+  ]) {
+    const m = $('#' + menuId);
+    if (m && !m.hidden) {
+      m.hidden = true;
+      closed = true;
+      const t = $('#' + triggerId);
+      if (t) t.setAttribute('aria-expanded', 'false');
+    }
+  }
+  const ctx = $('#ctxMenu');
+  if (ctx && !ctx.hidden) {
+    ctx.hidden = true;
+    closed = true;
+  }
+  const cmd = $('#cmdBackdrop');
+  if (cmd && !cmd.hidden) {
+    cmd.hidden = true;
+    closed = true;
+  }
+  return closed;
+}
+
+function syncFilterMore() {
+  const active = !!(S.filter.mocked || S.filter.status === 'tls');
+  const dot = $('#filterMoreDot');
+  const trig = $('#btnFilterMore');
+  if (dot) dot.hidden = !active;
+  if (trig) trig.classList.toggle('on', active);
+}
+
+/** 三步连接向导：从「证书」进来直接高亮第 2 步，从「设置」进来常规打开 */
+function focusConnectStep(n) {
+  $$('.connect-step').forEach((s) => s.classList.remove('focus'));
+  const el = document.getElementById('connectStep' + n);
+  if (!el) return;
+  el.classList.add('focus');
+  el.scrollIntoView({ block: 'nearest' });
+  setTimeout(() => el.classList.remove('focus'), 2000);
+}
+async function openConnect(step) {
+  await openSettings();
+  if (step) focusConnectStep(step);
+}
+
+/* ------------------------------------------------------------ 就近网络模式 */
+
+function showCtxMenu(x, y, html) {
+  const m = $('#ctxMenu');
+  if (!m) return;
+  m.innerHTML = html;
+  m.hidden = false;
+  const w = m.offsetWidth || 200;
+  const h = m.offsetHeight || 180;
+  m.style.left = Math.max(8, Math.min(x, window.innerWidth - w - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, window.innerHeight - h - 8)) + 'px';
+}
+
+function openNetModeMenu(e, match, label) {
+  const cur = currentNetSim().rules.find(
+    (r) => r.match.toLowerCase() === String(match).toLowerCase()
+  );
+  const modes = [
+    ['normal', '正常'],
+    ['weak', '弱网'],
+    ['offline', '断网'],
+    ['timeout', '超时'],
+  ];
+  showCtxMenu(
+    e.clientX,
+    e.clientY,
+    `<div class="ctx-title">${esc(label)}</div>` +
+      modes
+        .map(
+          ([m, t]) =>
+            `<button class="ctx-item${(cur ? cur.mode : 'normal') === m ? ' on' : ''}" data-net-set="${m}" data-net-match="${esc(match)}">${netTr(t)}</button>`
+        )
+        .join('') +
+      `<div class="ctx-sep"></div><button class="ctx-item" data-cmd="network">${netTr('管理网络规则')}</button>`
+  );
+}
+
+async function setNetMode(match, mode) {
+  const sim = currentNetSim();
+  const t = String(match).toLowerCase();
+  sim.rules = sim.rules.filter((r) => r.match.toLowerCase() !== t);
+  if (mode !== 'normal') {
+    sim.rules.push({ id: 'r' + Date.now().toString(36), match, mode });
+  }
+  sim.enabled = true;
+  await putNetSim(sim, true);
+  if (!$('#modalNetwork').hidden) renderNetPanel();
+  toast(mode === 'normal' ? '已恢复正常网络' : '已切换为' + netTr(NET_MODES[mode] || mode));
+}
+
+function openFlowNetMenu(e, f) {
+  const hasApp = f.app && f.app !== '未知来源';
+  const name = hasApp ? f.app : f.host;
+  if (!name) return toast('这条请求没有可识别的应用 / 域名');
+  openNetModeMenu(e, (hasApp ? 'app:' : 'host:') + name, name);
+}
+
+function openRowMenu(x, y, id) {
+  const isTls = String(id).startsWith('tls:');
+  const f = isTls
+    ? S.tlsFailures.find((t) => 'tls:' + t.host === id)
+    : S.flows.find((v) => v.id === id);
+  if (!f) return;
+  const label = isTls ? f.host : (f.path || f.url || '').slice(0, 46);
+  const rows = [];
+  if (isTls) {
+    rows.push(
+      `<button class="ctx-item" data-block-host="${esc(f.host)}">${netTr('加入跳过解密')}</button>`
+    );
+  } else {
+    rows.push(
+      `<button class="ctx-item" data-cmd="replay" data-id="${esc(id)}">${netTr('重放')}</button>`,
+      `<button class="ctx-item" data-cmd="quickmock" data-id="${esc(id)}">${netTr('快速 Mock')}</button>`,
+      `<button class="ctx-item" data-cmd="curl" data-id="${esc(id)}">${netTr('复制 cURL')}</button>`,
+      `<button class="ctx-item" data-cmd="star" data-id="${esc(id)}">${netTr('收藏')}</button>`
+    );
+  }
+  rows.push(
+    '<div class="ctx-sep"></div>',
+    `<button class="ctx-item" data-cmd="network">${netTr('管理网络规则')}</button>`,
+    `<button class="ctx-item" data-cmd="export">${netTr('导出 HAR')}</button>`
+  );
+  showCtxMenu(x, y, `<div class="ctx-title">${esc(label)}</div>` + rows.join(''));
+}
+
+/* ---------------------------------------------------------------- 命令面板 */
+
+const CMD_ITEMS = [
+  {
+    label: '新建 Mock 规则', hint: '完整编辑器', keys: 'new rule mock 规则 新建',
+    run: () => { closeModals(); openRuleTab({}); },
+  },
+  {
+    label: '快速 Mock 当前请求', hint: '选中请求后', keys: 'quick mock 快速 当前请求',
+    run: () => { const f = S.selected; if (f && f.kind !== 'tls') openQuickMock(f); else toast('先选一条请求'); },
+  },
+  {
+    label: '查看规则列表', keys: 'rules list 规则 列表',
+    run: openRuleWorkspace,
+  },
+  {
+    label: '网络模拟', keys: 'network 网络 断网 弱网 超时', run: () => openNetwork(),
+  },
+  { label: '导出 HAR', keys: 'export har 导出', run: () => exportFlows('har') },
+  {
+    label: '连接向导 / 证书', keys: 'connect ca certificate 证书 连接 设置',
+    run: () => openConnect(0),
+  },
+  {
+    label: '高级设置', keys: 'settings 设置 高级',
+    run: () => { openConnect(0); const d = document.querySelector('.st-advanced'); if (d) d.open = true; },
+  },
+  { label: '切换主题', keys: 'theme dark light 主题 深色 浅色', run: () => $('#btnTheme').click() },
+  { label: '切换语言', keys: 'language english 中文 语言', run: () => $('#btnLang').click() },
+  { label: '抓包开 / 关', keys: 'capture 抓包 暂停', run: () => $('#capture').click() },
+  { label: '清空流量', keys: 'clear 清空', run: () => $('#btnClear').click() },
+];
+
+function cmdItems() {
+  const list = CMD_ITEMS.slice();
+  for (const a of (S.facets.apps || []).slice(0, 6)) {
+    const label = a.label || a.key;
+    list.push({
+      label: '断网：' + label, hint: '网络模拟', keys: 'offline 断网 ' + a.key + ' ' + label,
+      run: () => setNetMode('app:' + a.key, 'offline'),
+    });
+    list.push({
+      label: '弱网：' + label, hint: '网络模拟', keys: 'slow weak 弱网 ' + a.key + ' ' + label,
+      run: () => setNetMode('app:' + a.key, 'weak'),
+    });
+  }
+  return list;
+}
+
+let cmdResults = [];
+let cmdActive = 0;
+
+function renderCmdList(q) {
+  const box = $('#cmdList');
+  if (!box) return;
+  const term = String(q || '').trim().toLowerCase();
+  const words = term.split(/\s+/).filter(Boolean);
+  const cmds = cmdItems().filter((c) =>
+    words.every((w) => (c.keys + ' ' + c.label).toLowerCase().includes(w))
+  );
+  const flows = term
+    ? S.flows
+        .filter((f) => `${f.url} ${f.app || ''} ${f.method} ${f.host || ''}`.toLowerCase().includes(term))
+        .slice(0, 8)
+    : [];
+  cmdResults = [
+    ...cmds.map((c) => ({ type: 'cmd', ...c })),
+    ...flows.map((f) => ({
+      type: 'flow',
+      id: f.id,
+      label: `${f.method} ${(f.path || f.url || '').slice(0, 66)}`,
+      hint: `${f.status || '—'} · ${f.app || f.host || ''}`,
+    })),
+  ].slice(0, 14);
+  cmdActive = Math.min(cmdActive, Math.max(0, cmdResults.length - 1));
+  box.innerHTML = cmdResults.length
+    ? cmdResults
+        .map(
+          (r, i) =>
+            `<button class="cmd-item${i === cmdActive ? ' on' : ''}" data-cmd-index="${i}">` +
+            `<span class="cmd-kind">${r.type === 'flow' ? netTr('请求') : netTr('命令')}</span>` +
+            `<span class="cmd-label">${esc(r.label)}</span>` +
+            `<span class="cmd-hint">${esc(r.hint || '')}</span></button>`
+        )
+        .join('')
+    : `<div class="cmd-empty">${netTr('没有匹配的命令或请求')}</div>`;
+}
+
+function openCmdPalette() {
+  closeModals();
+  const bd = $('#cmdBackdrop');
+  bd.hidden = false;
+  $('#cmdInput').value = '';
+  cmdActive = 0;
+  renderCmdList('');
+  $('#cmdInput').focus();
+}
+
+async function runCmdIndex(i) {
+  const r = cmdResults[i];
+  if (!r) return;
+  $('#cmdBackdrop').hidden = true;
+  if (r.type === 'flow') {
+    await selectFlow(r.id);
+    const row = $(`.row[data-id="${r.id}"]`);
+    if (row) row.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  await r.run();
+}
+
+/* -------------------------------------------------------------- 快速 Mock */
+
+const QK = { rule: null };
+
+function openQuickMock(f) {
+  QK.rule = fromFlowRule(f);
+  $('#qkName').value = QK.rule.name || '';
+  $('#qkStatus').value = QK.rule.status || 200;
+  $('#qkDelay').value = QK.rule.delayMs || 0;
+  $('#qkBody').value = QK.rule.body || '';
+  $('#qkMatchLine').textContent = `匹配 ${f.method} ${f.host || ''}${QK.rule.urlMatch || ''}`;
+  openModal('#modalQuick');
+}
+
+function quickPayload() {
+  const r = QK.rule || {};
+  return {
+    name: $('#qkName').value.trim() || '未命名规则',
+    note: '',
+    enabled: true,
+    method: r.method || '*',
+    host: r.host || '',
+    urlMatch: r.urlMatch || '',
+    matchMode: 'contains',
+    status: Number($('#qkStatus').value) || 200,
+    delayMs: Math.max(0, Number($('#qkDelay').value) || 0),
+    headers: r.headers || { 'content-type': 'application/json; charset=utf-8' },
+    body: $('#qkBody').value,
+    bodyType: 'auto',
+  };
+}
+
+async function saveQuickMock() {
+  try {
+    await api('/api/rules', { method: 'POST', body: quickPayload() });
+    closeModals();
+    await loadRules();
+    toast('规则已保存，立即生效');
+  } catch (err) {
+    toast('保存失败: ' + err.message);
+  }
+}
+
+function quickToAdvanced() {
+  const p = quickPayload();
+  closeModals();
+  openRuleTab(p);
+}
+
+/* ------------------------------------------------ 规则工作区交互绑定 */
+
+function bindRuleWorkspace() {
+  const form = $('#modalRule');
+  if (form) {
+    // 捕获模式：Monaco 的隐藏 textarea 也会触发 input，一并算作「未保存」
+    form.addEventListener('input', markActiveTabDirty, true);
+    form.addEventListener('change', markActiveTabDirty, true);
+  }
+
+  // 标签条与侧栏「打开的编辑器」共用同一套就近操作
+  const onTabClick = (e) => {
+    const close = e.target.closest('[data-rt-close]');
+    if (close) { e.stopPropagation(); closeRuleTab(close.dataset.rtClose); return; }
+    if (e.target.closest('[data-rt-add]')) { newRuleInDir(S.rulesDir); return; }
+    const tab = e.target.closest('[data-rt-key]');
+    if (tab) activateRuleTab(tab.dataset.rtKey);
+  };
+  $('#ruleTabs').addEventListener('click', onTabClick);
+  $('#wsOpenList').addEventListener('click', onTabClick);
+
+  $('#wsActExplorer').addEventListener('click', () => {
+    const off = document.documentElement.dataset.wsSidebar === 'off';
+    document.documentElement.dataset.wsSidebar = off ? 'on' : 'off';
+    $('#wsActExplorer').classList.toggle('on', !!off);
+  });
+  $('#wsActSearch').addEventListener('click', () => $('#rulesSearch').focus());
+  $('#wsActNew').addEventListener('click', () => newRuleInDir(S.rulesDir));
+  $('#wsActCmd').addEventListener('click', openCmdPalette);
+  $('#wsActHelp').addEventListener('click', () => {
+    const d = $('#wsHelp');
+    if (d) d.open = !d.open;
+  });
+
+  $('#wsQuickNew').addEventListener('click', () => newRuleInDir(S.rulesDir));
+  $('#wsQuickImport').addEventListener('click', () => openJsonIO('import'));
+  $('#wsQuickExport').addEventListener('click', () => openJsonIO('export'));
+
+  // 目录 / 搜索变化时同步面包屑与状态栏
+  $('#rulesSearch').addEventListener('input', updateWorkspaceChrome);
+  const panel = $('#modalRules');
+  if (panel) panel.addEventListener('click', (e) => {
+    if (e.target.closest('#rtCrumbBack')) updateWorkspaceChrome();
+  });
+}
+
+/* ------------------------------------------------------------ 新交互绑定 */
+
+function bindSimpleUI() {
+  $('#btnMore').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMoreMenu('top');
+  });
+  $('#moreMenu').addEventListener('click', (e) => {
+    // 外观类按钮可以连续点，不收菜单；打开弹窗的类目点完即收
+    const keep = e.target.closest('#fontDown, #fontUp, #fontVal, #btnTheme, #btnLang');
+    if (!keep) toggleMoreMenu('top', false);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#moreWrap')) {
+      const m = $('#moreMenu');
+      if (m && !m.hidden) toggleMoreMenu('top', false);
+    }
+    if (!e.target.closest('#filterMoreWrap')) {
+      const m = $('#filterMoreMenu');
+      if (m && !m.hidden) toggleMoreMenu('filter', false);
+    }
+    if (!e.target.closest('#ctxMenu') && !e.target.closest('[data-net-app], #actNet, [data-op="menu"]')) closeCtxMenu();
+  });
+
+  $('#ctxMenu').addEventListener('click', async (e) => {
+    const rt = e.target.closest('[data-rt]');
+    if (rt) {
+      closeCtxMenu();
+      await treeOp(rt.dataset.rt, {
+        dataset: {
+          path: rt.dataset.rtPath,
+          type: rt.dataset.rtType,
+          id: rt.dataset.rtRuleId,
+          ruleId: rt.dataset.rtRuleId,
+        },
+      });
+      return;
+    }
+    const ns = e.target.closest('[data-net-set]');
+    if (ns) {
+      closeCtxMenu();
+      await setNetMode(ns.dataset.netMatch, ns.dataset.netSet);
+      return;
+    }
+    const cmd = e.target.closest('[data-cmd]');
+    if (cmd) {
+      const id = cmd.dataset.id;
+      const action = cmd.dataset.cmd;
+      closeCtxMenu();
+      if (id) await selectFlow(id);
+      const map = {
+        replay: '#actReplay',
+        quickmock: '#actMock',
+        curl: '#actCurl',
+        star: '#actStar',
+      };
+      if (map[action]) $(map[action])?.click();
+      else if (action === 'network') openNetwork();
+      else if (action === 'export') exportFlows('har');
+    }
+  });
+
+  $('#cmdInput').addEventListener('input', (e) => {
+    cmdActive = 0;
+    renderCmdList(e.target.value);
+  });
+  $('#cmdInput').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      cmdActive = Math.max(
+        0,
+        Math.min(cmdResults.length - 1, cmdActive + (e.key === 'ArrowDown' ? 1 : -1))
+      );
+      renderCmdList($('#cmdInput').value);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      runCmdIndex(cmdActive);
+    }
+  });
+  $('#cmdList').addEventListener('click', (e) => {
+    const it = e.target.closest('[data-cmd-index]');
+    if (it) runCmdIndex(Number(it.dataset.cmdIndex));
+  });
+  $('#cmdBackdrop').addEventListener('click', (e) => {
+    if (e.target === $('#cmdBackdrop')) $('#cmdBackdrop').hidden = true;
+  });
+
+  $('#qkSave').addEventListener('click', saveQuickMock);
+  $('#qkAdvanced').addEventListener('click', quickToAdvanced);
+  syncFilterMore();
 }
 
 async function init() {
@@ -3383,7 +4638,8 @@ async function init() {
   bind();
   await loadStatus();
   loadLocalProxy(); // 只读探测，不阻塞首屏
-  await loadFlows();
+  await loadTlsFailures();
+  await loadFlows(); // 内部 renderList 会一并渲染置顶的诊断行
   await loadRules();
   await Promise.all([loadFacets(), loadBookmarks()]);
   renderChips();

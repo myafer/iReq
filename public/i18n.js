@@ -28,6 +28,10 @@
     // 导出反馈：带条数 / 错误原因，必须整句翻译，不能让片段替换译成「已导出 N flows」
     [/^已导出 (\d+) 条$/, function (m, a) { return 'Exported ' + a + ' flows'; }],
     [/^导出失败: (.+)$/, function (m, a) { return 'Export failed: ' + a; }],
+    // 握手失败诊断行：次数是动态的，整句翻译才不会把数字后面译成中文
+    [/^(\d+) 次握手失败$/, function (m, a) { return a === '1' ? '1 handshake failure' : a + ' handshake failures'; }],
+    [/^已让 (.+) 走透传，重新打开 App 试试$/, function (m, a) { return a + ' will now be passed through; reopen the app and try again'; }],
+    [/^加入白名单失败: (.+)$/, function (m, a) { return 'Failed to add to allowlist: ' + a; }],
     // 进程识别诊断提示：运行时数字 + 片段替换可能已把「次」变成 requests，两种形态都收
     [/^lsof 快照\s+(\d+)\s*(?:次|requests)?\s*·\s*解析到\s+(\d+)\s*个连接\s*·\s*未命中\s+(\d+)$/,
       function (m, a, b, c) { return 'lsof snapshot: ' + a + ' refreshes · ' + b + ' connections resolved · ' + c + ' misses'; }],
@@ -39,6 +43,12 @@
     [/^(\d+) 行$/, function (m, a) { return a + ' lines'; }],
     [/^(\d+) 键$/, function (m, a) { return a + ' keys'; }],
     [/^(\d+) 个响应头$/, function (m, a) { return a + ' response headers'; }],
+    // 规则匹配测试器 / 编辑器状态：整句带变量，先翻译外层再递归翻译原因
+    [/^✓ 命中 · (.+)$/, function (m, a) { return '✓ Hit · ' + t(a, true); }],
+    [/^✕ 不命中 · (.+)$/, function (m, a) { return '✕ No hit · ' + t(a, true); }],
+    [/^URL 命中（(.+) 模式）$/, function (m, a) { return 'URL hit (' + a + ' mode)'; }],
+    [/^方法不匹配：规则限定 (.+)，测试用的是 (.+)$/, function (m, a, b) { return 'Method mismatch: rule limits to ' + a + ', test used ' + b; }],
+    [/^域名不匹配：规则限定 (.+)，测试解析到 (.+)$/, function (m, a, b) { return 'Host mismatch: rule limits to ' + a + ', test resolved to ' + b; }],
     [/^共 (\d+) 项$/, function (m, a) { return a + ' items total'; }],
     [/^共 (\d+) 条规则。可以整段复制、下载成文件，贴到别的机器上一键导入。$/,
       function (m, a) { return 'Total ' + a + ' rules. Copy the whole block, download it as a file, and paste it into another machine to import in one click.'; }],
@@ -49,6 +59,9 @@
     [/^✓ JSON 有效 · (\d+) 条规则$/, function (m, a) { return '✓ Valid JSON · ' + a + ' rules'; }],
     [/^自动 · (.+)$/, function (m, a) { return 'Auto · ' + a; }],
     [/^有新版 v(.+)$/, function (m, a) { return 'New version v' + a + ' available'; }],
+    // 网络模拟：规则名与挂起时长是动态的，整句翻译才不会夹中文
+    [/^已添加断网规则：(.+)$/, function (m, a) { return 'Added offline rule: ' + a; }],
+    [/^iReq 超时模拟：挂起 (\d+)ms 后断开$/, function (m, a) { return 'iReq timeout simulation: held for ' + a + 'ms, then disconnected'; }],
     [/^上次检查失败：(.+)（工具会自动走自家代理重试）$/, function (m, a) { return 'Last check failed: ' + a + ' (will retry automatically)'; }],
     [/^当前 v(.+)，最新 v(.+)，点「前往下载」获取。$/, function (m, a, b) { return 'Current v' + a + ', latest v' + b + '. Click "Download" to get it.'; }],
     [/^当前 v(.+)，已是最新。上次检查 (.+)。$/, function (m, a, b) { return 'Current v' + a + ', up to date. Last checked ' + b + '.'; }],
@@ -76,6 +89,26 @@
     [/^(.+) 项$/, function (m, a) { return a + ' items'; }],
     [/^(.+) 行$/, function (m, a) { return a + ' lines'; }],
     [/^(.+) 条$/, function (m, a) { return a + ' flows'; }],
+    // 精简交互层：就近网络模式 / 快速 Mock / 命令面板的动态文案（要排在通用「X：Y」之前）
+    [/^断网：(.+)$/, function (m, a) { return 'Offline: ' + a; }],
+    [/^弱网：(.+)$/, function (m, a) { return 'Slow: ' + a; }],
+    [/^匹配 (.+)$/, function (m, a) { return 'Match ' + a; }],
+    [/^已切换为(.+)$/, function (m, a) { return 'Switched to ' + a; }],
+    // 规则工作区：条数 / 目录 / 路径都是动态的，整句翻译才不会中英夹杂
+    [/^共 (\d+) 条规则，匹配 (\d+) 条$/, function (m, a, b) { return a + ' rules total, ' + b + ' matching'; }],
+    [/^共 (\d+) 条规则$/, function (m, a) { return a + ' rules total'; }],
+    [/^当前文件夹 (\d+) 条 \/ 共 (\d+) 条规则$/, function (m, a, b) { return a + ' in this folder / ' + b + ' total'; }],
+    [/^确定删除规则「(.+)」？不可恢复。$/, function (m, a) { return 'Delete rule "' + a + '"? This cannot be undone.'; }],
+    [/^扫描完成，但文件树读取失败：(.+)$/, function (m, a) { return 'Scan complete, but the file tree could not be read: ' + a; }],
+    [/^文件树读取失败：(.+)$/, function (m, a) { return 'Failed to read the file tree: ' + a; }],
+    [/^扫描失败：(.+)$/, function (m, a) { return 'Scan failed: ' + a; }],
+    [/^新建失败：(.+)$/, function (m, a) { return 'Create failed: ' + a; }],
+    [/^操作失败：(.+)$/, function (m, a) { return 'Operation failed: ' + a; }],
+    [/^移动失败：(.+)$/, function (m, a) { return 'Move failed: ' + a; }],
+    [/^已新建文件夹 (.+)$/, function (m, a) { return 'Created folder ' + a; }],
+    [/^已复制路径：(.+)$/, function (m, a) { return 'Copied path: ' + a; }],
+    [/^已移动到 (.+)$/, function (m, a) { return 'Moved to ' + a; }],
+    [/^正在编辑响应体（保存后写入 (.+)）$/, function (m, a) { return 'Editing response body (will be written to ' + a + ' on save)'; }],
     [/^(.+)：(.+)$/, function (m, a, b) { return EN[a] ? EN[a] + ': ' + b : m; }],
   ];
 

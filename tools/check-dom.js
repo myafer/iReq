@@ -24,7 +24,9 @@ const usedIds = new Set(
 // 动态拼接出来的选择器（如 `#filters button`）不在此列
 
 // 由 renderDetail() / 规则树面包屑动态插入的元素，不在 index.html 静态结构中
-const DYNAMIC = new Set(['tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'rtCrumbBack']);
+const DYNAMIC = new Set([
+  'tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'actNet', 'rtCrumbBack',
+]);
 
 const missing = [...usedIds].filter((id) => !htmlIds.has(id) && !DYNAMIC.has(id));
 const unused = [...htmlIds].filter((id) => !usedIds.has(id) && !/^(modal|search|list|detail)/.test(id));

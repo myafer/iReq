@@ -28,9 +28,15 @@ const SUITES = [
   ['分栏拖动', 'check-splitters.js'],
   ['界面字号', 'check-scale.js'],
   ['Mock 编辑器', 'check-mock-editor.js'],
+  ['规则工作区', 'check-rule-workspace.js'],
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
   ['代理地址', 'check-address.js'],
+  ['精简交互', 'check-simple-ui.js'],
+  // 会清空流量 / 诊断数据，必须排最后
+  ['握手失败列表', 'check-tls-list.js'],
+  // 会改 networkSim 配置并清空流量，放最末；脚本结束会自己恢复现场
+  ['网络模拟', 'check-network-sim.js'],
 ];
 /* e2e.js 是早期只打日志、不做断言的冒烟脚本，且仍按原生 textarea 填 #ruBody
  * （规则编辑器换成 Monaco 后该节点隐藏，必然超时）——暂不纳入一键回归，脚本保留，

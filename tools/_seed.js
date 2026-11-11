@@ -119,6 +119,13 @@ async function ensureCaptureOn() {
  * 让「域名」分组至少有两个可点项。
  */
 async function seedFlows() {
+  // 握手失败诊断行会置顶在列表里，UI 自检点「第一行」或断言「每行都有应用图标」时
+  // 会踩到它。造测试流量前先清掉，保证这批自检看到的列表全是 flow。
+  try {
+    await fetch(`${CONSOLE}/api/diagnostics`, { method: 'DELETE' });
+  } catch (_) {
+    /* 清不掉不影响造流量 */
+  }
   await ensureCaptureOn();
   const server = await startOrigin();
   const originPort = server.address().port;

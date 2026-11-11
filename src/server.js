@@ -13,6 +13,7 @@ const { replay } = require('./replay');
 const { summary } = require('./store');
 const { parseAppAliases } = require('./derive');
 const { savePersistedConfig } = require('./user-config');
+const { normalize: normalizeNetworkSim } = require('./network-sim');
 
 /**
  * 列出非回环 IPv4 地址及其网卡。控制台顶栏要展示「局域网 IP」并允许在多网卡间切换，
@@ -182,6 +183,12 @@ class ConsoleServer {
       this._broadcast({ type: 'flow-update', flow: summary(flow) })
     );
     this.store.on('clear', () => this._broadcast({ type: 'clear' }));
+    // 握手失败是「连接层」事件，不是 HTTP flow，单独推给控制台的列表诊断行
+    if (this.proxy && typeof this.proxy.on === 'function') {
+      this.proxy.on('tls-failure', (failure) =>
+        this._broadcast({ type: 'tls-failure', failure })
+      );
+    }
   }
 
   _broadcast(payload) {
@@ -262,6 +269,7 @@ class ConsoleServer {
             }
           : { supported: false, enabled: false, stats: {} },
         uaAppMap: this.config.uaAppMap || [],
+        networkSim: normalizeNetworkSim(this.config.networkSim),
         appIcons: this.appIcons ? this.appIcons.status() : { supported: false },
         version: require('../package.json').version,
         update: this.updater ? this.updater.status() : null,
@@ -346,6 +354,12 @@ class ConsoleServer {
         const result = await replay({ store: this.store, flow, overrides: body || {} });
         return this._json(res, 200, result);
       }
+    }
+
+    if (parts[1] === 'diagnostics' && method === 'DELETE') {
+      if (this.proxy && this.proxy.tlsFailures) this.proxy.tlsFailures.clear();
+      this._broadcast({ type: 'tls-clear' });
+      return this._json(res, 200, { ok: true });
     }
 
     if (parts[1] === 'diagnostics' && method === 'GET') {
@@ -493,6 +507,11 @@ class ConsoleServer {
         }
         if (Number(body.maxFlows) > 0) this.store.maxFlows = Number(body.maxFlows);
         if (typeof body.autoUpdate === 'boolean') this.config.autoUpdate = body.autoUpdate;
+        // 网络模拟是会话级的（不落盘，重启自动恢复），改动实时同步到所有已开窗口
+        if (body.networkSim !== undefined) {
+          this.config.networkSim = normalizeNetworkSim(body.networkSim);
+          this._broadcast({ type: 'network-sim', sim: this.config.networkSim });
+        }
         // 用户偏好落盘（目前只有更新开关），重启后保留
         if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
         return this._json(res, 200, this.config);

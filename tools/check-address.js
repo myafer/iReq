@@ -134,9 +134,9 @@ async function getStatus() {
 
     await page.click('#btnCa');
     await page.waitForTimeout(300);
-    ok('证书弹窗手机代理地址同步', (await text('#caMobileProxy')) === `127.0.0.1:${port}`, await text('#caMobileProxy'));
+    ok('连接向导手机代理地址同步', (await text('#caMobileProxy')) === `127.0.0.1:${port}`, await text('#caMobileProxy'));
     ok('证书安装页 URL 同步', (await text('#caUrl')) === `http://127.0.0.1:${port}/`, await text('#caUrl'));
-    await page.click('#modalCa [data-close]');
+    await page.click('#modalSettings [data-close]');
     await page.waitForTimeout(200);
 
     await page.click('#btnSettings');

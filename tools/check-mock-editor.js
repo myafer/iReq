@@ -28,6 +28,13 @@ const ok = (name, cond, extra = '') => {
   if (!cond) console.log('   ↳', extra);
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* 编辑器关闭后会回到规则工作区，面板可能已经开着；统一走这个入口，
+   避免去点被弹窗遮罩挡住的顶栏「规则」按钮。 */
+const ensureRulesPanel = async (page) => {
+  const open = await page.evaluate(() => !document.querySelector('#modalRules').hidden);
+  if (!open) await page.click('#btnRules');
+  await sleep(250);
+};
 
 const api = async (p, opts) => {
   const r = await fetch(API + p, opts);
@@ -76,7 +83,7 @@ function proxyGet(path) {
     ok('首屏预热 Monaco 成功（本地 vendor，无 CDN）', init.je && init.loaded && init.monaco, JSON.stringify(init));
 
     /* ---------------------------------------------------- 打开新建规则弹窗 */
-    await page.click('#btnRules');
+    await ensureRulesPanel(page);
     await page.click('#ruNew');
     await page.waitForSelector('#modalRule:not([hidden])');
     await sleep(500);
@@ -302,7 +309,7 @@ function proxyGet(path) {
     }
 
     /* --------------------------------------------- 规则列表：搜索/复制/排序 */
-    await page.click('#btnRules');
+    await ensureRulesPanel(page);
     await page.fill('#rulesSearch', RULE_NAME);
     await sleep(300);
     const found = await page.evaluate(() => document.querySelectorAll('#rulesList .rule').length);
@@ -364,9 +371,11 @@ function proxyGet(path) {
     ok('点击树中规则打开编辑弹窗', ruleModalOpen);
     await page.keyboard.press('Escape');
     await sleep(300);
+    ok('Escape 从规则编辑器返回规则工作区', await page.evaluate(() =>
+      !document.querySelector('#modalRules').hidden && document.querySelector('#modalRule').hidden));
 
-    // 拖拽规则到根目录（模拟移动）：先重开规则面板（上一步 Escape 把弹窗全关了，树不可见）
-    await page.click('#btnRules');
+    // 拖拽规则到根目录（模拟移动）：确保规则面板可见
+    await ensureRulesPanel(page);
     await sleep(500);
     const srcRow = page.locator(`#rulesTree .rt-rule[data-path="${rulePath}"]`);
     await srcRow.dragTo(page.locator('#rulesTree'));
@@ -385,7 +394,7 @@ function proxyGet(path) {
     await sleep(300);
 
     // 重开规则面板，继续列表相关断言
-    await page.click('#btnRules');
+    await ensureRulesPanel(page);
     await sleep(500);
     const firstCard = page.locator('#rulesList .rule').first();
     const tid = await firstCard.getAttribute('data-id');
@@ -521,7 +530,7 @@ function proxyGet(path) {
     }
 
     /* --------------------------------------------- 主题 / 字号与编辑器联动 */
-    await page.click('#btnRules');
+    await ensureRulesPanel(page);
     await page.click('#ruNew');
     await sleep(400);
     const lightBg = await page.evaluate(() => {

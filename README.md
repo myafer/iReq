@@ -19,12 +19,14 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
 | Exclude specific domains | Add certificate-pinned apps to "skip decryption domains" and pass them through as a raw tunnel |
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
-| Connection diagnostics | Domains with repeated TLS handshake failures are listed, with one-click "add to skip decryption" — the most common cause of an app "not connecting" |
+| Connection diagnostics | Domains with repeated TLS handshake failures are listed (filter under "More ▾"), with one-click "add to skip decryption" — the most common cause of an app "not connecting" |
 | Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
-| Export | One-click **HAR 1.2** export of the current filter (full headers / bodies + iReq app / device metadata); raw JSON available at `/api/export/json` |
+| Export | One-click **HAR 1.2** export of the current filter ("⋯ More → Export HAR", or ⌘K → "export"); full headers / bodies + iReq app / device metadata; raw JSON at `/api/export/json` |
 | Instant settings | Settings save automatically as you type (short debounce); closing the dialog flushes pending edits — no Save button to remember |
-| Bilingual UI | Defaults to your system language; switch between English and Simplified Chinese from the top bar or Settings — the choice is remembered |
+| Bilingual UI | Defaults to your system language; switch between English and Simplified Chinese under "⋯ More → Appearance" (or Advanced settings) — the choice is remembered |
 | Merged title bar (macOS) | The native title bar is hidden: the red/yellow/green buttons sit inside the app top bar, which also acts as the window drag handle. Windows and Linux keep the system title bar |
+| Streamlined interaction | Only Capture / Rules / Clear / ⋯ More stay in the top bar; low-frequency tools live in "⋯ More", actions appear next to the selected request (right-click / Network ▾), and ⌘K finds both requests and commands |
+| VSCode-style rule workspace | Activity bar + explorer + multi-tab editor + breadcrumb + status bar; clicking a rule opens a tab instead of a modal, several rules can stay open, unsaved edits survive tab switches, with ⌘S / ⌘W / ⌘1..9 |
 
 ## Quick start
 
@@ -95,8 +97,8 @@ Next to "Listening" in the top bar is the **LAN IP** (e.g. `192.168.1.23:9090`),
 - **Copy separately**: when setting a Wi-Fi proxy on iOS / Android you fill in "Server" and "Port" separately; just tap the IP or port inside the pill, no need to pick them out of one whole string.
 - **Copy all**: tap `⧉` on the right to get `192.168.1.23:9090`.
 - **Switch address**: tap `▾` to open a menu listing each interface's LAN address (with the interface name, e.g. `LAN · en1`) and `127.0.0.1 (loopback)`; the menu also has three clearly labeled "Copy IP / Copy port / Copy full address" buttons. Pick the LAN IP to capture a phone, `127.0.0.1` to capture this Mac itself. The choice is stored in localStorage and persists across reloads.
-- The top bar, the empty-state hint, the install-page address in the certificate dialog, and the settings panel all share the same address source — switch once and everything syncs.
-- On narrow screens (< 900px) the top-bar pill is hidden, but "Settings › Proxy address" still has the same three copy buttons.
+- The top bar, the empty-state hint, the install-page address in the connection guide, and step 1 of the guide all share the same address source — switch once and everything syncs.
+- On narrow screens (< 900px) the top-bar pill is hidden, but step 1 of the connection guide still has the same three copy buttons.
 - The server's `GET /api/status` returns `lan` (array of IPs) and `lanInfo` (including the `iface` interface name, private ranges first), ready to use in scripts.
 
 ## Capturing local machine traffic (different from a phone)
@@ -106,7 +108,7 @@ so you must point the "system proxy" at iReq, otherwise the console will only sh
 The `HTTP_PROXY` environment variable only affects command-line programs like curl / node and has no effect on Safari, Chrome, or desktop apps
 — that's exactly why "the list is full of other IPs but never `127.0.0.1`".
 
-Easiest: in the console's top-right "Settings › Local capture" click **Take over local**, or click the `Local traffic not captured` shortcut in the top bar.
+Easiest: open "⋯ More → Certificate & connection" and click **Enable local capture** in step 3, or click the `Local traffic not captured` shortcut in the top bar.
 Equivalent command-line operations:
 
 ```bash
@@ -222,8 +224,10 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 
 ## Console
 
-- **Top-bar proxy address**: LAN IP by default, IP / port / whole string each copiable, ▾ switches multiple interfaces and local loopback (see above)
+- **Top bar**: only "Capture / Rules / Clear / ⋯ More" stay visible; certificates, settings, export, network simulation, theme, language and font size live in "⋯ More". The address pill shows the LAN IP by default, with IP / port / full-string copy and ▾ to switch interfaces (see above)
 - **List**: method, path, domain, status, duration; `MOCK` / `REPLAY` / `WS` / `Passthrough` badges distinguish the source
+- **Handshake failures**: when a client rejects the root CA (certificate pinning) or the port is not HTTP, that host appears as a red diagnostic row at the top of the list in real time — aggregated per host with a failure count, so retries never flood the list. The "More ▾ → Handshake failures" filter isolates them; opening a row shows the reason and a one-click "Skip decryption" action. These are connection-level events, not flows: they stay out of HAR exports and are cleared together with the list.
+- **Network simulation** ("⋯ More → Network Simulation", or the sidebar app dot / "Network ▾" in details / right-click a row): match by app / host / IP (or `*` for everything) and apply **Offline** (connection reset at CONNECT / request time), **Timeout** (no response until the deadline), or **Slow** (extra latency + response throttled to a target KB/s; passthrough tunnels throttled at the byte level). Rules are session-only — never written to disk, cleared on restart. Clicking the dot next to a sidebar app switches Normal / Slow / Offline / Timeout in place; the badge shows the active rule count, and changes sync to every window over SSE. Simulated requests are recorded as flows with a mode badge.
 - **Details**: four tabs — Overview / Request / Response / Raw — with auto-formatted, syntax-highlighted JSON;
   both request and response bodies have a "Structured / Raw / Expand all / Collapse all / Copy" toolbar: the structured view merges
   formatting and tree into one — expanded shows indented, colored JSON, clicking ▸ collapses a level into a `{ … N keys }` summary;
@@ -233,9 +237,9 @@ Every item in the sidebar's "App" group, the second line of the request list, an
   both copiable / **downloadable** (filename taken from the path with an extension added by type)
 - **Header block**: request / response headers highlight on hover line by line, **click a line to copy** `name: value`; key headers (host / content-type / authorization / cookie, etc.) are color-hinted; the block toolbar has "Copy all" (one `name: value` per line) / "Copy JSON" (the whole header object)
 - **Raw tab**: request / response messages with **line numbers**, click any line to copy it; toolbar "Copy all" (incl. body) / "Status line and headers only"; binary bodies are omitted in raw view with a hint pointing elsewhere
-- **Actions**: replay, Mock this request, copy cURL, copy response body
-- **Export** (top bar): downloads the currently filtered flows as a HAR 1.2 file, including complete request / response headers and bodies; no filter means all in-memory flows. Dialogs keep keyboard focus inside them and restore it on close.
-- **Rules**: rich editor (see below) — add / edit / delete, enable / disable, reorder, search, copy, JSON import / export
+- **Actions**: the detail bar has Replay / Mock this request / Network ▾ / Bookmark / Copy cURL; right-clicking a list row opens the same menu, and TLS diagnostic rows offer "Skip decryption".
+- **Export** ("⋯ More → Export HAR", or ⌘K → "export"): downloads the currently filtered flows as a HAR 1.2 file, including complete request / response headers and bodies; no filter means all in-memory flows. Dialogs keep keyboard focus inside them and restore it on close.
+- **Rules**: the top-bar "Rules" button opens a **VSCode-style full-screen workspace** (folder tree on the left, multi-tab editor on the right); "Mock this request" opens **Quick Mock** first (name / status / delay / body) and "Full editor" for the rich editor below — add / edit / delete, enable / disable, search, copy, JSON import / export, several tabs open at once
 - **JSON editor**: built-in **Monaco Editor 0.52.2** (the same engine as VS Code), vendored locally with no CDN dependency,
   works offline; syntax highlighting, error squiggles (real JSON worker validation), bracket matching, code folding, autocomplete,
   format / minify / fullscreen, light/dark theme and UI font size in sync; falls back to a native textarea on load failure with no feature loss
@@ -248,16 +252,24 @@ Every item in the sidebar's "App" group, the second line of the request list, an
   `iOS 127.0.0.1` / `Unknown 127.0.0.1` as new requests arrive. Remote devices are grouped by IP individually,
   the platform name is the most frequent one seen for that device, and with no UA only the IP is shown (no "Unknown").
   Clicking "Local" filters all local sources; details show "Local · original IP", and specific IPs in old bookmarks still work
-- **Search**: URL / method / status code / app / device IP / "Local"; filters: errors, JSON, Mock
-- **Font size**: top-bar `A− / A+` steps by 5% (85%–160%), click the middle percentage to reset to 100%, choice stored in localStorage
+- **Search**: URL / method / status code / app / device IP / "Local"; "All / Error / JSON" stay visible, Mock and Handshake failures live under "More ▾" (the trigger gets a dot when one is active)
+- **Font size**: under "⋯ More → Appearance", `A− / A+` steps by 5% (85%–160%), click the middle percentage to reset to 100%, choice stored in localStorage
 - **Column widths**: the two vertical dividers between the grouped sidebar / request list / details can both be dragged left/right (turn blue on hover with a visible grip),
   double-click to reset, after focusing use `← →` to nudge 16px (Shift 48px), `Home` to reset; widths stored in localStorage,
   with upper/lower bounds, re-clamped when the window shrinks, handles auto-hidden in the stacked layout on narrow screens
-- Shortcuts: `⌘K` search, `↑ ↓` switch requests, `Esc` close dialogs; light/dark toggle in the top-right
+- Shortcuts: `⌘K` opens the **command palette** (search requests and run actions directly, e.g. "offline WeChat", "new rule", "export HAR"), `↑ ↓` switch requests, `Esc` closes overlays; theme / language live under "⋯ More → Appearance"
 
-## Mock rule editor
+## VSCode-style rule workspace
 
-Click "Rules" → "+ New rule" in the top bar, or click "Mock this request" in request details (which pre-fills the real response body).
+Click "Rules" to open a **full-screen workspace** — no more bouncing between a list and a modal dialog:
+
+- **Activity bar** (thin strip on the far left): toggle the explorer, search, new rule, command palette, help.
+- **Explorer**: the real `data/rules/` folder tree, a search box, and an "Open Editors" section. Clicking a folder filters the list on the right to that folder (including subfolders); search narrows both the tree and the list. `*.body.*` response files are collapsed by default — `≡` in the toolbar reveals them. Tree rows are keyboard-accessible (`↑ ↓` / `→ ←` / `Enter` / `F2` / `Delete`); right-click or the row's `⋯` opens a context menu (new rule / subfolder here, rename, copy path, delete).
+- **Editor area**: clicking a rule opens a **tab** on the right while the tree stays visible. Multiple tabs can stay open; unsaved edits are kept in memory when you switch, shown as an orange dot, and confirmed before closing. A breadcrumb sits above the editor and a status bar below (rule count / current folder / tab count / save state).
+- **Welcome page**: with no tabs open, shows quick actions (new / import / export) and the full rule card list.
+- **Shortcuts**: `⌘S` save, `⌘W` close the current tab, `⌘1..9` switch tabs, `⌘K` command palette, `Esc` close the current tab (or leave the workspace when none remain).
+
+Click "+ New rule" or the `＋` on the tab bar for the full editor; "Mock this request" in request details opens **Quick Mock** first (pre-filled with the real response body, only name / status / delay / body), and "Full editor" carries what you typed into the rich interface below. Saving or closing a tab leaves you in the workspace at the same folder.
 
 | Tab | What it does |
 | --- | --- |
@@ -266,13 +278,13 @@ Click "Rules" → "+ New rule" in the top bar, or click "Mock this request" in r
 | ③ Response body | Monaco editor with a toolbar for format / minify / validate / copy / import file / clear / fullscreen; a bottom status bar shows whether the JSON is valid, the error line number, byte count, cursor line/column; below the editor is a "My Templates" popover: save / select / delete **custom templates** (persisted in localStorage, same-name overwrite), one click replaces the response body and syncs the status code |
 | ④ Preview / test | A preview of the actual HTTP message the client receives (status line + headers + colored body), a collapsible JSON structure tree, expand all / collapse all |
 
-`note` and `bodyType` are stored with the rule in `data/rules.json`.
+`note` and `bodyType` are stored with the rule in `data/rules/**/*.rule.json`; the response body lives in a matching `*.body.<ext>` file beside it.
 
 - The response body **doesn't have to be valid JSON**: switch to "Plain text / HTML / XML" to skip validation and save any content; in JSON mode a syntax error blocks saving and jumps to the error line.
-- The rule list supports search, duplicate, move up / down to change priority, enable / disable, edit, delete; **Export JSON** can be copied / downloaded,
-  **Import JSON** pastes a rule array and requires two confirmations before overwriting (to avoid accidents).
+- The rule workspace supports search, duplicate, enable / disable, edit, delete (all deletes ask for confirmation); **Export JSON** can be copied / downloaded,
+  **Import JSON** pastes a rule array and requires two confirmations before overwriting (to avoid accidents). Match priority follows the file tree order (shallow first, then by name), so renaming or moving a file changes it.
 - Shortcuts: `⌘⇧F` format in the response body, `⌘F` find; in fullscreen `Esc` exits fullscreen first.
-- "Save as copy" and "Delete rule" appear only when editing an existing rule; rules opened via "Mock this request" default to path-contains matching.
+- "Save as copy" and "Delete rule" appear only when editing an existing rule; rules opened via "Mock this request" (Quick Mock → Full editor) default to path-contains matching.
 
 ## Some design trade-offs
 
@@ -307,7 +319,8 @@ src/process-map.js  macOS: TCP source port → PID → real app name (lsof snaps
 src/app-icon.js     macOS: app name → .app → real icon PNG (plutil + sips, cache + path whitelist)
 src/local-address.js Local address normalization (loopback / ::ffff: / all interface IPs → local)
 src/bookmarks.js    Bookmark storage (data/bookmarks.json)
-src/rules.js        Mock rule matching engine (data/rules.json)
+src/rules.js        Mock rule matching engine (data/rules/**/*.rule.json + *.body.*)
+src/network-sim.js  Network simulation: rule normalize/match + byte-rate throttling Transform
 src/store.js        Traffic storage (in-memory ring + JSONL persistence + SSE events)
 src/replay.js       Replay
 src/server.js       REST API + static pages
@@ -327,6 +340,7 @@ GET    /api/facets              { flows, hosts, apps, devices, routes }
 GET    /api/app-icons?names=A,B   Batch-find real icons by app name → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      Icon file (only hash filenames inside data/app-icons/)
 GET    /api/diagnostics         { tlsFailures: [{host, count, error}], tunneled, stats }
+DELETE /api/diagnostics         Clear recorded handshake failures
 GET    /api/system-proxy        Local system proxy status + copiable on/off commands + caTrust/safeMode
 POST   /api/system-proxy        { enabled: true|false, service? } take over / release
 GET    /api/ca-trust            Local root CA trust status + copiable trust command (with 30s cache)
@@ -341,8 +355,9 @@ PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
 GET    /api/config  PUT /api/config   { capture, passthrough: [], mitmPorts: [443], maxFlows,
-                                        processMap: true, uaAppMapText: "okhttp=MyApp" }
-GET    /api/events                SSE: flow / flow-update / clear
+                                        processMap: true, uaAppMapText: "okhttp=MyApp",
+                                        networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
+GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-clear / network-sim
                                   (flow-update is the async local process name backfill, only app/appSource/process change)
 GET    /ca.pem                    Root CA (served by both the console and the proxy port)
 ```
@@ -376,9 +391,10 @@ node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, 
 node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
 node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
 node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
-node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (60 items)
+node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)
+node tools/check-rule-workspace.js # activity bar / explorer / multi-tab / unsaved snapshots / shortcuts / breadcrumb / status bar / English UI (28 items)
 node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
-node tools/verify-ui.js          # top-bar buttons / dialogs / certificate address
+node tools/verify-ui.js          # top-bar buttons / dialogs / connection guide address
 node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)
 node tools/check-local-ui.js     # console "Local capture" button click round-trip
 node tools/check-local-traffic.js# end-to-end: local browser requests really enter the list (clientIp=127.0.0.1)
@@ -386,6 +402,9 @@ node tools/check-app-name.js     # real local process name / HTTPS decryption / 
 node tools/check-app-icon.js     # local .app icon extraction / PNG cache / API / three-layer fallback / rendering / no flicker on select (56 items)
 node tools/check-ca-trust.js     # trust detection / safe mode branch / passthrough trace / guidance UI (42 items)
 node tools/check-address.js      # top-bar default LAN IP / three copy ways / switch persistence / sync everywhere / dark and narrow screens (35 items)
+node tools/check-tls-list.js     # handshake failures in the main list: SSE / aggregation / filter / one-click passthrough (14 items)
+node tools/check-network-sim.js  # offline / slow / timeout on HTTP + CONNECT, rule matching, panel, sidebar mode switch, SSE, EN mode (33 items)
+node tools/check-simple-ui.js    # top-bar More / filter More / connection guide / Quick Mock / ⌘K palette / context menus (26 items)
 ```
 
 `check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;
