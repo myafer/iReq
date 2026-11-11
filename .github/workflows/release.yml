@@ -143,10 +143,11 @@ jobs:
           else
             printf 'Release %s\n' "$TAG" > "$NOTES"
           fi
-          if [ -n "$PREV" ]; then
+          # tag message 里若已自带 Full Changelog 链接就不再追加，避免重复
+          if [ -n "$PREV" ] && ! grep -q 'Full Changelog' "$NOTES"; then
             printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
               "$GITHUB_REPOSITORY" "$PREV" "$TAG" >> "$NOTES"
-          else
+          elif [ -z "$PREV" ] && ! grep -q 'Full Changelog' "$NOTES"; then
             printf '\n**Full Changelog**: https://github.com/%s/commits/%s\n' \
               "$GITHUB_REPOSITORY" "$TAG" >> "$NOTES"
           fi
