@@ -127,7 +127,16 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
           PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
-          MSG="$(git for-each-ref --format='%(contents)' "refs/tags/${TAG}")"
+          # checkout 在 tag push 上会把 annotated tag 解引用成 lightweight tag，
+          # 此时 git for-each-ref %(contents) 取到的是 commit message 而非 tag 说明。
+          # 直接读 GitHub API 的 tag object，才能拿到发版时写进 tag 的 changelog。
+          REF_TYPE="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.type')"
+          REF_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
+          if [ "$REF_TYPE" = "tag" ]; then
+            MSG="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${REF_SHA}" --jq '.message')"
+          else
+            MSG=""
+          fi
           NOTES="$(mktemp)"
           if [ -n "$(printf '%s' "$MSG" | tr -d '[:space:]')" ]; then
             printf '%s\n' "$MSG" > "$NOTES"
