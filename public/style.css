@@ -4366,7 +4366,17 @@ html[data-ws-sidebar="off"] .ws-sidebar { display: none; }
   .ws-recent .rules { max-height: none; }
 }
 
-html[data-electron-titlebar='hidden'] .ws-titlebar { -webkit-app-region: drag; }
+/* Electron 隐藏标题栏时，系统红绿灯浮在工作区标题栏上方：
+   假圆点必须让位（隐藏），标题从红绿灯右侧起排，留位与主顶栏一致 */
+html[data-electron-titlebar='hidden'] .ws-titlebar {
+  -webkit-app-region: drag;
+  padding-left: 86px;
+}
+html[data-electron-titlebar='hidden'] .ws-dots { display: none; }
 html[data-electron-titlebar='hidden'] .ws-titlebar button,
 html[data-electron-titlebar='hidden'] .ws-body,
 html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; }
+
+@media (max-width: 1100px) {
+  html[data-electron-titlebar='hidden'] .ws-titlebar { padding-left: 76px; }
+}
