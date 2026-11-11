@@ -4,7 +4,7 @@
  * 本机系统代理接管。
  *
  * HTTP 代理不是透明的：手机要手动填 Wi-Fi 代理，本机也必须设置「系统代理」，
- * 否则浏览器 / GUI App 的流量根本不会经过 9090（这正是 Charles / Reqable 启动时
+ * 否则浏览器 / GUI App 的流量根本不会经过 9090（这正是 Charles / 同类抓包工具启动时
  * 替你做的那一步）。环境变量 HTTP_PROXY 只影响 curl / node 这类 CLI，对 Safari、
  * Chrome、桌面 App 无效。
  *

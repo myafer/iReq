@@ -31,6 +31,7 @@ const SUITES = [
   ['规则工作区', 'check-rule-workspace.js'],
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
+  ['证书档案与一键信任', 'check-ca-persist.js'],
   ['代理地址', 'check-address.js'],
   ['精简交互', 'check-simple-ui.js'],
   // 会清空流量 / 诊断数据，必须排最后

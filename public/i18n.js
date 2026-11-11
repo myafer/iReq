@@ -25,6 +25,14 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 根证书状态卡 / 一键安装 / .p12 备份（带变量，必须整句翻译）
+    [/^自动安装未完成：(.+)$/, function (m, a) { return 'Automatic install incomplete: ' + a; }],
+    [/^安装失败: (.+)$/, function (m, a) { return 'Install failed: ' + a; }],
+    [/^导入失败: (.+)$/, function (m, a) { return 'Import failed: ' + a; }],
+    [/^已导出 \.p12，导入密码：(.+)$/, function (m, a) { return 'Exported .p12. Import password: ' + a; }],
+    [/^仍未检测到信任：(.+)$/, function (m, a) { return 'Still not trusted: ' + a; }],
+    [/^钥匙串里还有 (\d+) 张旧根证书，本机当前用的是上面这份档案。$/,
+      function (m, a) { return 'The keychain still holds ' + a + ' old root CA(s); this machine uses the archive above.'; }],
     // 导出反馈：带条数 / 错误原因，必须整句翻译，不能让片段替换译成「已导出 N flows」
     [/^已导出 (\d+) 条$/, function (m, a) { return 'Exported ' + a + ' flows'; }],
     [/^导出失败: (.+)$/, function (m, a) { return 'Export failed: ' + a; }],

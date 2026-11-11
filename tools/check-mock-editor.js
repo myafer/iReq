@@ -322,9 +322,10 @@ function proxyGet(path) {
     await sleep(200);
 
     /* --------------------------------------------- 规则文件树（data/rules/） */
-    // data 目录从服务端状态里推导（caPath = <dataDir>/ca/reqlite-ca.pem）
+    // CA 目录已与 dataDir 解耦（固定在 ~/.ireq/ca），不能再从 caPath 反推数据目录。
+    // 服务端 /api/status 直接给 dataDir；老版本服务端没有该字段时才回退到旧推导。
     const stNow = await api('/api/status');
-    const dataDir = path.dirname(path.dirname(stNow.caPath || ''));
+    const dataDir = stNow.dataDir || path.dirname(path.dirname(stNow.caPath || ''));
     const rulesRoot = path.join(dataDir, 'rules');
 
     await page.click('#rtRefresh');

@@ -4,14 +4,14 @@
 
 轻量、跨平台的 HTTP(S) **抓包 / Mock / 重放** 工具。一个 `npm install`，一条命令起服务，浏览器里操作。
 
-> 定位：不想为了调一个接口去开 Charles / Reqable 全家桶时用的东西。跨 macOS / Windows / Linux，
+> 定位：不想为了调一个接口去开 Charles 之类的全家桶工具时用的东西。跨 macOS / Windows / Linux，
 > 内核纯 Node 实现、无原生依赖；可选桌面版用 Electron 把同一内核装进窗口。
 
 ## 能做什么
 
 | 能力 | 说明 |
 | --- | --- |
-| HTTPS 解密 | 首次运行自建根证书，按域名动态签发叶子证书（397 天有效期 + SAN，符合 Apple 要求） |
+| HTTPS 解密 | 根证书固定在 `~/.ireq/ca`（首次生成后跨版本复用），按域名动态签发叶子证书（397 天有效期 + SAN，符合 Apple 要求） |
 | 抓包 | 明文 HTTP 与解密后的 HTTPS 全量记录：方法、URL、头、body、状态、耗时、大小 |
 | 实时看 | 控制台走 SSE 推送，请求完成即时出现在列表里；新请求只插入一行，不整表重绘 |
 | 分组边栏 | 自动聚合 **设备 / 应用 / 域名 / 接口结构**，点一下即筛选；可收藏常用筛选为书签 |
@@ -40,14 +40,21 @@ npm start            # 代理 9090，控制台 http://127.0.0.1:9091
 不想装 Node？到 [Releases](https://github.com/myafer/iReq/releases) 下载对应平台的单文件可执行程序
 （macOS arm64/x64、Linux x64/arm64、Windows x64，推送 `v*` tag 时 CI 自动打包），运行即起服务。
 
-首次运行会在 `data/ca/` 生成根证书，然后：
+根证书与私钥首次运行时生成，之后**固定存放在 `~/.ireq/ca/`**：`ca-archive.json` 是带 SHA-1 指纹的档案，
+`reqlite-ca.pem` / `.key` 是兼容下载与手动安装的散文件。桌面版、CLI 单文件版、源码版共用同一份，
+**覆盖安装、升级、换形态都不会换证书，也就不用重新信任**；旧版放在 `data/ca/` 的证书会在首次启动时自动迁移过来。
 
-**macOS（本机调试）**
+**macOS（本机调试）**：最省事的是打开「⋯ 更多 → 证书与连接」，在第 2 步点 **一键安装并信任**，
+系统会弹一次授权确认，装完盾牌变绿。自动安装失败时展开「本机信任命令与状态」手动执行：
 
 ```bash
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain data/ca/reqlite-ca.pem
+security add-trusted-cert -r trustRoot \
+  -k "$HOME/Library/Keychains/login.keychain-db" \
+  "$HOME/.ireq/ca/reqlite-ca.pem"
 ```
+
+需要备份 / 迁移 / 让多台机器共用同一张 CA：在同一页点 **导出 .p12 备份**（含私钥，页面会显示导入密码），
+换机器后点 **导入 .p12** 即可，不用重新给手机装证书。
 
 **iOS**
 
@@ -60,7 +67,7 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 > 如果浏览器把地址跳成了 `https://`，会看到「证书错误」——那是**还没装证书**导致的，不是地址写错。
 > 两种解法：手动把地址栏改回 `http://`；或临时关掉 Wi-Fi 代理再打开。实在不行把
-> `data/ca/reqlite-ca.pem` 隔空投送 / 邮件发到手机上点开安装。
+> `~/.ireq/ca/reqlite-ca.pem` 隔空投送 / 邮件发到手机上点开安装。
 
 **Android**：同样下载证书 → 设置 › 安全 › 加密与凭据 › 安装证书 › CA 证书。
 Android 7+ 的 App 默认只信任系统证书，抓自家 App 请用 debug 包配 `networkSecurityConfig`。
@@ -78,7 +85,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ && sudo update-ca-certi
 
 ```bash
 iReq start [-p 9090] [-u 9091] [-b 0.0.0.0] [--ui-host 127.0.0.1]
-              [-d ./data] [--no-persist] [--no-ui] [--passthrough a.com,b.com] [--max-flows 2000]
+              [-d ./data] [--ca-dir ~/.ireq/ca] [--no-persist] [--no-ui] [--passthrough a.com,b.com] [--max-flows 2000]
 iReq ca            # 打印根证书路径
 iReq ca --print    # 输出 PEM
 iReq local status  # 查看本机系统代理
@@ -123,7 +130,7 @@ iReq local off        # 释放，精确还原原始配置
 `iReq local off`。macOS 走 `networksetup`（实测无需 sudo）；Windows / Linux 不自动改系统设置，
 在设置面板里有可复制的命令。
 
-抓 HTTPS 还要把根证书**加进本机钥匙串并设为「始终信任」**，这一步比看上去容易漏，见下一节。
+抓 HTTPS 还要把根证书**加进本机钥匙串并设为「始终信任」**，桌面版「证书与连接」里点一次「一键安装并信任」即可，这一步比看上去容易漏，见下一节。
 仍看不到就展开设置面板里的「手动设置 / 还是看不到？」：Chrome 的 QUIC(HTTP/3) 会绕过代理、
 证书固定的 App 会握手失败、命令行程序需显式设 `HTTP_PROXY / HTTPS_PROXY=http://127.0.0.1:9090`。
 
@@ -137,26 +144,29 @@ iReq local off        # 释放，精确还原原始配置
 | 不报错了，但列表里一条请求都没有 | 系统代理没开 / 服务没在跑 / 或命中了「安全模式」把 HTTPS 原样透传了 |
 
 **「装了证书」不等于「信任了证书」**。双击 `.pem` 导入钥匙串只是「安装」，
-信任设置仍是默认的「使用系统默认值」，Chrome 照样不认。装过 Reqable / Proxyman 的 CA 也没用 ——
-它们的公钥和 iReq 不是同一张证书。一次做完安装 + 信任（用户域，通常免 sudo）：
+信任设置仍是默认的「使用系统默认值」，Chrome 照样不认。装过其他抓包工具的 CA 也没用 ——
+它们的公钥和 iReq 不是同一张证书。桌面版「证书与连接」里的 **一键安装并信任** 会把这一步自动做完
+（用户域，通常免 sudo，系统弹一次授权确认）；失败时才需要手动执行：
 
 ```bash
 security add-trusted-cert -r trustRoot \
   -k "$HOME/Library/Keychains/login.keychain-db" \
-  "/绝对路径/iReq/data/ca/reqlite-ca.pem"
+  "$HOME/.ireq/ca/reqlite-ca.pem"
 ```
 
-控制台「设置 › 本机抓包」会显示真实状态和这条命令（路径已填好），点「复制信任命令」即可；
-执行完点「重新检测」。命令行核验（退出码 0 才是真的被信任）：
+状态卡的盾牌会显示「已信任 / 未信任」、CA 指纹与档案路径；「设置 › 本机抓包」也会显示同样的状态
+和这条命令（路径已填好），点「复制信任命令」即可，执行完点「重新检测」。
+信任结论会按 CA 指纹落盘到 `~/.ireq/ca/trust-state.json`，启动时沿用，不会因为一次钥匙串抖动
+就让你重装证书。命令行核验（退出码 0 才是真的被信任）：
 
 ```bash
-security verify-cert -c /绝对路径/iReq/data/ca/reqlite-ca.pem -p basic -L; echo $?
+security verify-cert -c "$HOME/.ireq/ca/reqlite-ca.pem" -p basic -L; echo $?
 security dump-trust-settings | grep -A2 'iReq'
 ```
 
 ⚠️ **别给 `add-trusted-cert` 加 `-p ssl`**：那会生成「仅 SSL 策略」的受限信任
 （`Number of trust settings : 1 / Policy OID: SSL`），`verify-cert` 仍判未信任，浏览器照样报错。
-Reqable CA 那种 `Number of trust settings : 0`（无策略约束）才是对的。
+正确安装的 CA 那种 `Number of trust settings : 0`（无策略约束）才是对的。
 
 **安全模式**：工具启动时用 `verify-cert` 检测信任状态。如果发现「未信任 + 系统代理由本工具接管」，
 本机回环地址的 443 会**自动原样透传**而不是解密 —— 网站照常打开，只是看不到 HTTPS 明文；
@@ -188,7 +198,7 @@ HTTPS 解密后 `req.socket` 变成 `TLSSocket`，所以 CONNECT 时把原始 so
 `flow-update` 自动换成真实进程名；回填会追加一条轻量 JSONL patch，重启后不会退化成「OkHttp 4」。
 
 **手机为什么还是没有 App 名？** HTTP 代理只看得到设备 IP，拿不到对端的进程/包名，这是协议层面的限制
-（Reqable 在手机代理模式下同样只能靠 UA，或靠设备端 VPN 配合）。解决办法是在
+（其他桌面代理在手机代理模式下同样只能靠 UA，或靠设备端 VPN 配合）。解决办法是在
 **设置 › 应用识别 › UA → 应用名** 里写映射，每行一条：
 
 ```
@@ -291,8 +301,8 @@ CFNetwork=我的 iOS 客户端
 - **抓包开关与 Mock 解耦**：关掉「抓包」只是不记录，规则照样生效，方便只看行为不看日志。
 - **Body 上限 2MB**：超出截断并打标，避免一条大文件响应把内存吃穿。
 - **上游证书默认不校验**（`rejectUnauthorized: false`）：企业代理、自签名测试环境能直接抓，代价是工具本身不能当作安全边界。
-- **ALPN 只谈 `http/1.1`**：Node 内置 http 服务器不解析 h2 帧，客户端会退回 1.1。**强制 h2 的接口（gRPC、部分 HTTP/2-only 服务）会连不上**，这是与 Reqable 的已知差距。
-- **只解密 443（可配）**：其它端口走裸隧道。把非 HTTP 协议（MQTT 8883、IMAP 993…）也解密会让 App 直接连不上，这是"Reqable 能用、iReq 不能用"的典型原因。
+- **ALPN 只谈 `http/1.1`**：Node 内置 http 服务器不解析 h2 帧，客户端会退回 1.1。**强制 h2 的接口（gRPC、部分 HTTP/2-only 服务）会连不上**，这是与成熟抓包工具的已知差距。
+- **只解密 443（可配）**：其它端口走裸隧道。把非 HTTP 协议（MQTT 8883、IMAP 993…）也解密会让 App 直接连不上，这是"别的工具能用、iReq 不能用"的典型原因。
 - **请求体流式转发**：边收边转，8MB chunked 上传也不会卡住；同时旁路记录（最多 2MB）。
 - **保活 65s**：Node 默认 5s，App 复用连接时容易撞上刚被关掉的 socket，表现为"偶发连不上"。
 - **自环保护**：目标地址若指向代理自己，`GET /`、`/ca.pem`、`/ca.cer` 会作为本机安装页应答；
@@ -311,8 +321,9 @@ CFNetwork=我的 iOS 客户端
 
 ```
 bin/iReq.js      CLI 入口 / 参数解析 / 启动横幅
-src/ca.js           根证书与按域名签发叶子证书（node-forge）
-src/ca-trust.js     macOS 根证书信任状态检测 + 免 sudo 信任命令（verify-cert / 钥匙串）
+src/ca.js           根证书档案（指纹校验 / 迁移 / .p12 导入导出）与按域名签发叶子证书（node-forge）
+src/ca-dirs.js      固定 CA 目录 ~/.ireq/ca 与旧版候选目录解析
+src/ca-trust.js     macOS 信任状态检测 / 结果落盘 / 一键安装（verify-cert / 钥匙串）
 src/proxy.js        MITM 核心：CONNECT、TLS 握手、转发、录制、Mock 响应
 src/derive.js       从 UA / 路径派生 设备、应用、接口结构；UA 别名与源端口提取
 src/process-map.js  macOS：TCP 源端口 → PID → 真实应用名（lsof 快照 + 缓存）
@@ -332,7 +343,7 @@ tools/              开发自检脚本（_seed.js 负责造测试流量，见「
 ## API（脚本化时可用）
 
 ```
-GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]、proxyPort、caTrust、safeMode
+GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]、proxyPort、caTrust、caInfo、dataDir、safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
 GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
@@ -343,8 +354,11 @@ GET    /api/diagnostics         { tlsFailures: [{host, count, error}], tunneled,
 DELETE /api/diagnostics         清空已记录的握手失败域名
 GET    /api/system-proxy        本机系统代理状态 + 可复制的 on/off 命令 + caTrust/safeMode
 POST   /api/system-proxy        { enabled: true|false, service? } 接管 / 释放
-GET    /api/ca-trust            本机根证书信任状态 + 可复制的信任命令（带 30s 缓存）
-POST   /api/ca-trust            强制重新检测并同步给代理（信任后恢复 HTTPS 解密）
+GET    /api/ca-trust            本机根证书信任状态 + 可复制的信任命令（带 30s 缓存，结果按指纹落盘）
+POST   /api/ca-trust            { action: "check"|"install" } 重新检测 / 一键安装并信任（回读 verify-cert）
+GET    /api/ca/archive           证书档案元信息（指纹 / 路径 / 来源）+ 钥匙串里遗留的旧 CA
+GET    /api/ca/p12               导出 .p12 备份（含私钥，密码在 x-ireq-p12-password 响应头）
+POST   /api/ca/import             { p12: "<base64>", password? } 导入 .p12 并重新检测信任
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
 GET    /api/flows/:id
 DELETE /api/flows
@@ -360,6 +374,7 @@ GET    /api/config  PUT /api/config   { capture, passthrough: [], mitmPorts: [44
 GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-clear / network-sim
                                   （flow-update 是本机进程名异步回填，只有 app/appSource/process 变化）
 GET    /ca.pem                    根证书（控制台与代理端口都提供）
+GET    /ca.cer                    同一张根证书的 DER 版（iOS / Android 安装用）
 ```
 
 例：从脚本里造一条 500 的 Mock
@@ -393,6 +408,7 @@ node tools/check-splitters.js    # 两根竖分割线：拖拽 / 命中区 / 夹
 node tools/check-device.js       # 127 + 本机网卡 IP 合并成「本机」/ 标签不闪跳 / 筛选与详情一致（40 项）
 node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版规则表单 / 真实 Mock 命中 / 导入导出 / 详情着色（83 项）
 node tools/check-rule-workspace.js # 活动栏 / 资源管理器 / 多标签 / 未保存快照 / 快捷键 / 面包屑 / 状态栏 / 英文界面（28 项）
+node tools/check-ca-persist.js   # CA 档案自愈 / 旧目录迁移 / .p12 往返 / 一键安装命令 / 状态落盘 / 盾牌 UI（57 项）
 node tools/check-scrollbar.js    # 深浅色滚动条（白条回归）
 node tools/verify-ui.js          # 顶栏按钮 / 弹窗 / 连接向导地址
 node tools/check-local-proxy.js  # 系统代理开启/恢复往返（scutil 验证真的生效）
@@ -434,6 +450,12 @@ xattr -cr /Applications/iReq.app
 ```
 
 之后即可正常打开。Windows（SmartScreen）与 Linux AppImage 如有类似提示，同理允许运行即可。
+
+> 因为产物未签名 / 未公证，**每次用新下载的 `.dmg` 覆盖 `/Applications/iReq.app` 都会重新带上
+> `com.apple.quarantine`**，需要再执行一次 `xattr -cr`；macOS 按代码签名身份记录的系统授权
+> （钥匙串访问、辅助功能、防火墙传入连接等）也会在换包后失效，需要重新点一次允许。
+> **根证书不受影响**：它固定在 `~/.ireq/ca`，覆盖安装不会重新生成，也不需要重新信任。
+> 只有彻底根治这两类授权弹窗才需要 Apple Developer ID 签名 + 公证。
 
 ## 已知限制
 

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * 本机应用图标（Reqable 那种侧栏里带 App 图标的效果）。
+ * 本机应用图标（抓包工具侧栏里带 App 图标的效果）。
  *
  * 思路：代理跑在 macOS 上时，ProcessMap 已经能拿到发起连接的真实进程名，
  * 而 /Applications 里的 .app 自带图标文件。这里按名字找到 bundle，用系统自带

@@ -8,9 +8,16 @@
  * 用户点「接管本机」时工具照常解密，结果把所有 HTTPS 站点都搞成证书错误。
  *
  * 判据（已实测）：security verify-cert -c <ca.pem> -p basic -L
- *   退出码 0 = 系统信任（用户域 add-trusted-cert 装的也算，Reqable CA 即如此）
+ *   退出码 0 = 系统信任（用户域 add-trusted-cert 装的也算，同类工具装的 CA 即如此）
  *   退出码 1 = CSSMERR_TP_NOT_TRUSTED
  * 注意别用 -p ssl：根证书没有对应 EKU，会误报 "Invalid Extended Key Usage"。
+ *
+ * v1.3.5：
+ *   - install() 在 app 内真正执行用户域 add-trusted-cert，成功后 verify-cert 回读；
+ *     失败仍把命令返回给前端降级展示（一键安装 + 失败降级手动）。
+ *   - 检测结果按 CA 指纹落盘到 trust-state.json，启动时可复用上一次结论，
+ *     不会因为一次钥匙串抖动就让用户重装证书。
+ *   - keychainInfo() 列出钥匙串里遗留的同名旧 CA，便于诊断「为什么又要装一次」。
  */
 
 const { execFileSync } = require('child_process');
@@ -20,8 +27,10 @@ const os = require('os');
 const path = require('path');
 
 const TTL = 30 * 1000;
+const CNS = ['iReq Root CA', 'reqLite Root CA'];
+const DEFAULT_CN = CNS[0];
 
-function run(cmd, args) {
+function run(cmd, args, timeout = 4000) {
   try {
     return {
       ok: true,
@@ -29,7 +38,7 @@ function run(cmd, args) {
       out: execFileSync(cmd, args, {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 4000,
+        timeout,
         maxBuffer: 4 * 1024 * 1024,
       }),
     };
@@ -54,17 +63,24 @@ function subjectCN(pem) {
   try {
     const c = new crypto.X509Certificate(pem);
     const line = String(c.subject).split('\n').find((s) => /^CN=/.test(s));
-    return line ? line.slice(3) : 'iReq Root CA';
+    return line ? line.slice(3) : DEFAULT_CN;
   } catch (_) {
-    return 'iReq Root CA';
+    return DEFAULT_CN;
   }
 }
 
 class CaTrust {
-  constructor(ca, { platform = process.platform, home = os.homedir() } = {}) {
+  constructor(ca, {
+    platform = process.platform,
+    home = os.homedir(),
+    stateFile = null,
+    runner = null,
+  } = {}) {
     this.ca = ca;
     this.platform = platform;
     this.home = home;
+    this.stateFile = stateFile;
+    this.runner = runner || run;
     this.cached = null;
     this.checkedAt = 0;
   }
@@ -77,14 +93,114 @@ class CaTrust {
     return this.ca && this.ca.caCertPath ? path.resolve(this.ca.caCertPath) : null;
   }
 
+  get loginKeychain() {
+    return path.join(this.home, 'Library/Keychains/login.keychain-db');
+  }
+
   /** 用户域信任（通常免 sudo，可能弹一次钥匙串授权）与系统域备用命令 */
   trustCommands() {
     const p = this.caPath || path.resolve('data/ca/reqlite-ca.pem');
-    const userKc = path.join(this.home, 'Library/Keychains/login.keychain-db');
+    const userKc = this.loginKeychain;
     return {
       user: `security add-trusted-cert -r trustRoot -k "${userKc}" "${p}"`,
       admin: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${p}"`,
       remove: `security delete-certificate -Z ${fingerprint(this.ca.caPem)} "${userKc}"`,
+    };
+  }
+
+  _readState() {
+    if (!this.stateFile) return null;
+    try {
+      const j = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
+      return j && typeof j === 'object' ? j : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _writeState(st) {
+    if (!this.stateFile) return;
+    try {
+      fs.writeFileSync(
+        this.stateFile,
+        JSON.stringify({
+          sha1: st.sha1,
+          trusted: st.trusted,
+          installed: st.installed,
+          checkedAt: st.checkedAt,
+        }, null, 2) + '\n',
+        { mode: 0o600 }
+      );
+    } catch (_) {
+      /* 磁盘只读也不影响主功能 */
+    }
+  }
+
+  /** 上一次确认过的结论（指纹必须一致，否则说明换了 CA，缓存作废） */
+  state() {
+    const j = this._readState();
+    if (!j || !j.sha1 || j.sha1 !== fingerprint(this.ca.caPem)) return null;
+    return j;
+  }
+
+  /** 一键安装：app 内执行用户域 add-trusted-cert，成功后回读 verify-cert */
+  install() {
+    if (!this.supported) {
+      return { ok: false, error: '当前平台不支持自动安装，请按下面的命令手动执行', commands: this.trustCommands() };
+    }
+    const p = this.caPath;
+    if (!p || !fs.existsSync(p)) {
+      return { ok: false, error: '根证书文件不存在，无法自动安装', commands: this.trustCommands() };
+    }
+    const r = this.runner(
+      'security',
+      ['add-trusted-cert', '-r', 'trustRoot', '-k', this.loginKeychain, p],
+      20000
+    );
+    // 不管 add-trusted-cert 返回什么，浏览器视角的 verify-cert 才是权威判据
+    const st = this.refresh();
+    const ok = st.trusted === true;
+    return {
+      ok,
+      code: r.code,
+      output: String(r.out || '').trim().slice(0, 400),
+      trusted: st.trusted,
+      installed: st.installed,
+      reason: st.reason,
+      error: ok ? '' : (r.code === 0 ? '命令执行完成但系统仍未信任，可能需要手动确认钥匙串授权' : String(r.out || '命令执行失败').trim().slice(0, 300)),
+      commands: this.trustCommands(),
+    };
+  }
+
+  /** 钥匙串里同名但指纹不同的旧 CA —— 覆盖安装反复装证书的历史痕迹 */
+  keychainInfo() {
+    if (!this.supported) return { supported: false, cn: DEFAULT_CN, certs: [], stale: [] };
+    const current = fingerprint(this.ca.caPem);
+    const certs = [];
+    for (const cn of CNS) {
+      const r = this.runner('security', ['find-certificate', '-a', '-c', cn, '-Z', '-p', this.loginKeychain], 8000);
+      const pems = String(r.out || '').match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) || [];
+      for (const pem of pems) {
+        const fp = fingerprint(pem);
+        if (fp && !certs.some((c) => c.sha1 === fp)) {
+          certs.push({ sha1: fp, subject: subjectCN(pem), current: fp === current });
+        }
+      }
+      const sys = this.runner('security', ['find-certificate', '-a', '-c', cn, '-Z', '-p', '/Library/Keychains/System.keychain'], 8000);
+      const sysPems = String(sys.out || '').match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) || [];
+      for (const pem of sysPems) {
+        const fp = fingerprint(pem);
+        if (fp && !certs.some((c) => c.sha1 === fp)) {
+          certs.push({ sha1: fp, subject: subjectCN(pem), current: fp === current, system: true });
+        }
+      }
+    }
+    return {
+      supported: true,
+      cn: DEFAULT_CN,
+      keychain: this.loginKeychain,
+      certs,
+      stale: certs.filter((c) => !c.current),
     };
   }
 
@@ -115,12 +231,9 @@ class CaTrust {
     // 是否已安装到钥匙串（不论是否设为信任）
     let installed = false;
     let keychain = '';
-    for (const kc of [
-      path.join(this.home, 'Library/Keychains/login.keychain-db'),
-      '/Library/Keychains/System.keychain',
-    ]) {
+    for (const kc of [this.loginKeychain, '/Library/Keychains/System.keychain']) {
       if (!fs.existsSync(kc)) continue;
-      const r = run('security', ['find-certificate', '-a', '-c', cn, '-Z', kc]);
+      const r = this.runner('security', ['find-certificate', '-a', '-c', cn, '-Z', kc]);
       if (r.ok && sha1 && r.out.toUpperCase().includes(sha1)) {
         installed = true;
         keychain = kc;
@@ -136,7 +249,7 @@ class CaTrust {
 
     // 是否被系统真正信任 —— 这是浏览器视角的权威判据
     const v = this.caPath
-      ? run('security', ['verify-cert', '-c', this.caPath, '-p', 'basic', '-L'])
+      ? this.runner('security', ['verify-cert', '-c', this.caPath, '-p', 'basic', '-L'])
       : { code: -1, out: '根证书文件不存在' };
     const trusted = v.code === 0;
 
@@ -156,6 +269,7 @@ class CaTrust {
       verifyOutput: trusted ? '' : String(v.out || '').split('\n').slice(0, 2).join(' ').trim(),
     };
     this.checkedAt = base.checkedAt;
+    this._writeState(this.cached);
     return this.cached;
   }
 
@@ -166,4 +280,4 @@ class CaTrust {
   }
 }
 
-module.exports = { CaTrust, fingerprint, subjectCN, run };
+module.exports = { CaTrust, fingerprint, subjectCN, run, CNS };

@@ -594,6 +594,27 @@
               <div class="cs-num">2</div>
               <div class="cs-main">
                 <h3>信任根证书 <span class="hint">解密 HTTPS 只需做一次</span></h3>
+                <div class="ca-status-card" id="caStatusCard">
+                  <div class="ca-shield-row">
+                    <span class="ca-shield" id="caShield">● 检查中…</span>
+                    <span class="ca-shield-hint" id="caShieldHint">正在读取本机证书状态</span>
+                  </div>
+                  <div class="ca-meta">
+                    <span class="ca-meta-k">指纹</span><code id="caFingerprint" data-no-i18n>—</code>
+                    <span class="ca-meta-k">档案</span><code id="caArchivePath" data-no-i18n>—</code>
+                    <span class="ca-meta-k">来源</span><b id="caSource">—</b>
+                  </div>
+                  <div class="addr-card-row ca-actions">
+                    <button type="button" class="btn primary" id="btnCaInstall">一键安装并信任</button>
+                    <button type="button" class="btn ghost" id="btnCaRecheck">重新检测</button>
+                    <button type="button" class="btn ghost" id="btnCaExportP12">导出 .p12 备份</button>
+                    <button type="button" class="btn ghost" id="btnCaImportP12">导入 .p12</button>
+                    <input type="file" id="caP12File" accept=".p12,.pfx" hidden>
+                    <input type="password" id="caP12Password" class="ca-p12-pwd" placeholder=".p12 密码（默认 ireq）" autocomplete="off" spellcheck="false">
+                  </div>
+                  <p class="hint" id="caAutoTip">安装由系统弹出授权确认；失败时可展开下面的手动命令。根证书与私钥固定在 ~/.ireq/ca，覆盖安装不会换证书。</p>
+                  <p class="hint" id="caStaleTip" hidden></p>
+                </div>
                 <div class="addr-card-row">
                   <a class="btn primary" href="/ca.cer" download="reqlite-ca.cer">下载 .cer（推荐）</a>
                   <a class="btn" href="/ca.pem" download="reqlite-ca.pem">下载 .pem</a>
@@ -611,7 +632,8 @@
                     <p class="hint">未信任时本机 HTTPS 自动透传；执行下面命令，再点「重新检测」。</p>
                     <pre class="code" id="lpCaCmd">—</pre>
                     <div class="lp-warn-actions">
-                      <button class="btn primary" id="lpCopyTrust">复制信任命令（免 sudo）</button>
+                      <button class="btn primary" id="lpInstallTrust">一键安装并信任</button>
+                      <button class="btn ghost" id="lpCopyTrust">复制信任命令（免 sudo）</button>
                       <button class="btn ghost" id="lpRecheckTrust">重新检测</button>
                     </div>
                   </div>

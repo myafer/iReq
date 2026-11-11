@@ -4,14 +4,14 @@
 
 A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm install`, one command to start the server, and you work in the browser.
 
-> Positioning: the thing to reach for when you want to debug one API and don't want to fire up the whole Charles / Reqable suite. Cross macOS / Windows / Linux,
+> Positioning: the thing to reach for when you want to debug one API and don't want to fire up the whole Charles / other full-featured suite. Cross macOS / Windows / Linux,
 > pure Node core with no native dependencies; the optional desktop app wraps the same core in an Electron window.
 
 ## What it can do
 
 | Capability | Description |
 | --- | --- |
-| HTTPS decryption | Self-generates a root CA on first run, dynamically issues leaf certificates per domain (397-day validity + SAN, meeting Apple's requirements) |
+| HTTPS decryption | Root CA pinned to `~/.ireq/ca` (generated once, reused across upgrades), dynamically issues leaf certificates per domain (397-day validity + SAN, meeting Apple's requirements) |
 | Capture | Full records of plaintext HTTP and decrypted HTTPS: method, URL, headers, body, status, duration, size |
 | Live view | Console pushes via SSE; a request appears in the list the moment it completes. New flows insert a single row instead of re-rendering the whole list |
 | Grouped sidebar | Automatically aggregates **device / app / domain / API structure**; one click filters; bookmark frequently used filters |
@@ -40,14 +40,22 @@ npm start            # proxy 9090, console http://127.0.0.1:9091
 Don't want to install Node? Download the single-file executable for your platform from [Releases](https://github.com/myafer/iReq/releases)
 (macOS arm64/x64, Linux x64/arm64, Windows x64; CI auto-packages on a `v*` tag push), and run it to start the server.
 
-The first run generates the root CA under `data/ca/`, then:
+The root CA and private key are generated once and then **pinned to `~/.ireq/ca/`**:
+`ca-archive.json` is the fingerprinted archive, while `reqlite-ca.pem` / `.key` are kept for downloads and manual installs.
+The desktop build, the single-file CLI and the source build all share the same CA, so **reinstalling, upgrading or switching
+distributions never changes the certificate and never requires trusting it again**. CAs left in the old `data/ca/` are migrated on first launch.
 
-**macOS (local debugging)**
+**macOS (local debugging)**: the easiest path is "⋯ More → Certificate & connection", step 2, **Install & trust now** —
+macOS asks for authorization once and the shield turns green. If that fails, expand "Trust command & status" and run:
 
 ```bash
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain data/ca/reqlite-ca.pem
+security add-trusted-cert -r trustRoot \
+  -k "$HOME/Library/Keychains/login.keychain-db" \
+  "$HOME/.ireq/ca/reqlite-ca.pem"
 ```
+
+To back up, migrate, or share one CA across machines: click **Export .p12 backup** on the same page (contains the private key;
+the import password is shown), then **Import .p12** on the other machine — no need to reinstall the certificate on phones.
 
 **iOS**
 
@@ -60,7 +68,7 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 > If the browser jumps the address to `https://`, you'll see a "certificate error" — that's caused by **the certificate not being installed yet**, not a wrong address.
 > Two fixes: manually change the address bar back to `http://`; or temporarily turn the Wi-Fi proxy off and on. If all else fails, AirDrop / email
-> `data/ca/reqlite-ca.pem` to the phone and tap to install it.
+> `~/.ireq/ca/reqlite-ca.pem` to the phone and tap to install it.
 
 **Android**: download the certificate the same way → Settings › Security › Encryption & credentials › Install a certificate › CA certificate.
 On Android 7+ apps trust only system certificates by default; to capture your own app, use a debug build with `networkSecurityConfig`.
@@ -78,7 +86,7 @@ Command-line arguments:
 
 ```bash
 iReq start [-p 9090] [-u 9091] [-b 0.0.0.0] [--ui-host 127.0.0.1]
-              [-d ./data] [--no-persist] [--no-ui] [--passthrough a.com,b.com] [--max-flows 2000]
+              [-d ./data] [--ca-dir ~/.ireq/ca] [--no-persist] [--no-ui] [--passthrough a.com,b.com] [--max-flows 2000]
 iReq ca            # print root CA path
 iReq ca --print    # output PEM
 iReq local status  # show local system proxy
@@ -123,7 +131,7 @@ The original config is backed up in `data/system-proxy-backup.json` and **restor
 `iReq local off` manually. macOS uses `networksetup` (tested to need no sudo); Windows / Linux don't change system settings automatically —
 copiable commands are in the settings panel.
 
-To capture HTTPS you also need to **add the root CA to the local Keychain and set it to "Always Trust"** — this step is easier to miss than it looks; see the next section.
+To capture HTTPS you also need to **add the root CA to the local Keychain and set it to "Always Trust"** — one click on "Install & trust now" under "Certificate & connection" does it; see the next section.
 If you still see nothing, expand "Manual setup / Still nothing?" in the settings panel: Chrome's QUIC(HTTP/3) bypasses the proxy,
 certificate-pinned apps fail the handshake, and command-line programs need an explicit `HTTP_PROXY / HTTPS_PROXY=http://127.0.0.1:9090`.
 
@@ -137,26 +145,29 @@ These two symptoms often appear together but have different root causes:
 | No error anymore, but not a single request in the list | System proxy is off / the service isn't running / "safe mode" passed HTTPS through untouched |
 
 **"Installed the certificate" ≠ "trusted the certificate"**. Double-clicking a `.pem` to import it into the Keychain is only "install" —
-the trust setting is still the default "Use System Defaults", and Chrome still rejects it. Having installed Reqable / Proxyman's CA doesn't help either —
-their public keys aren't the same certificate as iReq's. Do install + trust in one go (user domain, usually no sudo):
+the trust setting is still the default "Use System Defaults", and Chrome still rejects it. Having installed another proxy tool's CA doesn't help either —
+their public keys aren't the same certificate as iReq's. **Install & trust now** on the "Certificate & connection" page does
+both steps automatically (user domain, usually no sudo, one authorization prompt). Only if that fails, run manually:
 
 ```bash
 security add-trusted-cert -r trustRoot \
   -k "$HOME/Library/Keychains/login.keychain-db" \
-  "/absolute/path/iReq/data/ca/reqlite-ca.pem"
+  "$HOME/.ireq/ca/reqlite-ca.pem"
 ```
 
-The console's "Settings › Local capture" shows the real status and this command (with the path filled in); click "Copy trust command" to grab it;
-after running it click "Re-check". Command-line verification (exit code 0 means it's really trusted):
+The shield shows trusted / untrusted, the CA fingerprint and the archive path. "Settings › Local capture" shows the same status
+and the command with the path filled in — click "Copy trust command", run it, then "Re-check".
+The verdict is persisted per CA fingerprint in `~/.ireq/ca/trust-state.json` and reused on startup, so a Keychain hiccup
+won't make you reinstall the certificate. Command-line verification (exit code 0 means it's really trusted):
 
 ```bash
-security verify-cert -c /absolute/path/iReq/data/ca/reqlite-ca.pem -p basic -L; echo $?
+security verify-cert -c "$HOME/.ireq/ca/reqlite-ca.pem" -p basic -L; echo $?
 security dump-trust-settings | grep -A2 'iReq'
 ```
 
 ⚠️ **Don't add `-p ssl` to `add-trusted-cert`**: that creates a restricted "SSL-only policy" trust
 (`Number of trust settings : 1 / Policy OID: SSL`); `verify-cert` still reports untrusted and the browser still errors.
-Reqable CA's `Number of trust settings : 0` (no policy constraint) is the correct one.
+A properly trusted CA's `Number of trust settings : 0` (no policy constraint) is the correct one.
 
 **Safe mode**: on startup the tool uses `verify-cert` to check trust status. If it finds "untrusted + the system proxy is taken over by this tool",
 port 443 on the local loopback address is **automatically passed through untouched** instead of being decrypted — sites open normally, you just don't see HTTPS plaintext;
@@ -188,7 +199,7 @@ The `lsof` snapshot is async (~40–60ms): the first request may briefly show th
 `flow-update` a few dozen milliseconds later; the backfill appends a lightweight JSONL patch, so it won't degrade back to "OkHttp 4" after a restart.
 
 **Why do phones still have no app name?** An HTTP proxy only sees the device IP, not the peer's process / package name — a protocol-level limitation
-(Reqable in phone-proxy mode likewise can only rely on UA, or on a device-side VPN). The fix is to write a mapping in
+(Other desktop proxies likewise can only rely on UA, or on a device-side VPN). The fix is to write a mapping in
 **Settings › App identification › UA → App name**, one per line:
 
 ```
@@ -291,8 +302,8 @@ Click "+ New rule" or the `＋` on the tab bar for the full editor; "Mock this r
 - **Capture toggle decoupled from Mock**: turning off "capture" only stops recording, rules still apply — handy when you care about behavior, not logs.
 - **2MB body cap**: larger bodies are truncated and flagged, so one big file response can't eat all the memory.
 - **Upstream certificates not verified by default** (`rejectUnauthorized: false`): corporate proxies and self-signed test environments just work, at the cost of the tool not being a security boundary.
-- **ALPN negotiates `http/1.1` only**: Node's built-in http server doesn't parse h2 frames, so clients fall back to 1.1. **Services that force h2 (gRPC, some HTTP/2-only services) won't connect** — a known gap vs Reqable.
-- **Decrypt 443 only (configurable)**: other ports use a raw tunnel. Decrypting non-HTTP protocols too (MQTT 8883, IMAP 993…) would make apps fail to connect — the classic "Reqable works, iReq doesn't" cause.
+- **ALPN negotiates `http/1.1` only**: Node's built-in http server doesn't parse h2 frames, so clients fall back to 1.1. **Services that force h2 (gRPC, some HTTP/2-only services) won't connect** — a known gap vs full-featured proxies.
+- **Decrypt 443 only (configurable)**: other ports use a raw tunnel. Decrypting non-HTTP protocols too (MQTT 8883, IMAP 993…) would make apps fail to connect — the classic "other proxies work, iReq doesn't" cause.
 - **Streaming request bodies**: forwarded as they arrive, so an 8MB chunked upload won't stall; recorded on the side at the same time (up to 2MB).
 - **Keep-alive 65s**: Node's default is 5s; apps reusing connections tend to hit a just-closed socket, showing up as "occasionally can't connect".
 - **Self-loop protection**: if the target points at the proxy itself, `GET /`, `/ca.pem`, `/ca.cer` are served as the local install page;
@@ -311,8 +322,9 @@ Click "+ New rule" or the `＋` on the tab bar for the full editor; "Mock this r
 
 ```
 bin/iReq.js      CLI entry / arg parsing / startup banner
-src/ca.js            Root CA and per-domain leaf certificate issuance (node-forge)
-src/ca-trust.js     macOS root CA trust detection + sudo-free trust command (verify-cert / Keychain)
+src/ca.js            Root CA archive (fingerprint check / migration / .p12 import-export) and per-domain leaf issuance (node-forge)
+src/ca-dirs.js       Pinned CA dir ~/.ireq/ca + legacy candidate directories
+src/ca-trust.js     macOS trust detection / persisted verdict / one-click install (verify-cert / Keychain)
 src/proxy.js        MITM core: CONNECT, TLS handshake, forwarding, recording, Mock responses
 src/derive.js       Derives device, app, API structure from UA / path; UA aliases and source-port extraction
 src/process-map.js  macOS: TCP source port → PID → real app name (lsof snapshot + cache)
@@ -332,7 +344,7 @@ tools/              Dev self-check scripts (_seed.js generates test traffic, see
 ## API (for scripting)
 
 ```
-GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, iface}], proxyPort, caTrust, safeMode
+GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, iface}], proxyPort, caTrust, caInfo, dataDir, safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
 GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
@@ -343,8 +355,11 @@ GET    /api/diagnostics         { tlsFailures: [{host, count, error}], tunneled,
 DELETE /api/diagnostics         Clear recorded handshake failures
 GET    /api/system-proxy        Local system proxy status + copiable on/off commands + caTrust/safeMode
 POST   /api/system-proxy        { enabled: true|false, service? } take over / release
-GET    /api/ca-trust            Local root CA trust status + copiable trust command (with 30s cache)
-POST   /api/ca-trust            Force re-check and sync to proxy (resumes HTTPS decryption after trust)
+GET    /api/ca-trust            Local root CA trust status + copiable trust command (30s cache; verdict persisted by fingerprint)
+POST   /api/ca-trust            { action: "check"|"install" } re-check / one-click install (verifies with verify-cert)
+GET    /api/ca/archive           CA archive metadata (fingerprint / path / source) + stale CAs left in the Keychain
+GET    /api/ca/p12               Export .p12 backup (with private key; password in x-ireq-p12-password header)
+POST   /api/ca/import            { p12: "<base64>", password? } import .p12 and re-check trust
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
 GET    /api/flows/:id
 DELETE /api/flows
@@ -360,6 +375,7 @@ GET    /api/config  PUT /api/config   { capture, passthrough: [], mitmPorts: [44
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-clear / network-sim
                                   (flow-update is the async local process name backfill, only app/appSource/process change)
 GET    /ca.pem                    Root CA (served by both the console and the proxy port)
+GET    /ca.cer                    DER form of the same root CA (for iOS / Android installs)
 ```
 
 Example: create a 500 Mock from a script
@@ -393,6 +409,7 @@ node tools/check-splitters.js    # two vertical splitters: drag / hit area / cla
 node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
 node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)
 node tools/check-rule-workspace.js # activity bar / explorer / multi-tab / unsaved snapshots / shortcuts / breadcrumb / status bar / English UI (28 items)
+node tools/check-ca-persist.js   # CA archive self-heal / legacy migration / .p12 round-trip / install command / verdict persistence / shield UI (57 items)
 node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
 node tools/verify-ui.js          # top-bar buttons / dialogs / connection guide address
 node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)
@@ -434,6 +451,13 @@ xattr -cr /Applications/iReq.app
 ```
 
 It will then open normally. Windows (SmartScreen) and Linux AppImage may show similar prompts; just allow it to run the same way.
+
+> Because the build is unsigned / unnotarized, **each freshly downloaded `.dmg` used to overwrite
+> `/Applications/iReq.app` brings `com.apple.quarantine` back**, so `xattr -cr` is needed again.
+> System authorizations macOS records against the code-signing identity (Keychain access, Accessibility,
+> incoming firewall connections, etc.) also expire when the binary changes and must be approved again.
+> **The root CA is unaffected**: it lives in `~/.ireq/ca`, is never regenerated on reinstall, and needs no re-trusting.
+> Only an Apple Developer ID signature + notarization fully removes these two categories of prompts.
 
 ## Known limitations
 

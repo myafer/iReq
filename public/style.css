@@ -2109,6 +2109,78 @@ pre.code {
 .lp-badge.trust.off {
   color: var(--err);
 }
+
+/* 根证书状态卡：盾牌状态 + 档案指纹 + 一键安装 / p12 备份 */
+.ca-status-card {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.ca-shield-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ca-shield {
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+}
+.ca-shield.on {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.ca-shield.off {
+  color: var(--err);
+  border-color: var(--err);
+}
+.ca-shield-hint {
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-2);
+}
+.ca-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  margin-top: 10px;
+  font-size: calc(11.5px * var(--ui-scale));
+  align-items: baseline;
+}
+.ca-meta-k {
+  color: var(--text-2);
+}
+.ca-meta code,
+.ca-meta b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-weight: 400;
+}
+.ca-actions {
+  margin-top: 10px;
+}
+.ca-p12-pwd {
+  width: 190px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+/* 已信任时「一键安装」是禁用的，视觉上必须能看出来，别让用户一直点一个蓝按钮 */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .tag.tunnel {
   color: var(--warn);
 }

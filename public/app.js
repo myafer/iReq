@@ -3284,6 +3284,126 @@ async function toggleLocalProxy() {
   }
 }
 
+/* ------------------------------------- 根证书档案 / 一键信任 / .p12 备份
+ * 状态自己检测、安装自己执行、档案固定不随覆盖安装重建。 */
+
+function fmtCaFingerprint(fp) {
+  const s = String(fp || '').replace(/[^0-9A-Fa-f]/g, '');
+  return s ? (s.match(/.{1,4}/g) || []).join(' ').toUpperCase() : '—';
+}
+
+function renderCaStatus(arc, trust) {
+  const shield = $('#caShield');
+  if (!shield) return;
+  const t = trust || {};
+  const supported = t.supported !== false;
+  const state = !supported ? 'unknown' : t.trusted === true ? 'on' : 'off';
+  shield.className = 'ca-shield ' + state;
+  shield.textContent = state === 'on'
+    ? '● 根证书已信任'
+    : state === 'unknown' ? '● 无法自动检测' : '● 根证书未信任';
+  $('#caShieldHint').textContent = state === 'on'
+    ? '本机已信任，覆盖安装不会换证书'
+    : state === 'unknown' ? '当前平台请用下面的手动命令'
+      : '点「一键安装并信任」，或展开下面的手动命令';
+  $('#caFingerprint').textContent = fmtCaFingerprint((arc && arc.fingerprint) || t.sha1);
+  $('#caArchivePath').textContent = (arc && arc.archivePath) || t.caPath || '—';
+  const src = arc && arc.source;
+  $('#caSource').textContent = src === 'generated'
+    ? '首次生成'
+    : src === 'migrated' ? '从旧目录迁移'
+      : src === 'archive' || src === 'files' ? '复用已有档案' : '—';
+  const stale = ((arc && arc.keychain && arc.keychain.stale) || []).length;
+  const staleTip = $('#caStaleTip');
+  if (staleTip) {
+    staleTip.hidden = !(stale > 0);
+    staleTip.textContent = stale > 0
+      ? `钥匙串里还有 ${stale} 张旧根证书，本机当前用的是上面这份档案。`
+      : '';
+  }
+  const install = $('#btnCaInstall');
+  if (install) install.disabled = state === 'on';
+}
+
+async function loadCaStatus() {
+  try {
+    const [arc, trust] = await Promise.all([api('/api/ca/archive'), api('/api/ca-trust')]);
+    renderCaStatus(arc, trust);
+    return { arc, trust };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** 一键安装：服务端真的执行 add-trusted-cert，再 verify-cert 回读；失败降级到手动命令 */
+async function installCaTrust() {
+  const btns = [$('#btnCaInstall'), $('#lpInstallTrust')].filter(Boolean);
+  btns.forEach((b) => { b.disabled = true; b.textContent = '安装中…'; });
+  try {
+    const t = await api('/api/ca-trust', { method: 'POST', body: { action: 'install' } });
+    S.localProxy = { ...(S.localProxy || {}), caTrust: t, safeMode: t.safeMode };
+    S.status = { ...(S.status || {}), caTrust: t, safeMode: t.safeMode };
+    renderLocalProxy();
+    if (t.trusted) toast('根证书已信任，HTTPS 解密已恢复，刷新页面即可看到内容');
+    else toast('自动安装未完成：' + ((t.install && t.install.error) || t.reason || '请展开手动命令执行'));
+  } catch (err) {
+    toast('安装失败: ' + err.message);
+  } finally {
+    btns.forEach((b) => { b.textContent = '一键安装并信任'; b.disabled = false; });
+    await loadCaStatus();
+  }
+}
+
+async function exportCaP12() {
+  try {
+    const r = await fetch('/api/ca/p12');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const password = r.headers.get('x-ireq-p12-password') || '';
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'ireq-root-ca.p12';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast('已导出 .p12，导入密码：' + password);
+  } catch (err) {
+    toast('导出失败: ' + err.message);
+  }
+}
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+async function importCaP12(file) {
+  if (!file) return;
+  const btn = $('#btnCaImportP12');
+  if (btn) { btn.disabled = true; btn.textContent = '导入中…'; }
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const r = await api('/api/ca/import', {
+      method: 'POST',
+      body: { p12: bytesToBase64(bytes), password: ($('#caP12Password') || {}).value || '' },
+    });
+    S.localProxy = { ...(S.localProxy || {}), caTrust: r, safeMode: r.safeMode };
+    S.status = { ...(S.status || {}), caTrust: r, safeMode: r.safeMode };
+    renderLocalProxy();
+    toast(r.trusted ? '已导入 .p12，根证书已恢复' : '已导入 .p12，请点「一键安装并信任」');
+  } catch (err) {
+    toast('导入失败: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '导入 .p12'; }
+    await loadCaStatus();
+  }
+}
+
 async function copyTrustCmd() {
   const t = (S.localProxy && S.localProxy.caTrust) || (S.status && S.status.caTrust) || null;
   const text = t && t.commands && t.commands.user;
@@ -3307,6 +3427,7 @@ async function recheckTrust() {
     S.localProxy = { ...(S.localProxy || {}), caTrust: t, safeMode: t.safeMode };
     S.status = { ...(S.status || {}), caTrust: t, safeMode: t.safeMode };
     renderLocalProxy();
+    await loadCaStatus();
     toast(
       t.trusted
         ? '根证书已信任，HTTPS 解密已恢复，刷新页面即可看到内容'
@@ -3621,11 +3742,13 @@ function bind() {
   $('#ruSave').addEventListener('click', () => saveRule(false));
   $('#btnCa').addEventListener('click', async () => {
     const st = await loadStatus();
+    const caStatus = await loadCaStatus();
     const a = currentAddr();
     $('#caMobileProxy').textContent = addrFull(a);
     // 用安装页而不是直接甩 .pem：页面里有下载按钮 + 分平台步骤，手机上好操作
     $('#caUrl').textContent = `http://${addrFull(a)}/`;
-    $('#caLocalPath').textContent = st.caPath || 'data/ca/reqlite-ca.pem';
+    $('#caLocalPath').textContent =
+      (caStatus && caStatus.arc && caStatus.arc.caCertPath) || st.caPath || 'data/ca/reqlite-ca.pem';
     let userCmd = '';
     try {
       userCmd = ((await api('/api/ca-trust')).commands || {}).user || '';
@@ -3676,6 +3799,15 @@ function bind() {
   $('#lpCopyOff').addEventListener('click', () => copyLocalCmd('off'));
   $('#lpCopyTrust').addEventListener('click', copyTrustCmd);
   $('#lpRecheckTrust').addEventListener('click', recheckTrust);
+  $('#lpInstallTrust').addEventListener('click', installCaTrust);
+  $('#btnCaInstall').addEventListener('click', installCaTrust);
+  $('#btnCaRecheck').addEventListener('click', recheckTrust);
+  $('#btnCaExportP12').addEventListener('click', exportCaP12);
+  $('#btnCaImportP12').addEventListener('click', () => $('#caP12File').click());
+  $('#caP12File').addEventListener('change', (e) => {
+    importCaP12(e.target.files && e.target.files[0]);
+    e.target.value = '';
+  });
   ['stPassthrough', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
@@ -4225,6 +4357,8 @@ function focusConnectStep(n) {
 }
 async function openConnect(step) {
   await openSettings();
+  // 从设置弹窗内部直接切到「信任根证书」时也要刷新状态卡（不只走顶栏证书按钮）
+  void loadCaStatus();
   if (step) focusConnectStep(step);
 }
 

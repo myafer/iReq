@@ -257,6 +257,8 @@ class ConsoleServer {
         rules: this.rules.list().length,
         caPath: this.ca ? this.ca.caCertPath : null,
         caCreated: this.ca ? this.ca.created : false,
+        caInfo: this.ca ? this.ca.info : null,
+        dataDir: this.dataDir || null,
         caTrust: this.caTrust ? this._syncTrust() : null,
         safeMode: this._safeMode(),
         lan: lanAddresses(),
@@ -373,8 +375,61 @@ class ConsoleServer {
 
     if (parts[1] === 'ca-trust' && (method === 'GET' || method === 'POST')) {
       if (!this.caTrust) return this._json(res, 404, { error: '证书信任检测模块未启用' });
+      let installResult = null;
+      if (method === 'POST') {
+        const body = (await this._body(req)) || {};
+        if (body.action === 'install') installResult = this.caTrust.install();
+      }
+      // 安装之后必须强制刷新，让 config.caTrusted / 安全模式立刻跟着变
       const caTrust = this._syncTrust(method === 'POST');
-      return this._json(res, 200, { ...caTrust, safeMode: this._safeMode() });
+      return this._json(res, 200, {
+        ...caTrust,
+        safeMode: this._safeMode(),
+        caInfo: this.ca ? this.ca.info : null,
+        install: installResult,
+      });
+    }
+
+    // 证书档案元信息 + 钥匙串里遗留的旧 CA，供「证书与连接」的状态卡展示
+    if (parts[1] === 'ca' && method === 'GET' && parts[2] === 'archive') {
+      return this._json(res, 200, {
+        ...(this.ca ? this.ca.info : {}),
+        trustState: this.caTrust ? this.caTrust.state() : null,
+        keychain: this.caTrust ? this.caTrust.keychainInfo() : { certs: [], stale: [] },
+      });
+    }
+
+    if (parts[1] === 'ca' && method === 'POST' && parts[2] === 'import') {
+      if (!this.ca) return this._json(res, 404, { error: 'CA 未初始化' });
+      const body = (await this._body(req)) || {};
+      const raw = String(body.p12 || '');
+      if (!raw) return this._json(res, 400, { error: '没有收到 .p12 内容' });
+      const der = Buffer.from(raw, 'base64');
+      // 密码依次尝试：用户手填 → 默认 ireq → 本机档案里的导出密码 → 无密码。
+      // 同一台机器导出后直接导入无需抄密码；跨机器时在状态卡里填导出时显示的密码。
+      const pwd = String(body.password || '');
+      const tries = [pwd, 'ireq', (this.ca.archive && this.ca.archive.p12Password) || '', ''];
+      let info = null;
+      let lastErr = null;
+      for (const p of [...new Set(tries)]) {
+        try {
+          info = this.ca.importP12(der, p);
+          break;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      if (!info) {
+        return this._json(res, 400, { error: String((lastErr && lastErr.message) || 'p12 导入失败') });
+      }
+      // 换 CA 后旧信任结论立刻作废，强制重新检测
+      const caTrust = this._syncTrust(true);
+      return this._json(res, 200, {
+        ...caTrust,
+        safeMode: this._safeMode(),
+        caInfo: info,
+        keychain: this.caTrust ? this.caTrust.keychainInfo() : { certs: [], stale: [] },
+      });
     }
 
     if (parts[1] === 'system-proxy') {
@@ -525,7 +580,21 @@ class ConsoleServer {
       if (method === 'POST') return this._json(res, 200, await this.updater.checkOnce(true));
     }
 
-    if (parts[1] === 'ca' && method === 'GET') {
+    // 导出 .p12 备份（含根证书 + 私钥）；导入密码通过响应头回传，UI 会提示用户保存
+    if (parts[1] === 'ca' && method === 'GET' && parts[2] === 'p12') {
+      if (!this.ca) return this._json(res, 404, { error: 'CA 未初始化' });
+      const { der, password } = this.ca.exportP12();
+      res.writeHead(200, {
+        'content-type': 'application/x-pkcs12',
+        'content-disposition': 'attachment; filename="ireq-root-ca.p12"',
+        'x-ireq-p12-password': password,
+        'content-length': der.length,
+        'cache-control': 'no-store',
+      });
+      return res.end(der);
+    }
+
+    if (parts[1] === 'ca' && method === 'GET' && parts.length === 2) {
       return this._json(res, 200, {
         pem: this.ca ? this.ca.caPem : '',
         path: this.ca ? this.ca.caCertPath : '',

@@ -63,7 +63,8 @@ function freePort(pref, host) {
   });
 }
 
-// 数据目录：Electron 标准用户数据目录（~/Library/Application Support/iReq 等）
+// 流量/规则数据目录：Electron 标准用户数据目录（~/Library/Application Support/ireq/data 等）。
+// 注意根证书不在这里 —— CA 固定在 ~/.ireq/ca（src/ca-dirs.js），覆盖安装不会换证书。
 function resolveDataDir() {
   if (app.isPackaged) return path.join(app.getPath('userData'), 'data');
   return path.join(__dirname, '..', 'data'); // 开发模式沿用仓库内 data

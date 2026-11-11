@@ -14,6 +14,7 @@ const { ProxyServer } = require('./proxy');
 const { ConsoleServer } = require('./server');
 const { SystemProxy } = require('./system-proxy');
 const { CaTrust } = require('./ca-trust');
+const { resolveCaDir, caCandidates } = require('./ca-dirs');
 const { AppIconResolver } = require('./app-icon');
 const { UpdateChecker } = require('./update');
 const { loadPersistedConfig } = require('./user-config');
@@ -43,26 +44,37 @@ async function createApp({
   bindHost = '0.0.0.0',
   uiHost = '127.0.0.1',
   dataDir = defaultDataDir(),
+  caDir = null,
   persist = true,
   maxFlows = 2000,
   config = {},
 } = {}) {
-  const ca = new CertificateAuthority(path.join(dataDir, 'ca'));
+  // CA 落在固定目录，与 dataDir 解耦：Electron 打包版 / CLI 单文件 / dev 版共用同一张根证书，
+  // 覆盖安装或换形态都不会再触发「重新生成 CA → 重新信任」。
+  const resolvedCaDir = resolveCaDir({ caDir });
+  const ca = new CertificateAuthority(resolvedCaDir, {
+    candidates: caCandidates({ dataDir, repoDir: path.join(__dirname, '..') }),
+  });
   const store = new FlowStore({ dir: path.join(dataDir, 'flows'), persist, maxFlows });
   const rules = new RuleEngine(dataDir);
   const bookmarks = new BookmarkStore(dataDir);
   const systemProxy = new SystemProxy({ proxyPort, dataDir });
-  const caTrust = new CaTrust(ca);
+  const caTrust = new CaTrust(ca, { stateFile: path.join(resolvedCaDir, 'trust-state.json') });
   const appIcons = new AppIconResolver({ dataDir });
   // 启动时就检测一次：如果上次进程被强杀，系统代理可能还指向我们，
   // 而根证书又没装 —— 这种情况下必须立刻进入安全模式，别让本机 HTTPS 全挂。
+  // 若上次已确认过同一张 CA 受信任，先沿用该结论，避免钥匙串偶发抖动导致启动瞬间误进安全模式。
+  const priorTrust = caTrust.state();
   const trust = caTrust.refresh();
+  const effectiveTrust = trust.trusted === null
+    ? true
+    : (trust.trusted === true || (priorTrust && priorTrust.trusted === true));
   const runtimeConfig = {
     capture: true,
     passthrough: [],
     uaAppMap: [],
     processMap: true,
-    caTrusted: trust.trusted !== false, // 非 macOS 无法检测，不阻断
+    caTrusted: effectiveTrust, // 非 macOS 无法检测，不阻断
     localProxyOurs: Boolean(systemProxy.status().ours),
     ...loadPersistedConfig(dataDir),
     ...config,
@@ -107,6 +119,7 @@ async function createApp({
 
   return {
     ca,
+    caDir: resolvedCaDir,
     store,
     rules,
     bookmarks,

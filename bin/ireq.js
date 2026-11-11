@@ -4,7 +4,7 @@
 /**
  * iReq CLI
  *   ireq start [-p 9090] [-u 9091] [--bind 0.0.0.0] [--ui-host 127.0.0.1]
- *                 [--data <dir>] [--no-persist] [--no-ui] [--passthrough a.com,b.com]
+ *                 [--data <dir>] [--ca-dir <dir>] [--no-persist] [--no-ui] [--passthrough a.com,b.com]
  *   ireq ca [--print]      查看 / 导出根证书
  *   ireq --version
  */
@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const { createApp } = require('../src/app');
+const { resolveCaDir } = require('../src/ca-dirs');
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -52,7 +53,8 @@ iReq —— 轻量跨平台 HTTP(S) 抓包 / Mock / 重放
     -u, --ui <n>                控制台端口，默认 9091
     -b, --bind <host>           代理监听地址，默认 0.0.0.0（手机可连）
         --ui-host <host>        控制台监听地址，默认 127.0.0.1
-    -d, --data <dir>            数据目录，默认 ./data
+    -d, --data <dir>            数据目录（流量/规则），默认 ./data
+        --ca-dir <dir>          根证书档案目录，默认 ~/.ireq/ca（各形态共用）
         --no-persist            不把流量写入 JSONL
         --no-ui                 只起代理，不起控制台
         --passthrough <list>    跳过解密的域名，逗号分隔（证书固定的 App 用）
@@ -63,12 +65,13 @@ iReq —— 轻量跨平台 HTTP(S) 抓包 / Mock / 重放
   ireq local status         查看本机系统代理状态
   ireq local on|off         接管 / 释放本机系统代理（抓本机浏览器、桌面 App 的流量）
 
-安装根证书（只需一次）:
-  macOS   sudo security add-trusted-cert -d -r trustRoot \\
-            -k /Library/Keychains/System.keychain ./data/ca/reqlite-ca.pem
+安装根证书（只需一次，桌面版在「证书与连接」里可一键安装）:
+  macOS   security add-trusted-cert -r trustRoot \\
+            -k "$HOME/Library/Keychains/login.keychain-db" ~/.ireq/ca/reqlite-ca.pem
   iOS     手机代理指向本机 9090 后，浏览器打开 http://<你的IP>:9091/ca.pem 安装，
           再到 设置 > 通用 > 关于本机 > 证书信任设置 里把 iReq 打开
   Android 同上装 .pem（7.0+ 需要装到「用户证书」；App 默认不信任用户证书时需另行处理）
+  备份    控制台「证书与连接」可导出 .p12（含私钥），换机器/重装后导入即可复用同一张 CA
 `;
 
 async function main() {
@@ -91,7 +94,7 @@ async function main() {
   const dataDir = path.resolve(args.data || defaultData);
 
   if (cmd === 'ca') {
-    const caPath = path.join(dataDir, 'ca', 'reqlite-ca.pem');
+    const caPath = path.join(resolveCaDir({ caDir: args['ca-dir'] }), 'reqlite-ca.pem');
     if (!fs.existsSync(caPath)) {
       console.log('根证书还没生成，先运行一次 `ireq start` 即可。');
       process.exitCode = 1;
@@ -153,6 +156,7 @@ async function main() {
     bindHost: args.bind || '0.0.0.0',
     uiHost: args['ui-host'] || '127.0.0.1',
     dataDir,
+    caDir: args['ca-dir'],
     persist: !args['no-persist'],
     maxFlows: Number(args['max-flows']) || 2000,
     config: { passthrough },
@@ -171,7 +175,8 @@ async function main() {
   console.log(`  根证书     : ${info.caPath}`);
   console.log(`  抓本机流量 : 控制台「设置 › 本机抓包」一键接管，或执行 ireq local on`);
   if (info.restored) console.log(`  历史记录   : 已恢复 ${info.restored} 条（今天）`);
-  if (app.ca.created) console.log('  ↳ 首次运行，已生成新的根证书，需要重新信任一次');
+  if (app.ca.created) console.log('  ↳ 首次运行，已生成新的根证书，需要信任一次（桌面版可一键安装）');
+  if (app.ca.migratedFrom) console.log(`  ↳ 已复用旧目录的根证书：${app.ca.migratedFrom}`);
   console.log(line);
   console.log('  Ctrl+C 停止');
   console.log('');
