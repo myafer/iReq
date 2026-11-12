@@ -252,6 +252,7 @@ class ConsoleServer {
         stats: this.proxy ? this.proxy.stats : {},
         store: this.store.stats(),
         capture: this.config.capture,
+        mockEnabled: this.config.mockEnabled !== false,
         passthrough: this.config.passthrough,
         mitmPorts: this.config.mitmPorts,
         rules: this.rules.list().length,
@@ -540,6 +541,8 @@ class ConsoleServer {
       if (method === 'PUT') {
         const body = (await this._body(req)) || {};
         if (typeof body.capture === 'boolean') this.config.capture = body.capture;
+        // Mock 总开关：会话级，dock / 设置里一键旁路所有规则
+        if (typeof body.mockEnabled === 'boolean') this.config.mockEnabled = body.mockEnabled;
         if (Array.isArray(body.passthrough)) {
           this.config.passthrough = body.passthrough
             .map((s) => String(s).trim())

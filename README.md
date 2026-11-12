@@ -236,6 +236,7 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 ## Console
 
 - **Top bar**: only "Capture / Rules / Clear / ⋯ More" stay visible; certificates, settings, export, network simulation, theme, language and font size live in "⋯ More". The address pill shows the LAN IP by default, with IP / port / full-string copy and ▾ to switch interfaces (see above)
+- **Dock** (a permanent strip at the bottom): on the left, the **system proxy takeover state** (● green = taking over `IP:port`, yellow = taking over but HTTPS passing through, gray = not taken over) — click to toggle takeover/release, ✎ opens the connection wizard; on the right, three quick toggles: the **Mock master switch** (bypasses all rules at once without touching their content; badge = enabled rule count, right-click opens the rules workspace), **network simulation** (click to toggle, badge = active rule count, right-click opens settings), **Pause / Resume** capture (same state source as the top-bar "Capture" switch) and **Clear**
 - **List**: method, path, domain, status, duration; `MOCK` / `REPLAY` / `WS` / `Passthrough` badges distinguish the source
 - **Handshake failures**: when a client rejects the root CA (certificate pinning) or the port is not HTTP, that host appears as a red diagnostic row at the top of the list in real time — aggregated per host with a failure count, so retries never flood the list. The "More ▾ → Handshake failures" filter isolates them; opening a row shows the reason and a one-click "Skip decryption" action. These are connection-level events, not flows: they stay out of HAR exports and are cleared together with the list.
 - **Network simulation** ("⋯ More → Network Simulation", or the sidebar app dot / "Network ▾" in details / right-click a row): match by app / host / IP (or `*` for everything) and apply **Offline** (connection reset at CONNECT / request time), **Timeout** (no response until the deadline), or **Slow** (extra latency + response throttled to a target KB/s; passthrough tunnels throttled at the byte level). Rules are session-only — never written to disk, cleared on restart. Clicking the dot next to a sidebar app switches Normal / Slow / Offline / Timeout in place; the badge shows the active rule count, and changes sync to every window over SSE. Simulated requests are recorded as flows with a mode badge.
@@ -369,7 +370,7 @@ POST   /api/rules                 { name, method, urlMatch, matchMode, host, sta
 PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
-GET    /api/config  PUT /api/config   { capture, passthrough: [], mitmPorts: [443], maxFlows,
+GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-clear / network-sim
@@ -410,6 +411,7 @@ node tools/check-device.js       # 127 + local interface IPs merged into "Local"
 node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)
 node tools/check-rule-workspace.js # activity bar / explorer / multi-tab / unsaved snapshots / shortcuts / breadcrumb / status bar / English UI (28 items)
 node tools/check-ca-persist.js   # CA archive self-heal / legacy migration / .p12 round-trip / install command / verdict persistence / shield UI (57 items)
+node tools/check-dock.js         # Dock: mock master switch end-to-end bypass / badge counts / pause sync / right-click shortcuts / English UI (28 items)
 node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
 node tools/verify-ui.js          # top-bar buttons / dialogs / connection guide address
 node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)

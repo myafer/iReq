@@ -1026,6 +1026,11 @@ body.resizing * {
   flex: none;
 }
 
+/* 表头与数据行同向对齐：耗时列数据右对齐（.tm text-align:right），表头也要右对齐才上下对齐 */
+.listhead .c-time {
+  text-align: right;
+}
+
 .list {
   flex: 1;
   overflow: auto;
@@ -4379,4 +4384,120 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
 
 @media (max-width: 1100px) {
   html[data-electron-titlebar='hidden'] .ws-titlebar { padding-left: 76px; }
+}
+
+/* ---------------------------------------------------------------- 控制坞 */
+
+.dock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: calc(34px * var(--ui-scale));
+  padding: 0 10px;
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+  flex: none;
+  user-select: none;
+}
+
+.dock-proxy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 46%;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.4;
+}
+.dock-proxy:hover { background: var(--accent-soft); }
+
+.dock-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.dock-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(22, 121, 74, 0.15); }
+.dock-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(163, 92, 0, 0.15); }
+
+.dock-proxy-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.dock-edit {
+  flex: none;
+  color: var(--muted);
+  font-size: calc(12px * var(--ui-scale));
+}
+.dock-proxy:hover .dock-edit { color: var(--accent); }
+
+.dock-spacer { flex: 1; }
+
+.dock-toggle,
+.dock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1;
+}
+.dock-toggle:hover,
+.dock-btn:hover { background: var(--accent-soft); color: var(--text); }
+
+/* 开关态：激活 = 主题色描边 + 图标着色，一眼能看出「开着」 */
+.dock-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.dock-toggle.on svg { color: var(--accent); }
+#dockMock.on { border-color: var(--mock); color: var(--mock); background: rgba(138, 75, 214, 0.08); }
+#dockMock.on svg { color: var(--mock); }
+
+.dock-tlabel { font-weight: 500; }
+
+.dock-badge {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: currentColor;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+#dockMock.on .dock-badge { color: var(--mock); }
+#dockNet.on .dock-badge { color: var(--accent); }
+#dockMock:not(.on) .dock-badge,
+#dockNet:not(.on) .dock-badge { color: var(--muted); }
+
+/* 暂停 / 继续：图标二选一 */
+#dockPause .ic-play { display: none; }
+#dockPause.paused .ic-pause { display: none; }
+#dockPause.paused .ic-play { display: block; }
+#dockPause.paused { color: var(--warn); }
+
+#dockClear { padding: 0 6px; }
+
+@media (max-width: 900px) {
+  .dock-tlabel { display: none; }
 }

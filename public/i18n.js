@@ -25,6 +25,9 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 控制坞：代理状态是动态文本（带 IP:端口），必须整句翻译
+    [/^已接管 (.+) · HTTPS 透传$/, function (m, a) { return 'Taking over ' + a + ' · HTTPS passthrough'; }],
+    [/^已接管 (.+)$/, function (m, a) { return 'Taking over ' + a; }],
     // 根证书状态卡 / 一键安装 / .p12 备份（带变量，必须整句翻译）
     [/^自动安装未完成：(.+)$/, function (m, a) { return 'Automatic install incomplete: ' + a; }],
     [/^安装失败: (.+)$/, function (m, a) { return 'Install failed: ' + a; }],

@@ -25,6 +25,8 @@ const S = {
   status: {},
   /* 网络模拟规则（会话级，服务端不落盘） */
   networkSim: { enabled: true, latencyMs: 800, kbps: 64, timeoutMs: 30000, rules: [] },
+  /* Mock 总开关（会话级）：false 时所有规则整体旁路 */
+  mockEnabled: true,
   editingRule: null,
   bodyView: {},
   facets: { hosts: [], apps: [], devices: [], routes: [] },
@@ -290,9 +292,11 @@ async function loadStatus() {
     $('#connText').textContent = '监听中';
     $('#capture').checked = st.capture;
     $('#ruleCount').textContent = st.rules;
+    S.mockEnabled = st.mockEnabled !== false;
     S.networkSim = normalizeNetSim(st.networkSim);
     syncNetBadge();
     applyAddr();
+    renderDock();
     renderUpdate(st.update);
     return st;
   } catch (err) {
@@ -1612,6 +1616,7 @@ function syncNetBadge() {
   }
   const btn = $('#btnNetwork');
   if (btn) btn.classList.toggle('net-on', n > 0);
+  renderDock();
 }
 
 async function putNetSim(sim, immediate = false) {
@@ -2521,6 +2526,7 @@ async function saveRule(asCopy) {
 async function loadRules() {
   S.rules = await api('/api/rules');
   $('#ruleCount').textContent = S.rules.length;
+  renderDock();
   $('#rulesCount').textContent = S.rules.length ? `(${S.rules.length})` : '';
   await loadTree(); /* 先拿树：选中的目录可能已被外部编辑器删掉 */
   if (S.rulesDir && !treeHasDir(S.rulesTreeData && S.rulesTreeData.tree, S.rulesDir)) {
@@ -3198,6 +3204,7 @@ async function loadLocalProxy() {
     };
   }
   renderLocalProxy();
+  renderDock();
 }
 
 function renderLocalProxy() {
@@ -3282,6 +3289,93 @@ async function toggleLocalProxy() {
   } finally {
     btn.disabled = !(S.localProxy && S.localProxy.supported);
   }
+}
+
+/* ------------------------------------- 控制坞（系统代理 / Mock / 弱网 / 抓包） */
+
+function dockLanAddr() {
+  const st = S.status || {};
+  const lan = Array.isArray(st.lan) && st.lan.length ? st.lan[0] : '127.0.0.1';
+  return `${lan}:${st.proxyPort || '—'}`;
+}
+
+/** 控制坞只读 S 里已有的状态重绘，不自己发请求；数据变化点各自负责调用 */
+function renderDock() {
+  const st = S.status || {};
+  const lp = S.localProxy || {};
+  const ours = Boolean(lp.ours);
+  const safeMode = ours && Boolean(lp.safeMode);
+  const dot = $('#dockProxyDot');
+  if (dot) dot.className = 'dock-dot' + (safeMode ? ' warn' : ours ? ' on' : '');
+  const txt = $('#dockProxyText');
+  if (txt) {
+    txt.textContent = ours
+      ? (safeMode ? `已接管 ${dockLanAddr()} · HTTPS 透传` : `已接管 ${dockLanAddr()}`)
+      : '未接管本机代理';
+  }
+  $('#dockProxy').title = ours
+    ? '点击释放本机系统代理'
+    : '点击接管本机系统代理';
+
+  // Mock 总开关：徽章 = 已启用规则数
+  const mockOn = S.mockEnabled !== false;
+  const mockEnabledRules = (S.rules || []).filter((r) => r.enabled !== false).length;
+  $('#dockMock').classList.toggle('on', mockOn);
+  const mb = $('#dockMockCount');
+  mb.hidden = !mockOn || mockEnabledRules === 0;
+  mb.textContent = String(mockEnabledRules);
+
+  // 弱网模拟：徽章 = 生效规则数（关闭时归零，与顶栏 netCount 口径一致）
+  const sim = currentNetSim();
+  const netN = sim.enabled ? sim.rules.filter((r) => r.match).length : 0;
+  $('#dockNet').classList.toggle('on', sim.enabled && netN > 0);
+  const nb = $('#dockNetCount');
+  nb.hidden = netN === 0;
+  nb.textContent = String(netN);
+
+  // 抓包暂停 / 继续
+  const paused = st.capture === false;
+  $('#dockPause').classList.toggle('paused', paused);
+  $('#dockPauseText').textContent = paused ? '继续' : '暂停';
+}
+
+function bindDock() {
+  $('#dockProxy').addEventListener('click', (e) => {
+    if (e.target.closest('#dockProxyEdit')) return;
+    toggleLocalProxy();
+  });
+  $('#dockProxyEdit').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openConnect(1);
+  });
+  $('#dockMock').addEventListener('click', async () => {
+    const next = !(S.mockEnabled !== false);
+    try {
+      const cfg = await api('/api/config', { method: 'PUT', body: { mockEnabled: next } });
+      S.mockEnabled = cfg.mockEnabled !== false;
+      renderDock();
+      toast(S.mockEnabled ? 'Mock 已开启' : 'Mock 已关闭：所有规则临时旁路，规则内容不受影响');
+    } catch (err) {
+      toast('操作失败: ' + err.message);
+    }
+  });
+  // 右键（或触控板双指点击）直达设置面板
+  $('#dockMock').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    $('#btnRules').click();
+  });
+  $('#dockNet').addEventListener('click', async () => {
+    const sim = currentNetSim();
+    const next = !sim.enabled;
+    putNetSim({ ...sim, enabled: next }, true);
+    toast(next ? '弱网模拟已开启' : '弱网模拟已关闭');
+  });
+  $('#dockNet').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openNetwork();
+  });
+  $('#dockPause').addEventListener('click', () => $('#capture').click());
+  $('#dockClear').addEventListener('click', () => $('#btnClear').click());
 }
 
 /* ------------------------------------- 根证书档案 / 一键信任 / .p12 备份
@@ -3740,6 +3834,8 @@ function bind() {
 
   $('#capture').addEventListener('change', async (e) => {
     await api('/api/config', { method: 'PUT', body: { capture: e.target.checked } });
+    if (S.status) S.status.capture = e.target.checked;
+    renderDock();
     toast(e.target.checked ? '已开始抓包' : '已暂停抓包（代理仍在运行）');
   });
 
@@ -4792,6 +4888,7 @@ async function init() {
   syncSideForViewport();
   applyPaneWidths();
   bind();
+  bindDock();
   await loadStatus();
   loadLocalProxy(); // 只读探测，不阻塞首屏
   loadCaStatus(); // 预热证书状态卡：用户点开证书页时不用再等检测

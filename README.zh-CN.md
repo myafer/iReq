@@ -235,6 +235,7 @@ CFNetwork=我的 iOS 客户端
 ## 控制台
 
 - **顶栏**：常驻只有「抓包 / 规则 / 清空 / ⋯ 更多」；证书、设置、导出、网络模拟、主题、语言、字号都收在「⋯ 更多」里。地址胶囊默认局域网 IP，IP / 端口 / 整串分别可复制，▾ 切换多网卡与本机回环（见上节）
+- **控制坞**（底部常驻一条）：左侧是**系统代理接管状态**（● 绿 = 已接管 `IP:端口`，黄 = 接管但 HTTPS 透传中，灰 = 未接管），单击切换接管 / 释放，✎ 打开连接向导；右侧三个快捷开关：**Mock 总开关**（一键旁路所有规则，规则内容不动；徽章 = 已启用规则数，右键直达规则工作区）、**弱网模拟**（单击开关，徽章 = 生效规则数，右键打开设置）、**暂停 / 继续**抓包（与顶栏「抓包」开关同一状态源）和**清空**
 - **列表**：方法、路径、域名、状态、耗时；`MOCK` / `REPLAY` / `WS` / `透传` 角标区分来源
 - **握手失败域名**：客户端不认根证书（证书固定）或端口不是 HTTP 时，域名会实时以红色诊断行出现在列表顶部，按域名聚合并显示失败次数（重试不会刷屏）；「更多 ▾ → 握手失败」筛选可单独查看，点开详情能看原因并一键「加入跳过解密」。这类行属于连接层事件，不算 flow、不进 HAR 导出，清空列表时一起清掉。
 - **网络模拟**（「⋯ 更多 → 网络模拟」，或侧栏应用小圆点 / 详情「网络 ▾」/ 列表右键）：按应用名 / 域名 / IP（或 `*` 全部）匹配，可设 **断网**（CONNECT / 请求进来即重置连接）、**超时**（挂起不响应直到时限）、**弱网**（附加延迟 + 按目标 KB/s 限速响应体；透传隧道在字节层限速）。规则是会话级、不落盘、重启自动清空。点侧栏应用旁的小圆点可就地切 正常 / 弱网 / 断网 / 超时，顶栏角标显示生效条数，改动通过 SSE 同步到所有窗口；被模拟的请求会记成带模式角标的 flow。
@@ -368,7 +369,7 @@ POST   /api/rules                 { name, method, urlMatch, matchMode, host, sta
 PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
-GET    /api/config  PUT /api/config   { capture, passthrough: [], mitmPorts: [443], maxFlows,
+GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-clear / network-sim
@@ -409,6 +410,7 @@ node tools/check-device.js       # 127 + 本机网卡 IP 合并成「本机」/ 
 node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版规则表单 / 真实 Mock 命中 / 导入导出 / 详情着色（83 项）
 node tools/check-rule-workspace.js # 活动栏 / 资源管理器 / 多标签 / 未保存快照 / 快捷键 / 面包屑 / 状态栏 / 英文界面（28 项）
 node tools/check-ca-persist.js   # CA 档案自愈 / 旧目录迁移 / .p12 往返 / 一键安装命令 / 状态落盘 / 盾牌 UI（57 项）
+node tools/check-dock.js         # 控制坞：Mock 总开关端到端旁路 / 徽章口径 / 暂停联动 / 右键直达 / 英文界面（28 项）
 node tools/check-scrollbar.js    # 深浅色滚动条（白条回归）
 node tools/verify-ui.js          # 顶栏按钮 / 弹窗 / 连接向导地址
 node tools/check-local-proxy.js  # 系统代理开启/恢复往返（scutil 验证真的生效）

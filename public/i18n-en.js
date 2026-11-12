@@ -510,5 +510,21 @@ window.ReqLiteI18N_EN = {
   "导入中…": "Importing…",
   "已导入 .p12，根证书已恢复": "Imported .p12 and restored the root CA",
   "已导入 .p12，请点「一键安装并信任」": "Imported .p12 — click \"Install & trust now\" to trust it",
-  "根证书已信任，HTTPS 解密已恢复，刷新页面即可看到内容": "Root CA trusted; HTTPS decryption resumed. Refresh the page."
+  "根证书已信任，HTTPS 解密已恢复，刷新页面即可看到内容": "Root CA trusted; HTTPS decryption resumed. Refresh the page.",
+  "未接管本机代理": "Local proxy not taken over",
+  "暂停": "Pause",
+  "继续": "Resume",
+  "已开始抓包": "Capture resumed",
+  "已暂停抓包（代理仍在运行）": "Capture paused (proxy still running)",
+  "Mock 已开启": "Mock on",
+  "Mock 已关闭：所有规则临时旁路，规则内容不受影响": "Mock off: all rules are bypassed for now, the rules themselves are untouched",
+  "弱网模拟已开启": "Network simulation on",
+  "弱网模拟已关闭": "Network simulation off",
+  "点击接管 / 释放本机系统代理": "Click to take over / release the local system proxy",
+  "点击释放本机系统代理": "Click to release the local system proxy",
+  "点击接管本机系统代理": "Click to take over the local system proxy",
+  "Mock 总开关：单击切换，右键打开规则工作区": "Mock master switch: click to toggle, right-click for the rules workspace",
+  "弱网 / 断网模拟：单击开关，右键打开设置": "Network simulation: click to toggle, right-click for settings",
+  "清空请求列表": "Clear the request list",
+  "连接与证书设置": "Connection & certificate settings"
 };

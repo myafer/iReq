@@ -110,6 +110,7 @@ class ProxyServer extends EventEmitter {
     // 以前用 {...config} 新建对象，导致 UI 切换抓包 / 改透传域名对代理无效。
     const cfg = config || {};
     if (cfg.capture === undefined) cfg.capture = true;
+    if (cfg.mockEnabled === undefined) cfg.mockEnabled = true;
     if (!Array.isArray(cfg.passthrough)) cfg.passthrough = [];
     if (!Array.isArray(cfg.mitmPorts)) cfg.mitmPorts = [443];
     cfg.networkSim = normalizeNetworkSim(cfg.networkSim);
@@ -731,8 +732,10 @@ class ProxyServer extends EventEmitter {
     // 弱网的限速参数随 ctx 传给 _forward；延迟放在真正发起请求之前
     ctx.sim = sim && sim.mode === 'weak' ? sim : null;
 
-    // Mock 与「抓包开关」解耦：关掉记录时规则依旧生效
+    // Mock 与「抓包开关」解耦：关掉记录时规则依旧生效；
+    // 总开关（dock / 设置）关掉时所有规则整体旁路，直接转发。
     const run = () => {
+      if (this.config.mockEnabled === false) return this._forward(ctx);
       const rule = this.rules.match({
         method: req.method,
         url: target.toString(),
