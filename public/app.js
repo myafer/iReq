@@ -1741,6 +1741,13 @@ function closeModals() {
 
 const NET_MODES = { offline: '断网', weak: '弱网', timeout: '超时' };
 const NET_DEFAULTS = { enabled: true, latencyMs: 800, kbps: 64, timeoutMs: 30000, rules: [] };
+const DOCK_SIM_ID = 'dock-global';
+/* 写全句而不是拼字符串：英文字典按中文原文查表，拼出来的句子会漏翻 */
+const NET_LIVE_LABELS = {
+  offline: '全部流量：断网',
+  weak: '全部流量：弱网',
+  timeout: '全部流量：超时',
+};
 let netTimer = null;
 let netDirty = false;
 
@@ -1795,6 +1802,7 @@ function syncNetBadge() {
   const btn = $('#btnNetwork');
   if (btn) btn.classList.toggle('net-on', n > 0);
   renderDock();
+  renderNetLive();
 }
 
 async function putNetSim(sim, immediate = false) {
@@ -1812,6 +1820,66 @@ async function putNetSim(sim, immediate = false) {
   };
   if (immediate) return send();
   netTimer = setTimeout(send, 400);
+}
+
+/**
+ * 控制坞一键模式。
+ *
+ * 以前那个开关只翻 enabled 布尔值，而默认规则是空的 —— 用户点来点去没有任何
+ * 请求被拦，看着就像功能坏了。这里直接给全部流量落一条 * 规则，点第二次撤销；
+ * 其余按域名 / 应用的规则保留，全局规则排在最前（规则按顺序匹配，靠前优先）。
+ */
+async function toggleDockSim(mode) {
+  const sim = currentNetSim();
+  const globalIdx = sim.rules.findIndex((r) => r.match === '*');
+  const cur = sim.enabled && globalIdx >= 0 ? sim.rules[globalIdx] : null;
+  if (cur && cur.mode === mode) {
+    sim.rules = sim.rules.filter((_, i) => i !== globalIdx);
+    await putNetSim(sim, true);
+    toast('已恢复全部流量');
+  } else {
+    sim.rules = [
+      { id: DOCK_SIM_ID, match: '*', mode },
+      ...sim.rules.filter((r) => r.match !== '*'),
+    ];
+    sim.enabled = true;
+    await putNetSim(sim, true);
+    const local = !(S.localProxy && S.localProxy.ours);
+    toast(
+      mode === 'weak'
+        ? local
+          ? '已对全部流量开启弱网（右键可调参数）；本机未接管代理，仅对已连设备生效'
+          : '已对全部流量开启弱网（右键可调参数）'
+        : local
+          ? '已对全部流量开启断网（右键可调参数）；本机未接管代理，仅对已连设备生效'
+          : '已对全部流量开启断网（右键可调参数）'
+    );
+  }
+  renderNetLive();
+}
+
+/** 面板顶部状态条：当前到底在模拟什么、已经模拟了多少条、改动有没有真的生效 */
+function renderNetLive() {
+  const box = $('#netLive');
+  if (!box) return;
+  const sim = currentNetSim();
+  const n = sim.enabled ? sim.rules.filter((r) => r.match).length : 0;
+  const g = sim.enabled ? sim.rules.find((r) => r.match === '*') : null;
+  $('#netLiveText').textContent = g
+    ? netTr(NET_LIVE_LABELS[g.mode] || '已按规则模拟')
+    : n
+      ? netTr('已按规则模拟')
+      : netTr('未开启网络模拟');
+  const hits = (S.status && S.status.stats && S.status.stats.simulated) || 0;
+  $('#netHit').textContent = `已模拟 ${hits} 条请求`;
+  $('#netLiveDot').className =
+    'net-live-dot' + (n ? g && g.mode === 'offline' ? ' offline' : ' on' : '');
+  const killed = Number(S.lastSimKilled || 0);
+  const live = $('#netLiveKilled');
+  if (live) {
+    live.hidden = killed === 0;
+    live.textContent = `最近变更已切断 ${killed} 条已有连接`;
+  }
 }
 
 function netFromPanel() {
@@ -1874,8 +1942,9 @@ function renderNetPanel() {
 
 async function openNetwork() {
   try {
-    const cfg = await api('/api/config');
+    const [cfg, st] = await Promise.all([api('/api/config'), api('/api/status')]);
     S.networkSim = normalizeNetSim(cfg.networkSim);
+    S.status = st;
   } catch (_) {
     /* 保留本地状态 */
   }
@@ -3508,6 +3577,11 @@ function renderDock() {
   const sim = currentNetSim();
   const netN = sim.enabled ? sim.rules.filter((r) => r.match).length : 0;
   $('#dockNet').classList.toggle('on', sim.enabled && netN > 0);
+  // 一键全局模式：两个按钮各自只在自己那个模式生效时点亮，避免「点了断网却亮弱网」
+  const globalRule = sim.enabled ? sim.rules.find((r) => r.match === '*') : null;
+  $('#dockNet').classList.toggle('weak-on', !!globalRule && globalRule.mode === 'weak');
+  const off = $('#dockOffline');
+  if (off) off.classList.toggle('on', !!globalRule && globalRule.mode === 'offline');
   const nb = $('#dockNetCount');
   nb.hidden = netN === 0;
   nb.textContent = String(netN);
@@ -3543,16 +3617,14 @@ function bindDock() {
     e.preventDefault();
     $('#btnRules').click();
   });
-  $('#dockNet').addEventListener('click', async () => {
-    const sim = currentNetSim();
-    const next = !sim.enabled;
-    putNetSim({ ...sim, enabled: next }, true);
-    toast(next ? '弱网模拟已开启' : '弱网模拟已关闭');
-  });
-  $('#dockNet').addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    openNetwork();
-  });
+  $('#dockNet').addEventListener('click', () => toggleDockSim('weak'));
+  $('#dockOffline').addEventListener('click', () => toggleDockSim('offline'));
+  for (const id of ['#dockNet', '#dockOffline']) {
+    $(id).addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openNetwork();
+    });
+  }
   $('#dockPause').addEventListener('click', () => $('#capture').click());
   $('#dockClear').addEventListener('click', () => $('#btnClear').click());
 }
@@ -4487,6 +4559,11 @@ function bind() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'flow') {
       const f = msg.flow;
+      // 面板打开期间也让「已模拟 N 条」跟着涨，不用手动刷新
+      if (f.simMode && S.status && S.status.stats) {
+        S.status.stats.simulated = (S.status.stats.simulated || 0) + 1;
+        if (!$('#modalNetwork').hidden) renderNetLive();
+      }
       const m = {
         id: f.id,
         ts: f.ts,
@@ -4585,6 +4662,7 @@ function bind() {
     } else if (msg.type === 'network-sim') {
       // 别的窗口改了规则：同步角标和侧栏开关；正在输入时不重绘面板，避免打断编辑
       S.networkSim = normalizeNetSim(msg.sim);
+      if (typeof msg.killed === 'number') S.lastSimKilled = msg.killed;
       const panel = $('#modalNetwork');
       if (!panel.hidden && !panel.querySelector('input:focus, select:focus')) renderNetPanel();
       else {

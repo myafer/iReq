@@ -42,6 +42,7 @@ const SUITES = [
   ['握手失败处理后清除', 'check-tls-clear.js'],
   // 会改 networkSim 配置并清空流量，放最末；脚本结束会自己恢复现场
   ['网络模拟', 'check-network-sim.js'],
+  ['断网/弱网即时生效', 'check-net-live.js'],
   // 会清空流量 / 诊断数据 + 自己起慢上游，必须最后跑
   ['发起即见与清空同步', 'check-instant.js'],
 ];

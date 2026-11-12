@@ -126,7 +126,7 @@ class ProxyServer extends EventEmitter {
     cfg.networkSim = normalizeNetworkSim(cfg.networkSim);
     this.config = cfg;
     this.connections = new Set();
-    this.stats = { total: 0, mocked: 0, errors: 0, bytes: 0, tunneled: 0, tlsFailed: 0, safeTunneled: 0 };
+    this.stats = { total: 0, mocked: 0, errors: 0, bytes: 0, tunneled: 0, tlsFailed: 0, safeTunneled: 0, simulated: 0 };
     // 握手失败的域名：客户端不认我们的证书（证书固定 / App 自带校验），提示用户加白名单
     this.tlsFailures = new Map();
     // CONNECT 阶段拿不到 UA，靠历史 flow 把 host / IP 关联到应用名，规则才能命中手机 / 模拟器
@@ -224,7 +224,43 @@ class ProxyServer extends EventEmitter {
     const unknown = !app || /未知|未识别|unknown/i.test(app);
     if (unknown && host) app = this.appHints.byHost.get(String(host).toLowerCase()) || app;
     if (unknown && ip) app = this.appHints.byIp.get(String(ip).toLowerCase()) || app;
-    return { app, host, ip, deviceLabel: meta.deviceLabel || '' };
+    const fact = { app, host, ip, deviceLabel: meta.deviceLabel || '' };
+    // 记下这条连接属于谁。改网络模拟规则时，已经建好的 keep-alive / CONNECT 隧道
+    // 不会再走一遍匹配，只能靠这份 fact 找出该断哪些连接（见 applyNetworkSim）。
+    const s = (req && req.socket) || socket;
+    if (s) s.__simFact = fact;
+    return fact;
+  }
+
+  /**
+   * 配置变更立刻作用于存量连接。
+   *
+   * 只靠请求进来时判定会有个大窟窿：App 开着长连接（keep-alive / CONNECT 隧道 /
+   * 长轮询），用户中途打开断网，隧道里的数据照样来回，看上去就像「开关没用」。
+   * 这里把「新旧规则解析结果不同」的连接直接断开，逼客户端重连，重连后自然按新规则走。
+   * 没有 fact 的连接（刚 accept、还没发请求）不动，避免误伤监听中的新连接。
+   */
+  applyNetworkSim(prev, next) {
+    const sig = (s) =>
+      s ? `${s.mode}|${s.rule.match}|${s.latencyMs}|${s.kbps}|${s.timeoutMs}` : '';
+    let killed = 0;
+    // MITM 连接会同时登记底层 TCP socket 和 TLSSocket，按底层连接去重，别把一条算成两条
+    const seen = new Set();
+    for (const socket of this.connections) {
+      const base = socket.__reqliteClientSocket || socket;
+      if (seen.has(base)) continue;
+      seen.add(base);
+      const fact = socket.__simFact || base.__simFact;
+      if (!fact || socket.destroyed) continue;
+      if (sig(resolveNetworkSim(prev, fact)) === sig(resolveNetworkSim(next, fact))) continue;
+      try {
+        socket.destroy();
+        killed += 1;
+      } catch (_) {
+        /* 已经关了就算了 */
+      }
+    }
+    return killed;
   }
 
   _simConnectRecord(req, host, port, sim) {
@@ -259,6 +295,7 @@ class ProxyServer extends EventEmitter {
 
   /** 断网 = 立刻重置连接（贴近真实断网）；超时 = 不回 200，挂到时限再断 */
   _simBlockConnect(req, socket, host, port, sim) {
+    this.stats.simulated += 1;
     this._simConnectRecord(req, host, port, sim);
     if (sim.mode === 'offline') {
       try {
@@ -347,6 +384,7 @@ class ProxyServer extends EventEmitter {
           if (head && head.length) upstream.write(head);
           if (sim && sim.mode === 'weak') {
             // 透传隧道看不到明文请求，只能在字节层做延迟 + 限速
+            this.stats.simulated += 1;
             const down = throttleTransform(sim.kbps);
             const up = throttleTransform(sim.kbps);
             upstream.pipe(down).pipe(clientSocket);
@@ -779,6 +817,7 @@ class ProxyServer extends EventEmitter {
     if (sim && sim.mode !== 'weak') return this._simBlockHttp(ctx, sim);
     // 弱网的限速参数随 ctx 传给 _forward；延迟放在真正发起请求之前
     ctx.sim = sim && sim.mode === 'weak' ? sim : null;
+    if (ctx.sim) this.stats.simulated += 1;
 
     // Mock 与「抓包开关」解耦：关掉记录时规则依旧生效；
     // 总开关（dock / 设置）关掉时所有规则整体旁路，直接转发。
@@ -801,6 +840,7 @@ class ProxyServer extends EventEmitter {
 
   /** 断网：直接重置连接；超时：不写任何响应，挂到时限再断 */
   _simBlockHttp(ctx, sim) {
+    this.stats.simulated += 1;
     const { req, meta, startedAt } = ctx;
     const text =
       sim.mode === 'offline'

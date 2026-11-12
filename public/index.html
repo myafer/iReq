@@ -204,10 +204,14 @@
         <span class="dock-tlabel">Mock</span>
         <b class="dock-badge" id="dockMockCount" hidden></b>
       </button>
-      <button type="button" class="dock-toggle" id="dockNet" title="弱网 / 断网模拟：单击开关，右键打开设置">
+      <button type="button" class="dock-toggle" id="dockNet" title="弱网：单击对全部流量开启弱网，右键打开设置">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8.8 1.5 3.5 9h3.4l-.9 5.5L11.6 7H8.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
         <span class="dock-tlabel">弱网</span>
         <b class="dock-badge" id="dockNetCount" hidden></b>
+      </button>
+      <button type="button" class="dock-toggle" id="dockOffline" title="断网：单击对全部流量立即断网，右键打开设置">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.1 11.9 11.9 4.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span class="dock-tlabel">断网</span>
       </button>
       <button type="button" class="dock-btn" id="dockPause">
         <svg class="ic-pause" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3v10M11 3v10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
@@ -816,6 +820,13 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <span class="switch-label">启用</span>
             </label>
             <span class="hint">只影响匹配的请求；重启服务后自动清空</span>
+          </div>
+          <div class="net-live" id="netLive">
+            <span class="net-live-dot" id="netLiveDot"></span>
+            <span id="netLiveText">未开启网络模拟</span>
+            <span class="hint" id="netHit">已模拟 0 条请求</span>
+            <span class="hint" id="netLiveKilled" hidden>最近变更已切断 0 条已有连接</span>
+            <span class="hint">改动立即生效，已有连接会自动重连</span>
           </div>
           <div class="net-params">
             <label class="inline-field">弱网延迟 <input id="netLatency" class="input mono tiny" type="number" min="0" /> ms</label>

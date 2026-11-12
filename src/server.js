@@ -596,10 +596,18 @@ class ConsoleServer {
         }
         if (Number(body.maxFlows) > 0) this.store.maxFlows = Number(body.maxFlows);
         if (typeof body.autoUpdate === 'boolean') this.config.autoUpdate = body.autoUpdate;
-        // 网络模拟是会话级的（不落盘，重启自动恢复），改动实时同步到所有已开窗口
+        // 网络模拟是会话级的（不落盘，重启自动恢复），改动实时同步到所有已开窗口。
+        // 关键：规则只在新连接进来时判定，必须顺手断掉受影响的存量长连接，
+        // 否则用户中途打开断网，App 复用已有隧道照样能刷出数据。
         if (body.networkSim !== undefined) {
-          this.config.networkSim = normalizeNetworkSim(body.networkSim);
-          this._broadcast({ type: 'network-sim', sim: this.config.networkSim });
+          const prev = this.config.networkSim;
+          const next = normalizeNetworkSim(body.networkSim);
+          this.config.networkSim = next;
+          const killed =
+            this.proxy && typeof this.proxy.applyNetworkSim === 'function'
+              ? this.proxy.applyNetworkSim(prev, next)
+              : 0;
+          this._broadcast({ type: 'network-sim', sim: next, killed });
         }
         // 用户偏好落盘（目前只有更新开关），重启后保留
         if (this.dataDir) savePersistedConfig(this.dataDir, this.config);

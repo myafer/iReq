@@ -3678,6 +3678,30 @@ html[data-electron-titlebar="hidden"] .topbar :is(
   gap: 14px;
   flex-wrap: wrap;
 }
+/* 生效状态条：让用户一眼看到「现在到底在模拟什么、有没有真的拦到请求」 */
+.net-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  font-size: calc(12px * var(--ui-scale));
+}
+.net-live #netLiveText { font-weight: 600; color: var(--text); }
+.net-live .hint { font-size: calc(11px * var(--ui-scale)); }
+.net-live-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.net-live-dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+.net-live-dot.offline { background: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 18%, transparent); }
 .net-params {
   display: flex;
   flex-wrap: wrap;
@@ -4583,6 +4607,13 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
 .dock-toggle.on svg { color: var(--accent); }
 #dockMock.on { border-color: var(--mock); color: var(--mock); background: rgba(138, 75, 214, 0.08); }
 #dockMock.on svg { color: var(--mock); }
+/* 一键全局弱网 / 断网：两种模式用不同颜色，别让「点断网却亮弱网」 */
+#dockNet.weak-on,
+#dockOffline.on { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, transparent); }
+#dockNet.weak-on svg,
+#dockOffline.on svg { color: var(--ok); }
+#dockOffline.on { border-color: var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 9%, transparent); }
+#dockOffline.on svg { color: var(--err); }
 
 .dock-tlabel { font-weight: 500; }
 

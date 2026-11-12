@@ -72,6 +72,10 @@
     [/^有新版 v(.+)$/, function (m, a) { return 'New version v' + a + ' available'; }],
     // 网络模拟：规则名与挂起时长是动态的，整句翻译才不会夹中文
     [/^已添加断网规则：(.+)$/, function (m, a) { return 'Added offline rule: ' + a; }],
+    [/^已模拟 (\d+) 条请求$/, function (m, a) { return 'Simulated ' + a + ' requests'; }],
+    [/^最近变更已切断 (\d+) 条已有连接$/, function (m, a) {
+      return 'Last change dropped ' + a + ' existing ' + (a === '1' ? 'connection' : 'connections');
+    }],
     [/^iReq 超时模拟：挂起 (\d+)ms 后断开$/, function (m, a) { return 'iReq timeout simulation: held for ' + a + 'ms, then disconnected'; }],
     [/^上次检查失败：(.+)（工具会自动走自家代理重试）$/, function (m, a) { return 'Last check failed: ' + a + ' (will retry automatically)'; }],
     [/^当前 v(.+)，最新 v(.+)，点「前往下载」获取。$/, function (m, a, b) { return 'Current v' + a + ', latest v' + b + '. Click "Download" to get it.'; }],
