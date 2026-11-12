@@ -18,6 +18,7 @@ const net = require('net');
 const tls = require('tls');
 const forge = require('node-forge');
 const { UI, PROXY_PORT } = require('./_env');
+const { chromium, EXEC } = require('./_pw');
 
 let pass = 0;
 let fail = 0;
@@ -302,6 +303,55 @@ function destroyAll(...conns) {
   ok('回退后 HTTP/1.1 解密链路正常', h1res.status === 200 && /"ok"\s*:\s*true/.test(h1res.body),
     JSON.stringify(h1res).slice(0, 120));
   destroyAll(sock3, session, sock);
+
+  /* ---------- I. 详情面板标出协议版本 ----------
+   * 列表能按 HTTP2 筛，但详情只写「HTTPS（已解密）」的话，用户看不出这条是不是 h2 解出来的 */
+  const h2Flow = (await flowsList('limit=200')).find((f) => /^HTTP\/2/i.test(f.httpVersion || ''));
+  ok('流量记录带 HTTP/2.0 版本号', !!h2Flow, JSON.stringify(h2Flow && h2Flow.httpVersion));
+  if (h2Flow) {
+    const browser = await chromium.launch({ executablePath: EXEC });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN' });
+      await page.goto(UI + '/', { waitUntil: 'domcontentloaded' });
+      await page
+        .waitForFunction(() => typeof S !== 'undefined' && Array.isArray(S.flows) && S.flows.length > 0, null, {
+          timeout: 12000,
+        })
+        .catch(() => {});
+      const clicked = await page.evaluate((id) => {
+        const r = document.querySelector(`#list .row[data-id="${id}"]`);
+        if (!r) return false;
+        r.click();
+        return true;
+      }, h2Flow.id);
+      await page.waitForTimeout(600);
+      const readRow = (label) =>
+        page.evaluate((lb) => {
+          const dts = [...document.querySelectorAll('#detail .kv dt')];
+          const i = dts.findIndex((d) => d.textContent.trim() === lb);
+          if (i < 0) return '';
+          return [...document.querySelectorAll('#detail .kv dd')][i].textContent.trim();
+        }, label);
+      const ver = await readRow('协议版本');
+      ok('详情显示「协议版本 HTTP/2」', clicked && ver === 'HTTP/2', `clicked=${clicked} ver=${ver}`);
+      // h1 流量不该多出这一行（避免每条都堆冗余信息）
+      const h1Flow = (await flowsList('limit=200')).find((f) => /^HTTP\/1/i.test(f.httpVersion || ''));
+      if (h1Flow) {
+        await page.evaluate((id) => {
+          const r = document.querySelector(`#list .row[data-id="${id}"]`);
+          if (r) r.click();
+        }, h1Flow.id);
+        await page.waitForTimeout(400);
+        ok('HTTP/1.1 流量不显示协议版本行', (await readRow('协议版本')) === '', h1Flow.httpVersion);
+      } else {
+        ok('HTTP/1.1 流量不显示协议版本行（无可比对流量，跳过）', true, 'skipped');
+      }
+    } finally {
+      await browser.close();
+    }
+  } else {
+    ok('详情显示「协议版本 HTTP/2」（无 h2 流量，跳过）', false, 'no h2 flow');
+  }
 
   /* ---------- 现场恢复 ---------- */
   await putCfg({ h2Enabled: true, mitmPorts: [443], networkSim: SIM([]) });

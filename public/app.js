@@ -1790,6 +1790,8 @@ function tabOverview(f) {
         ? 'HTTP'
         : f.scheme,
     ],
+    // 只有非 HTTP/1.1 才单独列一行：解密出来的 h2 流量要能一眼看出协议版本
+    ...(/^HTTP\/2/i.test(f.httpVersion || '') ? [['协议版本', 'HTTP/2']] : []),
     ['状态', f.status ? `${f.status} ${f.statusText || ''}` : '请求失败'],
     ['耗时', fmtTime(f.duration)],
     ['请求大小', fmtSize(f.reqSize)],

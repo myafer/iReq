@@ -425,7 +425,7 @@ node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, 
 node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
 node tools/check-app-cascade.js  # checkbox-style multi-select apps (green check): domain / API cascade, upper groups collapse, legacy bookmarks (27 items)
 node tools/check-instant.js      # in-flight records + sidebar sync, in-place completion, same-frame clear, no revive (36 items)
-node tools/check-http2.js        # h2 negotiation / multiplexed per-stream records / pseudo-header stripping / mock·offline·slow / filters / fallback off switch (19 items)
+node tools/check-http2.js        # h2 negotiation / multiplexed per-stream records / pseudo-header stripping / mock·offline·slow / filters / protocol version in details / fallback off switch (22 items)
 node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
 node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
 node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)
@@ -489,7 +489,7 @@ It will then open normally. Windows (SmartScreen) and Linux AppImage may show si
 
 - The persisted JSONL includes request/response bodies (up to 2MB each), so files grow quickly under heavy traffic; use `--no-persist` to disable persistence.
 - Long-lived streaming responses (SSE / chunked) are forwarded in real time; an in-flight record exists from the moment the request starts and stays "in progress" until the connection ends (exports skip unfinished records).
-- HTTP/2 is not deframed; it falls back to 1.1.
+- HTTP/2 is decrypted via ALPN negotiation (h2 streams are recorded individually and details show "Protocol version: HTTP/2"); upstreams are always forwarded over HTTP/1.1, and extended CONNECT (WebSocket over h2) is not supported yet.
 - No WebSocket frame-level decryption, no HAR export (can be added if needed).
 - **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see "Where app names come from").
 - Local process detection is macOS-only; Linux / Windows would each need `netstat + /proc` / `GetExtendedTcpTable`.

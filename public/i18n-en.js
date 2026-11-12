@@ -18,6 +18,7 @@ window.ReqLiteI18N_EN = {
   "应用来源": "App source",
   "User-Agent 推断（远程设备可用 UA 别名标注）": "Inferred from User-Agent (remote devices can be labeled with UA aliases)",
   "协议": "Protocol",
+  "协议版本": "Protocol version",
   "请求大小": "Request size",
   "响应大小": "Response size",
   "响应类型": "Response type",

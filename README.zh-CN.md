@@ -423,7 +423,7 @@ node tools/check-scale.js        # 85%–160% 缩放、上下限、刷新保持�
 node tools/check-sidebar.js      # 五组边栏、筛选、收藏书签、折叠、窄屏抽屉
 node tools/check-app-cascade.js  # 应用勾选式多选（绿色对钩）：域名 / 接口结构级联 / 上方分组收起 / 老书签归一（27 项）
 node tools/check-instant.js      # 请求发起即入库 / 侧栏同步、完成就地更新、清空同帧归零、在途不复活（36 项）
-node tools/check-http2.js        # h2 协商 / 多路复用逐条入库 / 伪首部剥离 / Mock·断网·弱网 / 筛选 / 关闭回退（19 项）
+node tools/check-http2.js        # h2 协商 / 多路复用逐条入库 / 伪首部剥离 / Mock·断网·弱网 / 筛选 / 详情协议版本 / 关闭回退（22 项）
 node tools/check-splitters.js    # 两根竖分割线：拖拽 / 命中区 / 夹紧 / 持久化 / 复位 / 键盘（30 项）
 node tools/check-device.js       # 127 + 本机网卡 IP 合并成「本机」/ 标签不闪跳 / 筛选与详情一致（40 项）
 node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版规则表单 / 真实 Mock 命中 / 导入导出 / 详情着色（83 项）
@@ -486,7 +486,7 @@ xattr -cr /Applications/iReq.app
 
 - 落盘的 JSONL 含请求/响应体（单条最多 2MB），大流量场景文件增长较快；`--no-persist` 可关掉落盘。
 - 长连接流式响应（SSE / chunked）会实时转发；请求发起时就有一条「进行中」记录，连接结束前一直保持该状态（导出会跳过未完成的记录）。
-- HTTP/2 不会被解帧，走 1.1 回退。
+- HTTP/2 已按 ALPN 协商解密（h2 流量逐 stream 入库，详情标「协议版本 HTTP/2」）；上游一律按 HTTP/1.1 转发，扩展 CONNECT（h2 上的 WebSocket）暂不支持。
 - 不做 WebSocket 帧级解密、不做 HAR 导出（需要的话可以加）。
 - **手机等远程设备拿不到进程/包名**，只能按 UA 推断或用 UA 别名标注（见「应用名是怎么来的」）。
 - 本机进程识别只在 macOS 有；Linux / Windows 需要各自实现 `netstat + /proc` / `GetExtendedTcpTable`。
