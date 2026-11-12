@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 先看排障：列表空的 / 证书报错 / 解不开
+    url: https://github.com/myafer/iReq/blob/main/README.zh-CN.md
+    about: 八成问题在「排障」和「已知限制」两节里已经有答案，先花 30 秒看一眼
+  - name: 我装不上 / 打不开（macOS 提示无法验证开发者）
+    url: https://github.com/myafer/iReq/blob/main/README.zh-CN.md
+    about: 未签名的包首次打开需要右键「打开」，安装说明里有写

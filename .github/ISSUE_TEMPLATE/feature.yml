@@ -1,0 +1,57 @@
+name: 功能建议
+description: 想要一个现在没有的能力，或者觉得某处用起来别扭
+title: "[建议] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不用写得很正式：说清「你在做什么事、卡在哪」，比列一堆方案有用得多。
+
+  - type: textarea
+    id: scene
+    attributes:
+      label: 你当时在做什么
+      description: 场景比功能更重要，我会按场景想办法，不一定按你说的方案做
+      placeholder: |
+        例：联调时要在同一台机器上模拟「接口 500 + 慢 3 秒」，
+        现在得开两条规则分别配，想一次配好。
+    validations:
+      required: true
+
+  - type: textarea
+    id: now
+    attributes:
+      label: 现在怎么凑合解决
+      description: 有绕过办法也写一下，能帮我判断优先级
+      placeholder: 例：先开弱网规则，再手动开断网，来回切
+    validations:
+      required: false
+
+  - type: textarea
+    id: want
+    attributes:
+      label: 你希望它变成什么样
+      placeholder: 例：规则里能同时选「状态码」和「延迟」，一条规则搞定
+    validations:
+      required: false
+
+  - type: dropdown
+    id: weight
+    attributes:
+      label: 对你的影响
+      options:
+        - 阻塞工作，每次都要绕过
+        - 影响效率，但能忍
+        - 锦上添花
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我搜过现有 issue，没有重复
+          required: true
+        - label: 我接受「按场景重新设计方案」而不一定照搬我的想法

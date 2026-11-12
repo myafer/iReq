@@ -1,0 +1,31 @@
+name: Issue 自动分流
+
+# 只做分类打标与追问，不改代码、不开分支、不关 issue。
+# 没有配置 TRIAGE_API_KEY 时整条步骤会自动跳过，不影响正常提 issue。
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 分类并追问缺失信息
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          LLM_API_KEY: ${{ secrets.TRIAGE_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.TRIAGE_BASE_URL }}
+          LLM_MODEL: ${{ secrets.TRIAGE_MODEL }}
+        run: node .github/scripts/triage.js

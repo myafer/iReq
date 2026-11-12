@@ -95,6 +95,8 @@ window.ReqLiteI18N_EN = {
   "内存保留条数": "Flows kept in memory",
   "内容类型": "Content type",
   "其他": "Other",
+  "反馈与建议": "Feedback & ideas",
+  "Bug、建议、想要的功能都可以提": "Bugs, ideas, feature requests — all welcome",
   "减小字号": "Decrease font size",
   "分组": "Groups",
   "切换主题": "Toggle theme",

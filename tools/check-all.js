@@ -16,6 +16,7 @@ const path = require('path');
 const { UI } = require('./_env');
 
 const SUITES = [
+  ['仓库元数据', 'check-repo-meta.js'],
   ['i18n 字典', 'check-i18n.js'],
   ['流量存储', 'check-store.js'],
   ['DOM 结构', 'check-dom.js'],

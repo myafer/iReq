@@ -57,6 +57,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       (await page.locator('#moreMenu #fontVal').count()) === 1 &&
       (await page.locator('#moreMenu #btnTheme').count()) === 1 &&
       (await page.locator('#moreMenu #btnLang').count()) === 1);
+    // 反馈入口：必须是指向 GitHub issue 选择页的外链（Electron 会交给系统浏览器打开）
+    const feedback = await page.evaluate(() => {
+      const a = document.querySelector('#moreMenu #btnFeedback');
+      if (!a) return null;
+      return { href: a.getAttribute('href'), target: a.getAttribute('target'), text: a.textContent.trim() };
+    });
+    ok('更多菜单有反馈入口并指向 issue 页',
+      !!feedback && /github\.com\/myafer\/iReq\/issues\/new/.test(feedback.href || '') && feedback.target === '_blank',
+      JSON.stringify(feedback));
     await page.keyboard.press('Escape');
     await wait(120);
     ok('Esc 收起「更多」', await page.locator('#moreMenu').isHidden());

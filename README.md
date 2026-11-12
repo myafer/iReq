@@ -2,10 +2,14 @@
 
 # iReq
 
+[![Releases](https://img.shields.io/github/v/release/myafer/iReq?include_prereleases&sort=semver)](https://github.com/myafer/iReq/releases) [![Issues](https://img.shields.io/github/issues/myafer/iReq)](https://github.com/myafer/iReq/issues) [![License](https://img.shields.io/github/license/myafer/iReq)](LICENSE)
+
 A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm install`, one command to start the server, and you work in the browser.
 
 > Positioning: the thing to reach for when you want to debug one API and don't want to fire up a full-featured suite. Cross macOS / Windows / Linux,
 > pure Node core with no native dependencies; the optional desktop app wraps the same core in an Electron window.
+
+**Hit a problem or have an idea?** [Open an issue](https://github.com/myafer/iReq/issues/new/choose) — bugs, feature wishes, and "this feels awkward" feedback are all welcome, no formal write-up needed. The in-app path is **More ⋯ → Feedback & ideas**.
 
 ## What it can do
 
@@ -416,6 +420,7 @@ so they don't depend on the console happening to have data; each script prints a
 
 ```bash
 npm run check                   # one-shot summary (excludes suites that change the macOS system proxy)
+node tools/check-repo-meta.js    # Repo metadata: issue form structure / blank issues off / triage holds issues-only permission (22 items, no service)
 node tools/check-i18n.js        # English dictionary: orphan keys / uncovered Chinese UI text (no service needed)
 node tools/check-store.js        # persistence / restart recovery / clear doesn't resurrect (pure unit, temp dir)
 node tools/check-proxy.js        # plaintext forwarding, non-443 passthrough, 8MB streaming upload, keep-alive reuse, MITM, pinning diagnostics, capture toggle
@@ -432,7 +437,7 @@ node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / ric
 node tools/check-rule-workspace.js # activity bar / explorer / multi-tab / unsaved snapshots / shortcuts / breadcrumb / status bar / English UI (28 items)
 node tools/check-ca-persist.js   # CA archive self-heal / legacy migration / .p12 round-trip / install command / verdict persistence / shield UI (57 items)
 node tools/check-dock.js         # Dock: mock master switch end-to-end bypass / badge counts / pause sync / right-click shortcuts / English UI (28 items)
-node tools/check-filterbar.js    # Filter bar: matchStatus semantics / 12 content types through real traffic / UI single-select row counts / English UI (57 items)
+node tools/check-filterbar.js    # Filter bar: matchStatus semantics / 12 content types through real traffic / UI single-select row counts / flyout not clipped / English UI (62 items)
 node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
 node tools/verify-ui.js          # top-bar buttons / dialogs / connection guide address
 node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)
@@ -490,10 +495,26 @@ It will then open normally. Windows (SmartScreen) and Linux AppImage may show si
 - The persisted JSONL includes request/response bodies (up to 2MB each), so files grow quickly under heavy traffic; use `--no-persist` to disable persistence.
 - Long-lived streaming responses (SSE / chunked) are forwarded in real time; an in-flight record exists from the moment the request starts and stays "in progress" until the connection ends (exports skip unfinished records).
 - HTTP/2 is decrypted via ALPN negotiation (h2 streams are recorded individually and details show "Protocol version: HTTP/2"); upstreams are always forwarded over HTTP/1.1, and extended CONNECT (WebSocket over h2) is not supported yet.
-- No WebSocket frame-level decryption, no HAR export (can be added if needed).
+- No WebSocket frame-level decryption. HAR export is supported (**More ⋯ → Export HAR**); unfinished records are skipped.
 - **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see "Where app names come from").
 - Local process detection is macOS-only; Linux / Windows would each need `netstat + /proc` / `GetExtendedTcpTable`.
   Very short connections that close immediately may miss the `lsof` snapshot and keep the UA-inferred app name.
+
+## Feedback and contributing
+
+Opening an issue is the most valuable contribution — **you don't need to write code**:
+
+- [Bug report](https://github.com/myafer/iReq/issues/new?template=bug.yml): can't decrypt, empty list, broken UI, crash
+- [Feature request](https://github.com/myafer/iReq/issues/new?template=feature.yml): describe the task you were doing and where it got stuck
+- Faster in-app: **More ⋯ → Feedback & ideas** goes to the same place
+
+Three ground rules, all to save each other time:
+
+1. **Never paste real cookies, tokens or phone numbers.** Version, platform, the failing host and what you saw is enough to reproduce.
+2. **Scenario first, solution second.** "I want status code and delay in one rule" beats "add a combined field to rules".
+3. **Every issue gets read.** Labels flow `needs-triage → accepted → shipped`, and release notes say which change came from whose report.
+
+Code contributions are welcome too: open an issue to agree on the approach first, then send a PR. `node tools/check-all.js` must pass — every feature has a matching `tools/check-*.js`.
 
 ## License
 

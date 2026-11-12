@@ -2,10 +2,14 @@
 
 # iReq
 
+[![Releases](https://img.shields.io/github/v/release/myafer/iReq?include_prereleases&sort=semver)](https://github.com/myafer/iReq/releases) [![Issues](https://img.shields.io/github/issues/myafer/iReq)](https://github.com/myafer/iReq/issues) [![License](https://img.shields.io/github/license/myafer/iReq)](LICENSE)
+
 轻量、跨平台的 HTTP(S) **抓包 / Mock / 重放** 工具。一个 `npm install`，一条命令起服务，浏览器里操作。
 
 > 定位：不想为了调一个接口去开全家桶工具时用的东西。跨 macOS / Windows / Linux，
 > 内核纯 Node 实现、无原生依赖；可选桌面版用 Electron 把同一内核装进窗口。
+
+**遇到问题或有想法？** [提个 issue](https://github.com/myafer/iReq/issues/new/choose) —— bug、想要的功能够用着别扭的地方都可以，不用写得很正式。应用内「更多 ⋯ → 反馈与建议」是同一个入口。
 
 ## 能做什么
 
@@ -414,6 +418,7 @@ curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json'
 
 ```bash
 npm run check                   # 一键汇总（不含会改动 macOS 系统代理的脚本）
+node tools/check-repo-meta.js    # 仓库元数据：issue 模板结构 / 空白 issue 关闭 / 分流 workflow 只拿 issues 权限（22 项，无需服务）
 node tools/check-i18n.js        # 英文字典：孤儿键 / 未覆盖中文文案（无需服务）
 node tools/check-store.js        # 落盘 / 重启恢复 / 清空不复活（纯单元，用临时目录）
 node tools/check-proxy.js        # 明文转发、非 443 透传、8MB 流式上传、保活复用、MITM、证书固定诊断、抓包开关
@@ -430,7 +435,7 @@ node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版�
 node tools/check-rule-workspace.js # 活动栏 / 资源管理器 / 多标签 / 未保存快照 / 快捷键 / 面包屑 / 状态栏 / 英文界面（28 项）
 node tools/check-ca-persist.js   # CA 档案自愈 / 旧目录迁移 / .p12 往返 / 一键安装命令 / 状态落盘 / 盾牌 UI（57 项）
 node tools/check-dock.js         # 控制坞：Mock 总开关端到端旁路 / 徽章口径 / 暂停联动 / 右键直达 / 英文界面（28 项）
-node tools/check-filterbar.js    # 筛选条：matchStatus 语义 / 12 种内容类型真实流量过筛选 / UI 单选与行数一致 / 英文界面（57 项）
+node tools/check-filterbar.js    # 筛选条：matchStatus 语义 / 12 种内容类型真实流量过筛选 / UI 单选与行数一致 / 更多菜单不被裁剪 / 英文界面（62 项）
 node tools/check-scrollbar.js    # 深浅色滚动条（白条回归）
 node tools/verify-ui.js          # 顶栏按钮 / 弹窗 / 连接向导地址
 node tools/check-local-proxy.js  # 系统代理开启/恢复往返（scutil 验证真的生效）
@@ -487,10 +492,26 @@ xattr -cr /Applications/iReq.app
 - 落盘的 JSONL 含请求/响应体（单条最多 2MB），大流量场景文件增长较快；`--no-persist` 可关掉落盘。
 - 长连接流式响应（SSE / chunked）会实时转发；请求发起时就有一条「进行中」记录，连接结束前一直保持该状态（导出会跳过未完成的记录）。
 - HTTP/2 已按 ALPN 协商解密（h2 流量逐 stream 入库，详情标「协议版本 HTTP/2」）；上游一律按 HTTP/1.1 转发，扩展 CONNECT（h2 上的 WebSocket）暂不支持。
-- 不做 WebSocket 帧级解密、不做 HAR 导出（需要的话可以加）。
+- 不做 WebSocket 帧级解密。HAR 导出已支持（「更多 ⋯ → 导出 HAR」），未完成的记录会被跳过。
 - **手机等远程设备拿不到进程/包名**，只能按 UA 推断或用 UA 别名标注（见「应用名是怎么来的」）。
 - 本机进程识别只在 macOS 有；Linux / Windows 需要各自实现 `netstat + /proc` / `GetExtendedTcpTable`。
   建立后立刻关闭的极短连接可能赶不上 `lsof` 快照，会保持 UA 推断的应用名。
+
+## 反馈与贡献
+
+提 issue 是最有价值的贡献方式，**不需要你会写代码**：
+
+- [Bug 报告](https://github.com/myafer/iReq/issues/new?template=bug.yml)：解不开、列表空的、界面不对、崩溃
+- [功能建议](https://github.com/myafer/iReq/issues/new?template=feature.yml)：说清「你在做什么事、卡在哪」比列方案有用
+- 应用内更快：「更多 ⋯ → 反馈与建议」直接跳到同一个入口
+
+三条约定，都是为了别浪费你我的时间：
+
+1. **不要贴真实的 Cookie / Token / 手机号**。只说版本、平台、失败域名和现象就够了，我按场景复现。
+2. **先说场景，再说方案**。你说「想一次配好状态码和延迟」，比说「给规则加个组合字段」更容易被我做对。
+3. **提了就会有人看**。标签流转 `needs-triage → accepted → shipped`，发版说明里会写清哪条来自谁的反馈。
+
+代码贡献同样欢迎：先开 issue 对齐方案再提 PR，`node tools/check-all.js` 全套自检必须通过。仓库里每个功能都配了对应的 `tools/check-*.js`，改哪儿跑哪儿。
 
 ## License
 
