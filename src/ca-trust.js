@@ -172,10 +172,15 @@ class CaTrust {
     };
   }
 
-  /** 钥匙串里同名但指纹不同的旧 CA —— 覆盖安装反复装证书的历史痕迹 */
-  keychainInfo() {
+  /** 钥匙串里同名但指纹不同的旧 CA —— 覆盖安装反复装证书的历史痕迹。
+   *  结果按指纹缓存 60s：每次要跑 4 个 security 子进程（2 个 CN × 登录/系统钥匙串），
+   *  首启主进程忙时不该被它反复拖住；装/删证书会换指纹或走强制刷新。 */
+  keychainInfo(force = false) {
     if (!this.supported) return { supported: false, cn: DEFAULT_CN, certs: [], stale: [] };
     const current = fingerprint(this.ca.caPem);
+    if (!force && this._kcCache && this._kcCache.fp === current && Date.now() - this._kcCache.at < 60000) {
+      return this._kcCache.val;
+    }
     const certs = [];
     for (const cn of CNS) {
       const r = this.runner('security', ['find-certificate', '-a', '-c', cn, '-Z', '-p', this.loginKeychain], 8000);
@@ -195,13 +200,15 @@ class CaTrust {
         }
       }
     }
-    return {
+    const val = {
       supported: true,
       cn: DEFAULT_CN,
       keychain: this.loginKeychain,
       certs,
       stale: certs.filter((c) => !c.current),
     };
+    this._kcCache = { fp: current, at: Date.now(), val };
+    return val;
   }
 
   /** 强制重新检测（会跑一次 security 子进程，别放在轮询里） */

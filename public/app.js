@@ -3325,14 +3325,34 @@ function renderCaStatus(arc, trust) {
   if (install) install.disabled = state === 'on';
 }
 
-async function loadCaStatus() {
-  try {
-    const [arc, trust] = await Promise.all([api('/api/ca/archive'), api('/api/ca-trust')]);
-    renderCaStatus(arc, trust);
-    return { arc, trust };
-  } catch (_) {
-    return null;
+/** 证书状态卡加载：archive 与 ca-trust 任何一侧失败都不能把卡片卡在「检查中」。
+ *  覆盖安装后的首次打开，主进程可能被钥匙串 / 网络探测子进程阻塞较久，
+ *  请求失败或超时（15s）都会自动重试，最终失败时给出明确提示而不是永远转圈。 */
+let caStatusRetryTimer = null;
+async function loadCaStatus(attempt = 0) {
+  clearTimeout(caStatusRetryTimer);
+  const opt = { signal: AbortSignal.timeout(15000) };
+  const [arcR, trustR] = await Promise.allSettled([
+    api('/api/ca/archive', opt),
+    api('/api/ca-trust', opt),
+  ]);
+  const arc = arcR.status === 'fulfilled' ? arcR.value : null;
+  const trust = trustR.status === 'fulfilled' ? trustR.value : null;
+  // 任何一侧成功就先渲染 —— 缺的一侧由重试补齐
+  if (arc || trust) renderCaStatus(arc, trust);
+  if (arc && trust) return { arc, trust };
+  if (attempt < 3) {
+    caStatusRetryTimer = setTimeout(() => { loadCaStatus(attempt + 1); }, [1500, 3000, 6000][attempt]);
+    return { arc, trust, pending: true };
   }
+  const shield = $('#caShield');
+  if (shield && !arc && !trust) {
+    shield.className = 'ca-shield off';
+    shield.textContent = '● 自动检测失败';
+  }
+  const hint = $('#caShieldHint');
+  if (hint && (!arc || !trust)) hint.textContent = '自动检测失败，点「重新检测」重试；仍不行请重启 iReq';
+  return { arc, trust };
 }
 
 /** 一键安装：服务端真的执行 add-trusted-cert，再 verify-cert 回读；失败降级到手动命令 */
@@ -3741,8 +3761,10 @@ function bind() {
   $('#ruNew').addEventListener('click', () => newRuleInDir(S.rulesDir));
   $('#ruSave').addEventListener('click', () => saveRule(false));
   $('#btnCa').addEventListener('click', async () => {
+    // 状态卡先渲染，不等 loadStatus（首启时它可能被子进程探测拖慢）
+    const caStatusPromise = loadCaStatus();
     const st = await loadStatus();
-    const caStatus = await loadCaStatus();
+    const caStatus = await caStatusPromise;
     const a = currentAddr();
     $('#caMobileProxy').textContent = addrFull(a);
     // 用安装页而不是直接甩 .pem：页面里有下载按钮 + 分平台步骤，手机上好操作
@@ -4772,6 +4794,7 @@ async function init() {
   bind();
   await loadStatus();
   loadLocalProxy(); // 只读探测，不阻塞首屏
+  loadCaStatus(); // 预热证书状态卡：用户点开证书页时不用再等检测
   await loadTlsFailures();
   await loadFlows(); // 内部 renderList 会一并渲染置顶的诊断行
   await loadRules();
