@@ -263,7 +263,10 @@ CFNetwork=我的 iOS 客户端
   `iOS 127.0.0.1` / `未知 127.0.0.1` 之间闪跳。远程设备按 IP 单独成组，
   平台名取该设备出现最多的一种，没有 UA 就只显示 IP（不写「未知」）。
   点「本机」会筛出所有本机来源；详情显示「本机 · 原始 IP」，老书签里的具体 IP 仍然可用
-- **搜索**：URL / 方法 / 状态码 / 应用 / 设备 IP / 「本机」；「全部 / 错误 / JSON」常驻，Mock、握手失败收在「更多 ▾」（选中时触发按钮带蓝点）
+- **搜索**：URL / 方法 / 状态码 / 应用 / 设备 IP / 「本机」；搜索框下方有一条**筛选条**（单选，分组用竖线隔开，超出横向滚动）：
+  **全部 · HTTP · HTTPS · WebSocket · SSE** ｜ **HTTP1 · HTTP2** ｜ **JSON · XML · 文本 · HTML · JS · 图片 · 媒体 · 二进制** ｜ **1xx–5xx**；
+  Mock、握手失败、错误收在「更多 ▾」（选中时触发按钮带蓝点）。协议按记录的 scheme / httpVersion 判定，
+  内容类型按响应 Content-Type 判定（svg 归图片、event-stream 归 SSE、无 Content-Type 不算二进制），前后端共用同一套判断
 - **字号**：「⋯ 更多 → 外观」里 `A− / A+` 按 5% 步进（85%–160%），点中间的百分比一键回 100%，选择记在 localStorage
 - **栏宽**：分组边栏 / 请求列表 / 详情之间的两根竖线都能左右拖（悬停变蓝并可看到握把），
   双击复位，聚焦后 `← →` 微调 16px（Shift 48px）、`Home` 复位；宽度记在 localStorage，
@@ -411,6 +414,7 @@ node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版�
 node tools/check-rule-workspace.js # 活动栏 / 资源管理器 / 多标签 / 未保存快照 / 快捷键 / 面包屑 / 状态栏 / 英文界面（28 项）
 node tools/check-ca-persist.js   # CA 档案自愈 / 旧目录迁移 / .p12 往返 / 一键安装命令 / 状态落盘 / 盾牌 UI（57 项）
 node tools/check-dock.js         # 控制坞：Mock 总开关端到端旁路 / 徽章口径 / 暂停联动 / 右键直达 / 英文界面（28 项）
+node tools/check-filterbar.js    # 筛选条：matchStatus 语义 / 12 种内容类型真实流量过筛选 / UI 单选与行数一致 / 英文界面（57 项）
 node tools/check-scrollbar.js    # 深浅色滚动条（白条回归）
 node tools/verify-ui.js          # 顶栏按钮 / 弹窗 / 连接向导地址
 node tools/check-local-proxy.js  # 系统代理开启/恢复往返（scutil 验证真的生效）

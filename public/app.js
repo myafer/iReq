@@ -437,6 +437,63 @@ function applyFlowDelta() {
   if (prevTop > 0) list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
 }
 
+/** 筛选条单选判断：与服务端 store.filter 的 status 语义保持一致（新增协议/内容/状态码分组） */
+function matchStatusUi(f, status) {
+  if (!status) return true;
+  const st = Number(f.status) || 0;
+  const ct = String(f.resContentType || '').toLowerCase();
+  switch (status) {
+    case 'error':
+      return st >= 400 || !!f.error;
+    case 'ok':
+      return st >= 200 && st < 400;
+    case 'json':
+      return ct.includes('json');
+    case 'http':
+      return f.scheme === 'http';
+    case 'https':
+      return f.scheme === 'https';
+    case 'ws':
+      return !!f.ws;
+    case 'sse':
+      return ct.includes('text/event-stream');
+    case 'http1':
+      return String(f.httpVersion || '').toUpperCase().startsWith('HTTP/1');
+    case 'http2':
+      return String(f.httpVersion || '').toUpperCase().startsWith('HTTP/2');
+    case 'xml':
+      return ct.includes('xml') && !ct.includes('html');
+    case 'html':
+      return ct.includes('html');
+    case 'js':
+      return /javascript|ecmascript/.test(ct);
+    case 'text':
+      return ct.startsWith('text/') && !/html|javascript|ecmascript|event-stream/.test(ct);
+    case 'image':
+      return ct.startsWith('image/');
+    case 'media':
+      return ct.startsWith('audio/') || ct.startsWith('video/');
+    case 'binary':
+      return (
+        !!ct &&
+        !ct.startsWith('text/') &&
+        !/json|xml|html|javascript|ecmascript|event-stream|image\/|audio\/|video\//.test(ct)
+      );
+    case '1xx':
+      return st >= 100 && st < 200;
+    case '2xx':
+      return st >= 200 && st < 300;
+    case '3xx':
+      return st >= 300 && st < 400;
+    case '4xx':
+      return st >= 400 && st < 500;
+    case '5xx':
+      return st >= 500 && st < 600;
+    default:
+      return true;
+  }
+}
+
 function renderList() {
   const list = $('#list');
   const prevTop = list.scrollTop;
@@ -3823,7 +3880,8 @@ function bind() {
     S.filter.status = btn.dataset.status || '';
     S.filter.mocked = btn.dataset.mocked === '1';
     syncFilterMore();
-    if (S.filter.status === 'tls' || S.filter.mocked) toggleMoreMenu('filter', false);
+    if (S.filter.status === 'tls' || S.filter.status === 'error' || S.filter.mocked)
+      toggleMoreMenu('filter', false);
     // 握手失败是连接层诊断，不在 flow store 里，后端不认这个筛选值
     if (S.filter.status === 'tls') {
       renderList();
@@ -4303,6 +4361,8 @@ function bind() {
         url: f.url,
         host: f.host,
         path: f.path,
+        scheme: f.scheme,
+        httpVersion: f.httpVersion,
         status: f.status,
         statusText: f.statusText,
         duration: f.duration,
@@ -4337,7 +4397,7 @@ function bind() {
         m.deviceLabel || ''
       } ${(m.process && `${m.process.name} ${m.process.command} ${m.process.pid}`) || ''}`.toLowerCase();
       const match =
-        (!S.filter.status || (S.filter.status === 'error' ? m.error || m.status >= 400 : S.filter.status === 'json' ? /json/i.test(m.resContentType || '') : true)) &&
+        matchStatusUi(m, S.filter.status) &&
         (!S.filter.mocked || m.mocked) &&
         (!S.filter.host || m.host === S.filter.host) &&
         (!S.filter.app || m.app === S.filter.app) &&
@@ -4457,7 +4517,7 @@ function closeAllPopups() {
 }
 
 function syncFilterMore() {
-  const active = !!(S.filter.mocked || S.filter.status === 'tls');
+  const active = !!(S.filter.mocked || S.filter.status === 'tls' || S.filter.status === 'error');
   const dot = $('#filterMoreDot');
   const trig = $('#btnFilterMore');
   if (dot) dot.hidden = !active;

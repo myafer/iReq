@@ -32,6 +32,7 @@ const SUITES = [
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
   ['控制坞', 'check-dock.js'],
+  ['筛选条', 'check-filterbar.js'],
   ['证书档案与一键信任', 'check-ca-persist.js'],
   ['代理地址', 'check-address.js'],
   ['精简交互', 'check-simple-ui.js'],

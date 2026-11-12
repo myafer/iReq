@@ -651,6 +651,54 @@ pre {
   white-space: nowrap;
 }
 
+/* 筛选条：协议 / 内容类型 / 状态码分组，单选，超出横向滚动 */
+.fbar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.fbar::-webkit-scrollbar {
+  display: none;
+}
+
+.fbar > button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+
+.fbar > button:hover {
+  color: var(--text);
+}
+
+.fbar > button.on {
+  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-weight: 500;
+}
+
+.fbar-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 7px;
+  flex: none;
+}
+
 /* ------------------------------------------------------------- 分组边栏 */
 
 .shell {
@@ -3476,6 +3524,11 @@ pre.raw-view {
 .seg button {
   font-size: calc(12px * var(--hd));
   padding: 3px 10px;
+}
+
+.fbar > button {
+  font-size: calc(12px * var(--hd));
+  padding: 2px 8px;
 }
 
 .count {

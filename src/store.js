@@ -125,7 +125,12 @@ class FlowStore extends EventEmitter {
     return flow;
   }
 
-  /** 条件筛选：返回完整 flow 对象。列表接口再映射成 summary，导出直接用完整对象。 */
+  /**
+   * 条件筛选：返回完整 flow 对象。列表接口再映射成 summary，导出直接用完整对象。
+   * status 单值匹配语义见模块底的 matchStatus（与前端 matchStatusUi 保持一致）：
+   * 协议（http/https/ws/sse/http1/http2）、内容类型（json/xml/text/html/js/image/media/binary）、
+   * 状态码（1xx..5xx）、error / ok / json（历史值，保持兼容）。
+   */
   filter({
     query = '',
     method = '',
@@ -145,9 +150,7 @@ class FlowStore extends EventEmitter {
       const f = ensureDerived(f0);
       if (onlyMocked && !f.mocked) continue;
       if (method && f.method !== method.toUpperCase()) continue;
-      if (status === 'error' && !(f.status >= 400 || f.error)) continue;
-      if (status === 'ok' && !(f.status >= 200 && f.status < 400)) continue;
-      if (status === 'json' && !String(f.resContentType || '').includes('json')) continue;
+      if (!matchStatus(f, status)) continue;
       if (h && String(f.host || '').toLowerCase() !== h) continue;
       if (ipq) {
         // 'local' 是侧栏「本机」那一组：回环 + 本机所有网卡 IP 都要命中。
@@ -264,6 +267,67 @@ class FlowStore extends EventEmitter {
   }
 }
 
+/**
+ * 筛选条 status 单值匹配。语义必须与前端 matchStatusUi 保持一致：
+ * 协议（http/https/ws/sse/http1/http2）、内容类型（json/xml/text/html/js/image/media/binary）、
+ * 状态码（1xx..5xx）、error / ok / json（历史值，保持兼容）。
+ */
+function matchStatus(f, status) {
+  if (!status) return true;
+  const st = Number(f.status) || 0;
+  const ct = String(f.resContentType || '').toLowerCase();
+  switch (status) {
+    case 'error':
+      return st >= 400 || !!f.error;
+    case 'ok':
+      return st >= 200 && st < 400;
+    case 'json':
+      return ct.includes('json');
+    case 'http':
+      return f.scheme === 'http';
+    case 'https':
+      return f.scheme === 'https';
+    case 'ws':
+      return !!f.ws;
+    case 'sse':
+      return ct.includes('text/event-stream');
+    case 'http1':
+      return String(f.httpVersion || '').toUpperCase().startsWith('HTTP/1');
+    case 'http2':
+      return String(f.httpVersion || '').toUpperCase().startsWith('HTTP/2');
+    case 'xml':
+      return ct.includes('xml') && !ct.includes('html');
+    case 'html':
+      return ct.includes('html');
+    case 'js':
+      return /javascript|ecmascript/.test(ct);
+    case 'text':
+      return ct.startsWith('text/') && !/html|javascript|ecmascript|event-stream/.test(ct);
+    case 'image':
+      return ct.startsWith('image/');
+    case 'media':
+      return ct.startsWith('audio/') || ct.startsWith('video/');
+    case 'binary':
+      return (
+        !!ct &&
+        !ct.startsWith('text/') &&
+        !/json|xml|html|javascript|ecmascript|event-stream|image\/|audio\/|video\//.test(ct)
+      );
+    case '1xx':
+      return st >= 100 && st < 200;
+    case '2xx':
+      return st >= 200 && st < 300;
+    case '3xx':
+      return st >= 300 && st < 400;
+    case '4xx':
+      return st >= 400 && st < 500;
+    case '5xx':
+      return st >= 500 && st < 600;
+    default:
+      return true;
+  }
+}
+
 /** 老数据没有 app / platform / route，按需补一次，避免聚合里一堆"未知" */
 function ensureDerived(f) {
   const ua = (f.reqHeaders || {})['user-agent'];
@@ -286,6 +350,7 @@ function summary(f) {
     host: f.host,
     path: f.path,
     scheme: f.scheme,
+    httpVersion: f.httpVersion,
     status: f.status,
     statusText: f.statusText,
     duration: f.duration,
@@ -310,4 +375,4 @@ function summary(f) {
   };
 }
 
-module.exports = { FlowStore, summary };
+module.exports = { FlowStore, summary, matchStatus };

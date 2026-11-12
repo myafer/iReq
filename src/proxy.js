@@ -992,6 +992,9 @@ class ProxyServer extends EventEmitter {
       flow.deviceKey = deviceKeyOf(flow.clientIp);
       flow.deviceLabel = deviceLabelOf(flow.clientIp, flow.platform);
     }
+    // 筛选条按 HTTP1 / HTTP2 分流：本代理与上游固定 ALPN http/1.1，明文请求也是 1.1
+    // 解析，所以真实发生 HTTP 交换的记录都是 HTTP/1.1；CONNECT 透传未解密，版本未知不标。
+    if (flow.method !== 'CONNECT' && !flow.httpVersion) flow.httpVersion = 'HTTP/1.1';
     const saved = this.store.add(flow);
 
     // CONNECT 阶段没有 UA：把应用名记到 host / IP 上，后续同域名、同设备的连接

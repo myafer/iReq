@@ -264,7 +264,10 @@ Every item in the sidebar's "App" group, the second line of the request list, an
   `iOS 127.0.0.1` / `Unknown 127.0.0.1` as new requests arrive. Remote devices are grouped by IP individually,
   the platform name is the most frequent one seen for that device, and with no UA only the IP is shown (no "Unknown").
   Clicking "Local" filters all local sources; details show "Local · original IP", and specific IPs in old bookmarks still work
-- **Search**: URL / method / status code / app / device IP / "Local"; "All / Error / JSON" stay visible, Mock and Handshake failures live under "More ▾" (the trigger gets a dot when one is active)
+- **Search**: URL / method / status code / app / device IP / "Local"; below the search box sits a **filter bar** (single-select, groups separated by dividers, scrolls horizontally when narrow):
+  **All · HTTP · HTTPS · WebSocket · SSE** ｜ **HTTP1 · HTTP2** ｜ **JSON · XML · Text · HTML · JS · Image · Media · Binary** ｜ **1xx–5xx**;
+  Mock, Handshake failures and Error live under "More ▾" (the trigger gets a dot when one is active). Protocol chips use the recorded scheme / httpVersion,
+  content chips use the response Content-Type (svg counts as image, event-stream as SSE, missing Content-Type is not binary); frontend and backend share one matcher
 - **Font size**: under "⋯ More → Appearance", `A− / A+` steps by 5% (85%–160%), click the middle percentage to reset to 100%, choice stored in localStorage
 - **Column widths**: the two vertical dividers between the grouped sidebar / request list / details can both be dragged left/right (turn blue on hover with a visible grip),
   double-click to reset, after focusing use `← →` to nudge 16px (Shift 48px), `Home` to reset; widths stored in localStorage,
@@ -412,6 +415,7 @@ node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / ric
 node tools/check-rule-workspace.js # activity bar / explorer / multi-tab / unsaved snapshots / shortcuts / breadcrumb / status bar / English UI (28 items)
 node tools/check-ca-persist.js   # CA archive self-heal / legacy migration / .p12 round-trip / install command / verdict persistence / shield UI (57 items)
 node tools/check-dock.js         # Dock: mock master switch end-to-end bypass / badge counts / pause sync / right-click shortcuts / English UI (28 items)
+node tools/check-filterbar.js    # Filter bar: matchStatus semantics / 12 content types through real traffic / UI single-select row counts / English UI (57 items)
 node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
 node tools/verify-ui.js          # top-bar buttons / dialogs / connection guide address
 node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)
