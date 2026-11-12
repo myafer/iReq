@@ -74,7 +74,7 @@ class FlowStore extends EventEmitter {
     }
   }
 
-  add(flow) {
+  add(flow, { persist = true } = {}) {
     if (this.paused) return flow;
     this.flows.unshift(flow);
     this.index.set(flow.id, flow);
@@ -82,7 +82,9 @@ class FlowStore extends EventEmitter {
       const dropped = this.flows.splice(this.maxFlows);
       for (const f of dropped) this.index.delete(f.id);
     }
-    if (this.persist) {
+    // 「进行中」的占位记录不落盘：请求没走完就写一行 status=0，重启后会变成
+    // 一堆永远没有结果的幽灵记录。等 finish 时一次性写入完整行。
+    if (persist && this.persist) {
       try {
         fs.appendFileSync(this._todayFile(), JSON.stringify(flow) + '\n');
       } catch (_) {
@@ -90,6 +92,33 @@ class FlowStore extends EventEmitter {
       }
     }
     this.emit('flow', flow);
+    return flow;
+  }
+
+  /**
+   * 请求完成：把占位记录就地补成最终结果，复用同一个 id。
+   * 列表和侧栏在请求「发起」时就已看到这条记录，这里只推一次 update，不新增行。
+   * 已被清空 / 挤出环形队列的记录不复活（否则点清空后，在途请求的收尾会把行带回来）。
+   */
+  finish(flow, patch) {
+    if (!flow || this.index.get(flow.id) !== flow) return null;
+    // 请求收尾的 fields 里带着「发起时」算出的 app（可能只是 UA 推断）。
+    // 若期间 lsof 已异步回填了真实进程名，不能被它覆盖回去。
+    const resolved =
+      flow.appSource === 'process'
+        ? { app: flow.app, appSource: flow.appSource, process: flow.process }
+        : null;
+    if (patch) Object.assign(flow, patch);
+    if (resolved) Object.assign(flow, resolved);
+    delete flow.pending;
+    if (this.persist) {
+      try {
+        fs.appendFileSync(this._todayFile(), JSON.stringify(flow) + '\n');
+      } catch (_) {
+        /* 落盘失败不影响内存更新 */
+      }
+    }
+    this.emit('flow-update', flow);
     return flow;
   }
 
@@ -184,9 +213,10 @@ class FlowStore extends EventEmitter {
     return this.filter(options).map(summary);
   }
 
-  /** 导出用：带 headers / body 的完整记录，条数上限交给调用方 */
+  /** 导出用：带 headers / body 的完整记录，条数上限交给调用方。
+   *  进行中的占位记录没有响应，导出时跳过，避免 HAR 里出现 status=0 的空条目。 */
   listFull(options = {}) {
-    return this.filter({ limit: 2000, ...options });
+    return this.filter({ limit: 2000, ...options }).filter((f) => !f.pending);
   }
 
   /**
@@ -376,6 +406,7 @@ function summary(f) {
     httpVersion: f.httpVersion,
     status: f.status,
     statusText: f.statusText,
+    pending: !!f.pending,
     duration: f.duration,
     reqSize: f.reqSize,
     resSize: f.resSize,

@@ -41,6 +41,8 @@ const SUITES = [
   ['握手失败列表', 'check-tls-list.js'],
   // 会改 networkSim 配置并清空流量，放最末；脚本结束会自己恢复现场
   ['网络模拟', 'check-network-sim.js'],
+  // 会清空流量 / 诊断数据 + 自己起慢上游，必须最后跑
+  ['发起即见与清空同步', 'check-instant.js'],
 ];
 /* e2e.js 是早期只打日志、不做断言的冒烟脚本，且仍按原生 textarea 填 #ruBody
  * （规则编辑器换成 Monaco 后该节点隐藏，必然超时）——暂不纳入一键回归，脚本保留，

@@ -13,7 +13,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | --- | --- |
 | HTTPS decryption | Root CA pinned to `~/.ireq/ca` (generated once, reused across upgrades), dynamically issues leaf certificates per domain (397-day validity + SAN, meeting Apple's requirements) |
 | Capture | Full records of plaintext HTTP and decrypted HTTPS: method, URL, headers, body, status, duration, size |
-| Live view | Console pushes via SSE; a request appears in the list the moment it completes. New flows insert a single row instead of re-rendering the whole list |
+| Live view | Console pushes via SSE; **the moment a request starts** it appears in both the list and the sidebar (status column shows `…`). The response fills status / duration / body into that same row. New flows insert a single row instead of re-rendering the whole list; "Clear" empties the list and sidebar groups in the same frame |
 | Grouped sidebar | Automatically aggregates **device / app / domain / API structure**; one click filters; bookmark frequently used filters |
 | Mock | Matches by method + URL (contains / wildcard / regex) + domain, returns custom status code, headers, body; add delay to simulate a slow network |
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
@@ -237,7 +237,7 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 
 - **Top bar**: only "Capture / Rules / Clear / ⋯ More" stay visible; certificates, settings, export, network simulation, theme, language and font size live in "⋯ More". The address pill shows the LAN IP by default, with IP / port / full-string copy and ▾ to switch interfaces (see above)
 - **Dock** (a permanent strip at the bottom): on the left, the **system proxy takeover state** (● green = taking over `IP:port`, yellow = taking over but HTTPS passing through, gray = not taken over) — click to toggle takeover/release, ✎ opens the connection wizard; on the right, three quick toggles: the **Mock master switch** (bypasses all rules at once without touching their content; badge = enabled rule count, right-click opens the rules workspace), **network simulation** (click to toggle, badge = active rule count, right-click opens settings), **Pause / Resume** capture (same state source as the top-bar "Capture" switch) and **Clear**
-- **List**: method, path, domain, status, duration; `MOCK` / `REPLAY` / `WS` / `Passthrough` badges distinguish the source
+- **List**: method, path, domain, status, duration; in-flight requests show a neutral grey `…` (subtle pulse, never mistaken for the red error state) and turn into the real status code in place; `MOCK` / `REPLAY` / `WS` / `Passthrough` badges distinguish the source
 - **Handshake failures**: when a client rejects the root CA (certificate pinning) or the port is not HTTP, that host appears as a red diagnostic row at the top of the list in real time — aggregated per host with a failure count, so retries never flood the list. The "More ▾ → Handshake failures" filter isolates them; opening a row shows the reason and a one-click "Skip decryption" action. These are connection-level events, not flows: they stay out of HAR exports and are cleared together with the list.
 - **Network simulation** ("⋯ More → Network Simulation", or the sidebar app dot / "Network ▾" in details / right-click a row): match by app / host / IP (or `*` for everything) and apply **Offline** (connection reset at CONNECT / request time), **Timeout** (no response until the deadline), or **Slow** (extra latency + response throttled to a target KB/s; passthrough tunnels throttled at the byte level). Rules are session-only — never written to disk, cleared on restart. Clicking the dot next to a sidebar app switches Normal / Slow / Offline / Timeout in place; the badge shows the active rule count, and changes sync to every window over SSE. Simulated requests are recorded as flows with a mode badge.
 - **Details**: four tabs — Overview / Request / Response / Raw — with auto-formatted, syntax-highlighted JSON;
@@ -381,7 +381,8 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], m
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-clear / network-sim
-                                  (flow-update is the async local process name backfill, only app/appSource/process change)
+                                  (flow = in-flight placeholder emitted when the request starts; flow-update = response
+                                   completion in place, plus async local process name backfill; clear = list + sidebar reset)
 GET    /ca.pem                    Root CA (served by both the console and the proxy port)
 GET    /ca.cer                    DER form of the same root CA (for iOS / Android installs)
 ```
@@ -414,6 +415,7 @@ node tools/check-empty-state.js  # empty state show/hide, list/detail font size,
 node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, clipping and overflow
 node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
 node tools/check-app-cascade.js  # checkbox-style multi-select apps (green check): domain / API cascade, upper groups collapse, legacy bookmarks (27 items)
+node tools/check-instant.js      # in-flight records + sidebar sync, in-place completion, same-frame clear, no revive (36 items)
 node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
 node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
 node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)
@@ -473,7 +475,7 @@ It will then open normally. Windows (SmartScreen) and Linux AppImage may show si
 ## Known limitations
 
 - The persisted JSONL includes request/response bodies (up to 2MB each), so files grow quickly under heavy traffic; use `--no-persist` to disable persistence.
-- Long-lived streaming responses (SSE / chunked) are forwarded in real time, but only recorded after the response ends.
+- Long-lived streaming responses (SSE / chunked) are forwarded in real time; an in-flight record exists from the moment the request starts and stays "in progress" until the connection ends (exports skip unfinished records).
 - HTTP/2 is not deframed; it falls back to 1.1.
 - No WebSocket frame-level decryption, no HAR export (can be added if needed).
 - **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see "Where app names come from").

@@ -700,6 +700,24 @@ class ProxyServer extends EventEmitter {
     };
 
     const ctx = { req, res, target, startedAt, reqCapture, meta };
+    // 请求一进来就出现在列表和侧栏，不等上游响应
+    ctx.flow = this._begin(ctx);
+    // 客户端 / 上游提前断开（没有走完任何收尾分支）时，别让「进行中」永远挂着
+    if (ctx.flow) {
+      res.once('close', () => {
+        const flow = ctx.flow;
+        if (!flow || !flow.pending) return;
+        setImmediate(() => {
+          if (!flow.pending || this.store.index.get(flow.id) !== flow) return;
+          this.store.finish(flow, {
+            status: 0,
+            statusText: '',
+            duration: elapsed(startedAt),
+            error: 'iReq: 请求未完成（连接已关闭）',
+          });
+        });
+      });
+    }
 
     // 防自环
     const targetPort = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
@@ -721,7 +739,7 @@ class ProxyServer extends EventEmitter {
           statusText: 'Loop Detected',
           duration: 0,
           error: msg,
-        });
+        }, ctx);
       }
       return;
     }
@@ -772,7 +790,7 @@ class ProxyServer extends EventEmitter {
         error: text,
         simMode: sim.mode,
         simRule: sim.rule.match,
-      });
+      }, ctx);
     }
     if (sim.mode === 'offline') {
       try {
@@ -833,7 +851,7 @@ class ProxyServer extends EventEmitter {
         duration: elapsed(startedAt),
         mocked: true,
         mockRule: rule.name || rule.id,
-      });
+      }, ctx);
     };
 
     const delay = Number(rule.delayMs) || 0;
@@ -922,7 +940,7 @@ class ProxyServer extends EventEmitter {
           statusText: upRes.statusMessage || '',
           duration: elapsed(startedAt),
           ...(sim ? { simMode: 'weak', simRule: sim.rule.match } : {}),
-        });
+        }, ctx);
       };
       if (sim) {
         // 弱网：响应体按目标带宽分片放行，不整体缓冲，大响应也不会撑爆内存
@@ -976,16 +994,39 @@ class ProxyServer extends EventEmitter {
       statusText: '',
       duration: elapsed(startedAt),
       error: String(message),
-    });
+    }, ctx);
   }
 
-  _record(fields) {
-    this.stats.total += 1;
+  /**
+   * 请求刚进代理就先落一条「进行中」占位记录并推 SSE：
+   * 列表、侧栏（设备 / 应用 / 域名 / 接口）在请求发起的那一刻就能看到，
+   * 而不是等上游响应收完。响应结束时 _record 复用同一个 id 就地补完，不产生第二行。
+   */
+  _begin(ctx) {
+    if (!this.config.capture) return null;
     const flow = {
       id: randomUUID(),
       ts: Date.now(),
-      ...fields,
+      ...ctx.meta,
+      reqBody: '',
+      reqSize: 0,
+      resHeaders: {},
+      resBody: null,
+      resSize: 0,
+      status: 0,
+      statusText: '',
+      duration: 0,
+      pending: true,
     };
+    this.stats.total += 1;
+    this._prepare(flow);
+    const saved = this.store.add(flow, { persist: false });
+    this._afterAdd(saved);
+    return saved;
+  }
+
+  /** 广播前必须补齐的字段：设备 key / 标签、HTTP 版本 */
+  _prepare(flow) {
     // 兜底：任何记录路径（含未来新增的分支）都带上稳定的设备 key / 标签，
     // 这样 SSE 推给控制台的实时流量也能按「本机」筛选，不依赖 UA。
     if (!flow.deviceKey || !flow.deviceLabel) {
@@ -995,8 +1036,10 @@ class ProxyServer extends EventEmitter {
     // 筛选条按 HTTP1 / HTTP2 分流：本代理与上游固定 ALPN http/1.1，明文请求也是 1.1
     // 解析，所以真实发生 HTTP 交换的记录都是 HTTP/1.1；CONNECT 透传未解密，版本未知不标。
     if (flow.method !== 'CONNECT' && !flow.httpVersion) flow.httpVersion = 'HTTP/1.1';
-    const saved = this.store.add(flow);
+  }
 
+  /** 入库后：学习应用名来源、异步回填本机进程名 */
+  _afterAdd(flow) {
     // CONNECT 阶段没有 UA：把应用名记到 host / IP 上，后续同域名、同设备的连接
     // 也能被「按应用」的模拟规则命中（手机、模拟器尤其依赖这条兜底）。
     const learned = String(flow.app || '');
@@ -1030,6 +1073,28 @@ class ProxyServer extends EventEmitter {
         })
         .catch(() => {});
     }
+  }
+
+  /**
+   * 记录收尾。带 ctx 且占位记录还在库里时，走 store.finish 就地更新（同一个 id）；
+   * 否则是 CONNECT / WebSocket / 模拟阻断这类一次性记录，按老逻辑新增。
+   */
+  _record(fields, ctx) {
+    if (ctx && ctx.flow) {
+      // 主链路一定已有占位记录。它可能刚被「清空」或被挤出环形队列：
+      // 这时只丢弃，绝不退化成新增——否则点完清空，在途请求的收尾会把行带回来。
+      if (this.store.index.get(ctx.flow.id) !== ctx.flow) return null;
+      return this.store.finish(ctx.flow, fields) || ctx.flow;
+    }
+    this.stats.total += 1;
+    const flow = {
+      id: randomUUID(),
+      ts: Date.now(),
+      ...fields,
+    };
+    this._prepare(flow);
+    const saved = this.store.add(flow);
+    this._afterAdd(saved);
     return saved;
   }
 }

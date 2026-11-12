@@ -549,19 +549,20 @@ function rowHtml(f) {
   ]
     .filter(Boolean)
     .join(' ');
-  const stText = f.error ? 'ERR' : f.status || '—';
+  // 请求刚发出、上游还没回：状态列显示「…」而不是 0/—，行带 pending 呼吸态
+  const stText = f.error ? 'ERR' : f.pending ? '…' : f.status || '—';
   const appName = f.app && f.app !== f.host ? f.app : '';
   const hostPart = esc(f.host);
   const appPart = appName ? ` · ${ICONS().iconHtml(appName, 'xs')}${esc(appName)}` : '';
   const sub = `<span class="hl">${hostPart}${appPart}</span>`;
-  return `<div class="row" data-id="${f.id}">
+  return `<div class="row${f.pending ? ' pending' : ''}" data-id="${f.id}">
     <span class="m ${esc(f.method)}">${esc(f.method)}</span>
     <span class="cellurl">
       <div class="p">${esc(p)}</div>
       <div class="h">${sub}${badges}</div>
     </span>
     <span class="st ${statusClass(f.status)}">${esc(stText)}</span>
-    <span class="tm ${f.duration > 800 ? 'slow' : ''}">${f.duration === undefined ? '' : fmtTime(f.duration)}</span>
+    <span class="tm ${f.duration > 800 ? 'slow' : ''}">${f.pending || f.duration === undefined ? '' : fmtTime(f.duration)}</span>
   </div>`;
 }
 
@@ -665,7 +666,15 @@ function isLocalClientIpUi(ip) {
   return lans.some((x) => String(x).toLowerCase() === s);
 }
 
+/* 清空会作废旧世代：清空前发出去的 facets 请求即使晚到，也不能把
+ * 已经消失的「设备 / 应用」分组重新填回去（高频抓包时很容易撞上）。 */
+let facetsEpoch = 0;
+let facetsSeq = 0;
+
 async function loadFacets() {
+  const epoch = facetsEpoch;
+  const seq = ++facetsSeq;
+  const fresh = () => epoch === facetsEpoch && seq === facetsSeq;
   try {
     // 勾选应用后域名 / 接口结构级联：把当前筛选传给服务端，
     // hosts 按「应用(+设备+搜索)」聚合，routes 再叠加已选域名。
@@ -675,8 +684,11 @@ async function loadFacets() {
     if (S.filter.host) p.set('host', S.filter.host);
     if (S.filter.q) p.set('q', S.filter.q);
     const qs = p.toString();
-    S.facets = await api('/api/facets' + (qs ? '?' + qs : ''));
+    const data = await api('/api/facets' + (qs ? '?' + qs : ''));
+    if (!fresh()) return; // 清空已发生，或已有更新的请求在路上
+    S.facets = data;
   } catch (_) {
+    if (!fresh()) return;
     /* 忽略，保留上一次结果 */
   }
   renderSide();
@@ -692,9 +704,40 @@ async function loadBookmarks() {
 }
 
 let facetTimer;
+let facetsLastAt = 0;
+/** 侧栏聚合跟着实时流走：80ms 合并突发；持续高频时至少每 300ms 推一次，
+ *  避免每条新流量都重置定时器导致侧栏反而一直不刷新。 */
 function scheduleFacets() {
   clearTimeout(facetTimer);
-  facetTimer = setTimeout(loadFacets, 1200);
+  const run = () => {
+    facetsLastAt = Date.now();
+    loadFacets();
+  };
+  if (Date.now() - facetsLastAt >= 300) run();
+  else facetTimer = setTimeout(run, 80);
+}
+
+/** 清空：UI 先同步抹平，再向服务端取一次权威空值 */
+function resetFacetsNow() {
+  facetsEpoch += 1;
+  clearTimeout(facetTimer);
+  S.facets = { hosts: [], apps: [], devices: [], routes: [] };
+  renderSide();
+  loadFacets();
+}
+
+/** 列表、待渲染队列、侧栏在同一帧一起清掉，避免「列表空了、分组还挂着」 */
+function clearFlowsUi({ resetDetail = false } = {}) {
+  pendingAdds.length = 0;
+  pendingPatches.length = 0;
+  S.flows = [];
+  renderList();
+  if (resetDetail) {
+    S.selectedId = null;
+    S.selected = null;
+    $('#detail').innerHTML = detailEmptyHtml;
+  }
+  resetFacetsNow();
 }
 
 function activeFilterKeys() {
@@ -3942,17 +3985,20 @@ function bind() {
   });
 
   $('#btnClear').addEventListener('click', async () => {
-    await api('/api/flows', { method: 'DELETE' });
-    // 诊断记录也一起清，否则点了「清空」列表里还留着几行
-    await api('/api/diagnostics', { method: 'DELETE' }).catch(() => {});
-    S.selectedId = null;
-    S.selected = null;
-    $('#detail').innerHTML = detailEmptyHtml;
-    S.flows = [];
+    // 乐观清空：列表、详情、侧栏（设备 / 应用 / 域名 / 接口）先在同一帧消失，
+    // 不等 DELETE 往返，也不等 SSE 广播或 facet 定时器。
     S.tlsFailures = [];
     syncTlsBadge();
-    renderList();
-    toast('已清空');
+    clearFlowsUi({ resetDetail: true });
+    try {
+      await api('/api/flows', { method: 'DELETE' });
+      // 诊断记录也一起清，否则点了「清空」列表里还留着几行
+      await api('/api/diagnostics', { method: 'DELETE' }).catch(() => {});
+      toast('已清空');
+    } catch (err) {
+      toast('清空失败: ' + err.message);
+      await loadFlows(); // 服务端没清成功，把真实列表拉回来
+    }
   });
 
   $('#btnRules').addEventListener('click', openRuleWorkspace);
@@ -4408,6 +4454,7 @@ function bind() {
         scheme: f.scheme,
         httpVersion: f.httpVersion,
         status: f.status,
+        pending: !!f.pending,
         statusText: f.statusText,
         duration: f.duration,
         reqSize: f.reqSize,
@@ -4456,24 +4503,26 @@ function bind() {
         scheduleFacets();
       }
     } else if (msg.type === 'flow-update') {
-      // 本机进程名是 lsof 异步查到的，比记录本身晚一点到：就地更新列表 / 详情 / 侧栏
+      // 两种来源：① 请求完成（占位记录就地补上状态码 / 耗时 / 响应类型）；
+      // ② 本机进程名是 lsof 异步查到的。都推的是完整 summary，整行合并即可。
       const f = msg.flow;
       const row = S.flows.find((x) => x.id === f.id);
       if (row) {
-        row.app = f.app;
-        row.appSource = f.appSource;
-        row.process = f.process;
-        if (f.deviceKey) row.deviceKey = f.deviceKey;
-        if (f.deviceLabel) row.deviceLabel = f.deviceLabel;
+        Object.assign(row, f);
         scheduleFlowPatch(row);
+      } else if (f.status || f.error) {
+        // 进行中的记录当时被筛选挡掉了，完成后可能应该出现 → 按最终状态重拉列表
+        loadFlows();
       }
-      if (S.selectedId === f.id && S.selected) {
-        S.selected.app = f.app;
-        S.selected.appSource = f.appSource;
-        S.selected.process = f.process;
-        if (f.deviceKey) S.selected.deviceKey = f.deviceKey;
-        if (f.deviceLabel) S.selected.deviceLabel = f.deviceLabel;
-        renderDetail();
+      if (S.selectedId === f.id) {
+        // 请求刚完成时详情里才有响应体，自动刷新（保留当前 tab，不打断查看）
+        api('/api/flows/' + f.id)
+          .then((flow) => {
+            if (S.selectedId !== f.id) return;
+            S.selected = flow;
+            renderDetail();
+          })
+          .catch(() => {});
       }
       scheduleFacets();
     } else if (msg.type === 'tls-failure') {
@@ -4492,9 +4541,9 @@ function bind() {
         renderSide();
       }
     } else if (msg.type === 'clear') {
-      S.flows = [];
+      // 别的窗口点了清空：列表和侧栏同步消失，不走 80ms 定时器
+      clearFlowsUi();
       scheduleRender();
-      scheduleFacets();
     }
   };
   es.onerror = () => {
