@@ -343,6 +343,8 @@ class ConsoleServer {
         caCreated: this.ca ? this.ca.created : false,
         caInfo: this.ca ? this.ca.info : null,
         dataDir: this.dataDir || null,
+        /* 界面按平台换文案：访达 / 资源管理器 / 文件管理器 */
+        platform: process.platform,
         caTrust: this.caTrust ? this._syncTrust() : null,
         safeMode: this._safeMode(),
         lan: lanAddresses(),
@@ -618,6 +620,8 @@ class ConsoleServer {
       // PUT  /api/rules/file?path=a/b.body.json       → 直接写 body 文件 { text } 或 { base64 }
       // POST /api/rules/fs                            → 新建 { type:'dir'|'rule', dir, name }
       // POST /api/rules/move                          → 重命名/拖拽移动 { from, toDir, newName? }
+      // POST /api/rules/copy                          → 复制粘贴 { from, toDir, newName? }
+      // POST /api/rules/reveal                        → 在系统文件管理器中显示 { path }
       // DELETE /api/rules/file?path=...               → 删除文件或文件夹（递归）
       if (method === 'GET' && parts[2] === 'tree') {
         return this._json(res, 200, this.rules.tree());
@@ -633,10 +637,17 @@ class ConsoleServer {
           return this._json(res, 400, { error: String((err && err.message) || err) });
         }
       }
-      if (method === 'POST' && (parts[2] === 'fs' || parts[2] === 'move')) {
+      if (method === 'POST' && ['fs', 'move', 'copy', 'reveal'].includes(parts[2])) {
         const body = (await this._body(req)) || {};
         try {
-          const out = parts[2] === 'fs' ? this.rules.create(body) : this.rules.move(body);
+          const out =
+            parts[2] === 'fs'
+              ? this.rules.create(body)
+              : parts[2] === 'move'
+                ? this.rules.move(body)
+                : parts[2] === 'copy'
+                  ? this.rules.copy(body)
+                  : this.rules.reveal(body.path, { dryRun: body.dryRun === true });
           return this._json(res, 200, out);
         } catch (err) {
           return this._json(res, 400, { error: String((err && err.message) || err) });

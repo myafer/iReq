@@ -290,7 +290,11 @@ class RuleEngine {
       n.children.forEach(sortNode);
     };
     sortNode(root);
-    return { root: path.relative(process.cwd(), this.root) || this.root, tree: root.children };
+    return {
+      root: path.relative(process.cwd(), this.root) || this.root,
+      rootAbs: this.root, // 界面「复制绝对路径 / 在文件管理器中显示」用
+      tree: root.children,
+    };
   }
 
   /** 读单个文件：.rule.json 返回规则（含 body），body 文件返回原文 */
@@ -335,11 +339,13 @@ class RuleEngine {
     return this.add({ ...input, dir: d, name });
   }
 
-  /** 重命名 / 移动（拖拽）：from 为 .rule.json 或目录 */
+  /** 重命名 / 移动（拖拽）：from 为 .rule.json 或目录
+   *  只传 newName 不传 toDir = 就地改名；显式传 toDir（含 ''）才是移动 */
   move({ from, toDir, newName }) {
     const fromRel = String(from || '').split(path.sep).join('/');
     const absFrom = resolveWithin(this.root, fromRel);
-    const targetDir = this._normDir(toDir);
+    const ownDir = path.posix.dirname(fromRel);
+    const targetDir = toDir === undefined ? (ownDir === '.' ? '' : ownDir) : this._normDir(toDir);
     const st = fs.statSync(absFrom);
 
     if (st.isDirectory()) {
@@ -373,6 +379,95 @@ class RuleEngine {
     return { ok: true };
   }
 
+  /** 复制（粘贴的来源）：规则文件连同响应体一起复制并换新 id，
+   *  文件夹递归复制（里面每条规则同样换 id，避免和原件抢同一条规则）。
+   *  名字冲突自动编号，重复粘贴不会互相覆盖。 */
+  copy({ from, toDir, newName }) {
+    const fromRel = String(from || '')
+      .split(path.sep)
+      .join('/')
+      .replace(/^\/+|\/+$/g, '');
+    if (!fromRel) throw new Error('没有指定要复制的文件');
+    const absFrom = resolveWithin(this.root, fromRel);
+    if (!fs.existsSync(absFrom)) throw new Error('源文件不存在: ' + fromRel);
+    const targetDir = this._normDir(toDir);
+    const base = path.posix.basename(fromRel);
+    const st = fs.statSync(absFrom);
+
+    if (st.isDirectory()) {
+      const nm = this._freeDirName(targetDir, sanitizeName(newName || base));
+      const to = targetDir ? targetDir + '/' + nm : nm;
+      if ((to + '/').startsWith(fromRel + '/')) throw new Error('不能把文件夹复制到它自己里面');
+      fs.cpSync(absFrom, resolveWithin(this.root, to), { recursive: true });
+      this._reidCopiedRules(fromRel, to);
+      this.reload();
+      return { ok: true, type: 'dir', path: to };
+    }
+
+    if (base.endsWith(RULE_EXT)) {
+      const oldStem = base.slice(0, -RULE_EXT.length);
+      const stem = this._freeStem(targetDir, sanitizeName(newName || oldStem));
+      const to = (targetDir ? targetDir + '/' : '') + stem + RULE_EXT;
+      const raw = JSON.parse(fs.readFileSync(absFrom, 'utf8'));
+      const src = this.rules.find((r) => r.file === fromRel);
+      let bodyFile = null;
+      if (src && src.bodyFile) {
+        const ext = path.posix.extname(src.bodyFile);
+        const dstBody = (targetDir ? targetDir + '/' : '') + stem + '.body' + ext;
+        fs.copyFileSync(resolveWithin(this.root, src.bodyFile), resolveWithin(this.root, dstBody));
+        bodyFile = dstBody;
+      }
+      const meta = { ...raw, id: randomUUID(), name: stem };
+      if (bodyFile) meta.bodyFile = bodyFile;
+      else delete meta.bodyFile;
+      delete meta.body;
+      fs.writeFileSync(resolveWithin(this.root, to), JSON.stringify(meta, null, 2));
+      this.reload();
+      return { ok: true, type: 'rule', path: to };
+    }
+
+    // 其它文件（响应体等）：按字节复制
+    const ext = path.posix.extname(base);
+    const nm = this._freeFileName(targetDir, sanitizeName(newName || base.slice(0, -ext.length)) + ext);
+    const to = targetDir ? targetDir + '/' + nm : nm;
+    fs.copyFileSync(absFrom, resolveWithin(this.root, to));
+    this.reload();
+    return { ok: true, type: 'file', path: to };
+  }
+
+  /** 在系统文件管理器里定位（macOS 访达 / Windows 资源管理器 / Linux 文件管理器）
+   *  { dryRun: true } 只算出命令不真的打开窗口——自检脚本用它避免在跑测试时弹窗 */
+  reveal(rel, { dryRun } = {}) {
+    const target = resolveWithin(this.root, String(rel || ''));
+    const exists = fs.existsSync(target);
+    const isDir = exists ? fs.statSync(target).isDirectory() : !path.extname(target);
+    const dir = exists && isDir ? target : path.dirname(target);
+    const plat = process.platform;
+    let cmd;
+    let args;
+    if (plat === 'darwin') {
+      cmd = 'open';
+      args = exists && isDir ? [target] : ['-R', target]; // -R = 在访达里选中该文件
+    } else if (plat === 'win32') {
+      cmd = 'explorer';
+      args = exists && isDir ? [target] : ['/select,' + target];
+    } else {
+      cmd = 'xdg-open';
+      args = [dir];
+    }
+    if (dryRun) return { ok: true, platform: plat, path: target, dir, cmd, args, dryRun: true };
+    try {
+      const { execFile } = require('child_process');
+      const child = execFile(cmd, args, { windowsHide: true }, () => {
+        /* explorer 选中文件时返回值恒为 1，这里不当作失败 */
+      });
+      child.unref();
+    } catch (err) {
+      throw new Error('打开文件管理器失败: ' + err.message);
+    }
+    return { ok: true, platform: plat, path: target, dir };
+  }
+
   /* ---------------- 内部工具 ---------------- */
 
   _normDir(d) {
@@ -391,6 +486,65 @@ class RuleEngine {
       stem = sanitizeName(want) + ' ' + i++;
     }
     return stem;
+  }
+
+  /** 目录里找一个没被占用的文件夹名 */
+  _freeDirName(dir, want) {
+    const dirAbs = resolveWithin(this.root, dir);
+    const base = sanitizeName(want);
+    let name = base;
+    let i = 2;
+    while (fs.existsSync(path.join(dirAbs, name))) name = base + ' ' + i++;
+    return name;
+  }
+
+  /** 目录里找一个没被占用的文件名（含扩展名） */
+  _freeFileName(dir, want) {
+    const dirAbs = resolveWithin(this.root, dir);
+    const ext = path.extname(want);
+    const base = sanitizeName(want.slice(0, want.length - ext.length)) + ext;
+    const stem = base.slice(0, base.length - ext.length);
+    let name = base;
+    let i = 2;
+    while (fs.existsSync(path.join(dirAbs, name))) name = stem + ' ' + i++ + ext;
+    return name;
+  }
+
+  /** 复制文件夹后把里面每条规则的 id 换掉，并把 bodyFile 指到新位置 */
+  _reidCopiedRules(oldRel, newRel) {
+    const walk = (oldDir, newDir) => {
+      let entries = [];
+      try {
+        entries = fs.readdirSync(resolveWithin(this.root, newDir), { withFileTypes: true });
+      } catch (_) {
+        return;
+      }
+      for (const ent of entries) {
+        if (ent.name.startsWith('.')) continue;
+        const childOld = oldDir ? oldDir + '/' + ent.name : ent.name;
+        const childNew = newDir ? newDir + '/' + ent.name : ent.name;
+        if (ent.isDirectory()) {
+          walk(childOld, childNew);
+          continue;
+        }
+        if (!ent.name.endsWith(RULE_EXT)) continue;
+        const abs = resolveWithin(this.root, childNew);
+        try {
+          const raw = JSON.parse(fs.readFileSync(abs, 'utf8'));
+          const next = { ...raw, id: randomUUID() };
+          if (raw.bodyFile) {
+            const rest = String(raw.bodyFile).startsWith(oldRel + '/')
+              ? String(raw.bodyFile).slice(oldRel.length)
+              : '/' + path.posix.basename(String(raw.bodyFile));
+            next.bodyFile = newRel + rest;
+          }
+          fs.writeFileSync(abs, JSON.stringify(next, null, 2));
+        } catch (_) {
+          /* 损坏文件原样保留，交给 reload 打日志 */
+        }
+      }
+    };
+    walk(oldRel, newRel);
   }
 
   /** 重命名 stem（rule + body 一起），可同时挪目录；失败返回 null
