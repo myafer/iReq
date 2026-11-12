@@ -161,10 +161,20 @@ function connectOnly(host) {
       push('白名单落盘持久化（服务未暴露 dataDir，跳过）', true, 'skipped');
     }
 
+    // alpn 用例需要走 http/1.1 回退路径（h2 开启时 createSecureServer 会接受 h2 握手，
+    // 客户端只提 h2 反而成功），先临时关闭 HTTP/2 协商，EOF 即时可见
+    await api('/api/config', { method: 'PUT', body: { h2Enabled: false } });
     await handshake(DIAG_A);
     await handshake(DIAG_B, { alpn: ['h2'] });
-    await sleep(250);
-    const diag = await api('/api/diagnostics');
+    // 轮询等两条诊断都落库（h1 回退路径 EOF 即时可见，轮询只为稳健）
+    const startDiag = Date.now();
+    let diag = await api('/api/diagnostics');
+    while (Date.now() - startDiag < 8000) {
+      const hosts = diag.tlsFailures.map((f) => f.host);
+      if (hosts.includes(DIAG_A) && hosts.includes(DIAG_B)) break;
+      await sleep(300);
+      diag = await api('/api/diagnostics');
+    }
     const a = diag.tlsFailures.find((f) => f.host === DIAG_A);
     const b = diag.tlsFailures.find((f) => f.host === DIAG_B);
     push('诊断记录带原因分类', !!a && a.reason === 'no-request' && !!b && b.reason === 'alpn', JSON.stringify(diag.tlsFailures.map((f) => [f.host, f.reason])));
@@ -283,6 +293,7 @@ function connectOnly(host) {
     push('无 JS 报错', errs.length === 0, JSON.stringify(errs.slice(0, 2)));
   } finally {
     if (browser) await browser.close();
+    await api('/api/config', { method: 'PUT', body: { h2Enabled: true } }).catch(() => {});
     await api('/api/config', { method: 'PUT', body: { passthrough: saved } }).catch(() => {});
     await api('/api/diagnostics', { method: 'DELETE' }).catch(() => {});
     await api('/api/flows', { method: 'DELETE' }).catch(() => {});

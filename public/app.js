@@ -4118,6 +4118,7 @@ function settingsPayload() {
     maxFlows: Number($('#stMax').value) || 2000,
     uaAppMapText: $('#stUaAppMap').value,
     processMap: $('#stProcessMap').checked,
+    h2Enabled: $('#stH2').checked,
   };
 }
 
@@ -4174,6 +4175,7 @@ async function openSettings() {
     : '当前系统不提供本机进程关联（仅 macOS 支持），远程设备请用上方 UA 别名标注。';
   loadLocalProxy();
   $('#stMax').value = st.store ? st.store.maxFlows : 2000;
+  $('#stH2').checked = st.h2Enabled !== false;
   const infoAddr = currentAddr();
   $('#stInfo').textContent = [
     `代理地址    : ${addrFull(infoAddr)}（${infoAddr.label}）`,
@@ -4473,6 +4475,7 @@ function bind() {
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
   $('#stProcessMap').addEventListener('change', queueSettingsSave);
+  $('#stH2').addEventListener('change', queueSettingsSave);
 
   /* -------------------------------- 跳过解密管理列表 */
   $('#btnPassthrough').addEventListener('click', () => openPassthrough());

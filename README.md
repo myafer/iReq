@@ -19,6 +19,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
 | Exclude specific domains | Add certificate-pinned apps to the "skip decryption" allowlist and pass them through as a raw tunnel. The allowlist has its own manager (source / added time / pass-through hit count), supports add / search / rename / remove / clear / bulk import, and persists across restarts |
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
+| HTTP/2 | The decryption tunnel negotiates h2 via ALPN: **endpoints that only offer h2 (Apple ID auth, gRPC gateways, some CDNs) can now be decrypted**. Traffic is recorded as HTTP/2.0 with multiplexed streams captured individually and filterable; disable in Settings to fall back to HTTP/1.1 |
 | Connection diagnostics | Domains with repeated TLS handshake failures are listed (filter under "More ▾"); one-click "add to skip decryption" opens the manager. Details show the classified cause (untrusted cert / HTTP/2-only / reset during handshake / non-HTTP port) plus the raw TLS error, SNI and ALPN. Once a host is allowlisted, its diagnostic row disappears immediately instead of sticking to the top of the list |
 | Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
 | Export | One-click **HAR 1.2** export of the current filter ("⋯ More → Export HAR", or ⌘K → "export"); full headers / bodies + iReq app / device metadata; raw JSON at `/api/export/json` |
@@ -311,7 +312,7 @@ Click "+ New rule" or the `＋` on the tab bar for the full editor; "Mock this r
 - **Capture toggle decoupled from Mock**: turning off "capture" only stops recording, rules still apply — handy when you care about behavior, not logs.
 - **2MB body cap**: larger bodies are truncated and flagged, so one big file response can't eat all the memory.
 - **Upstream certificates not verified by default** (`rejectUnauthorized: false`): corporate proxies and self-signed test environments just work, at the cost of the tool not being a security boundary.
-- **ALPN negotiates `http/1.1` only**: Node's built-in http server doesn't parse h2 frames, so clients fall back to 1.1. **Services that force h2 (gRPC, some HTTP/2-only services) won't connect** — a known gap vs full-featured proxies.
+- **HTTP/2 via negotiation**: the decryption tunnel uses `http2.createSecureServer`; h2 clients get h2 decryption (streams recorded individually, pseudo/ connection headers stripped, mock / offline / slow applied per stream), and h2-only endpoints no longer fail the handshake. Upstreams are always forwarded over HTTP/1.1 (a clear plaintext boundary). Disable in Settings for pure 1.1. Extended CONNECT (WebSocket over h2) is not supported yet; h2 clients fall back to a 1.1 upgrade automatically.
 - **Decrypt 443 only (configurable)**: other ports use a raw tunnel. Decrypting non-HTTP protocols too (MQTT 8883, IMAP 993…) would make apps fail to connect — the classic "other proxies work, iReq doesn't" cause.
 - **Streaming request bodies**: forwarded as they arrive, so an 8MB chunked upload won't stall; recorded on the side at the same time (up to 2MB).
 - **Keep-alive 65s**: Node's default is 5s; apps reusing connections tend to hit a just-closed socket, showing up as "occasionally can't connect".
@@ -382,7 +383,7 @@ POST   /api/rules                 { name, method, urlMatch, matchMode, host, sta
 PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
-GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], mitmPorts: [443], maxFlows,
+GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
@@ -424,6 +425,7 @@ node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, 
 node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
 node tools/check-app-cascade.js  # checkbox-style multi-select apps (green check): domain / API cascade, upper groups collapse, legacy bookmarks (27 items)
 node tools/check-instant.js      # in-flight records + sidebar sync, in-place completion, same-frame clear, no revive (36 items)
+node tools/check-http2.js        # h2 negotiation / multiplexed per-stream records / pseudo-header stripping / mock·offline·slow / filters / fallback off switch (19 items)
 node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
 node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
 node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)

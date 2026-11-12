@@ -19,6 +19,7 @@
 | 重放 | 改 method / URL / header / body 重新发送，结果作为新请求入列并与原请求关联 |
 | 排除指定域名 | 证书固定（pinning）的 App 加进「跳过解密」白名单，走裸隧道透传；白名单有独立管理列表（来源 / 加入时间 / 已透传次数），增删改查、批量导入、重启保留 |
 | 只解密 HTTP | **默认只解密 443**，其它端口原样透传（MQTT / IMAP / 私有二进制协议不会被破坏）；设置里可加端口 |
+| HTTP/2 | 解密隧道按 ALPN 协商 h2：**客户端只提 h2 的端点（Apple 账号认证、gRPC 网关、部分 CDN）也能解密**，流量记为 HTTP/2.0 且多路复用逐条入库，筛选条可单独过滤；设置里可关闭退回 HTTP/1.1 |
 | 连接诊断 | 反复 TLS 握手失败的域名会列出来，「更多 ▾」里可单独筛选，一键「加入跳过解密」后自动打开管理列表；详情给出原因判定（证书不被信任 / 只接受 HTTP/2 / 握手被重置 / 非 HTTP 协议）与底层报错、SNI、ALPN；加入白名单后诊断行立即撤掉，不会再顶在列表顶部 |
 | 落盘 | 当天流量写 `data/flows/flows-YYYY-MM-DD.jsonl`，重启可回看最近 300 条 |
 | 导出 | 「⋯ 更多 → 导出 HAR」或 ⌘K 输入「导出」，一键把当前筛选结果导出为 **HAR 1.2**（完整头 / body + iReq 应用、设备扩展字段）；原始 JSON 用 `/api/export/json` |
@@ -309,7 +310,7 @@ CFNetwork=我的 iOS 客户端
 - **抓包开关与 Mock 解耦**：关掉「抓包」只是不记录，规则照样生效，方便只看行为不看日志。
 - **Body 上限 2MB**：超出截断并打标，避免一条大文件响应把内存吃穿。
 - **上游证书默认不校验**（`rejectUnauthorized: false`）：企业代理、自签名测试环境能直接抓，代价是工具本身不能当作安全边界。
-- **ALPN 只谈 `http/1.1`**：Node 内置 http 服务器不解析 h2 帧，客户端会退回 1.1。**强制 h2 的接口（gRPC、部分 HTTP/2-only 服务）会连不上**，这是与成熟抓包工具的已知差距。
+- **HTTP/2 按协商支持**：解密隧道走 `http2.createSecureServer`，客户端提 h2 就按 h2 解密（多路复用逐条记录、伪首部与连接级头剥除、Mock / 断网 / 弱网逐 stream 生效），只提 h2 的端点不再握手失败；上游始终按 HTTP/1.1 转发（明文边界清晰）。设置里可关闭退回纯 1.1。扩展 CONNECT（h2 上的 WebSocket）暂不支持，h2 客户端会自动退回 1.1 升级。
 - **只解密 443（可配）**：其它端口走裸隧道。把非 HTTP 协议（MQTT 8883、IMAP 993…）也解密会让 App 直接连不上，这是"别的工具能用、iReq 不能用"的典型原因。
 - **请求体流式转发**：边收边转，8MB chunked 上传也不会卡住；同时旁路记录（最多 2MB）。
 - **保活 65s**：Node 默认 5s，App 复用连接时容易撞上刚被关掉的 socket，表现为"偶发连不上"。
@@ -380,7 +381,7 @@ POST   /api/rules                 { name, method, urlMatch, matchMode, host, sta
 PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
-GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], mitmPorts: [443], maxFlows,
+GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
@@ -422,6 +423,7 @@ node tools/check-scale.js        # 85%–160% 缩放、上下限、刷新保持�
 node tools/check-sidebar.js      # 五组边栏、筛选、收藏书签、折叠、窄屏抽屉
 node tools/check-app-cascade.js  # 应用勾选式多选（绿色对钩）：域名 / 接口结构级联 / 上方分组收起 / 老书签归一（27 项）
 node tools/check-instant.js      # 请求发起即入库 / 侧栏同步、完成就地更新、清空同帧归零、在途不复活（36 项）
+node tools/check-http2.js        # h2 协商 / 多路复用逐条入库 / 伪首部剥离 / Mock·断网·弱网 / 筛选 / 关闭回退（19 项）
 node tools/check-splitters.js    # 两根竖分割线：拖拽 / 命中区 / 夹紧 / 持久化 / 复位 / 键盘（30 项）
 node tools/check-device.js       # 127 + 本机网卡 IP 合并成「本机」/ 标签不闪跳 / 筛选与详情一致（40 项）
 node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版规则表单 / 真实 Mock 命中 / 导入导出 / 详情着色（83 项）

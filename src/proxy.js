@@ -12,6 +12,7 @@
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const http2 = require('http2');
 const tls = require('tls');
 const net = require('net');
 const os = require('os');
@@ -30,6 +31,123 @@ const TEXTUAL_RE =
   /^(text\/|application\/(json|xml|javascript|ecmascript|x-www-form-urlencoded|graphql|x-ndjson|problem\+json|x-js)|application\/[\w.+-]*\+(json|xml)|image\/svg)/i;
 
 const DROP_HEADERS = ['proxy-connection', 'proxy-authorization', 'proxy-authenticate'];
+
+/**
+ * HTTP/2 头适配：伪首部与连接级头不能原样转成 HTTP/1.1（反过来也如此）。
+ * 请求侧剥掉后转发上游，响应侧剥掉后写回客户端，两边共用。
+ */
+const H2_DROP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-connection',
+  'proxy-authorization',
+  'proxy-authenticate',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'http2-settings',
+]);
+
+function h2CleanHeaders(h) {
+  const out = {};
+  for (const [k, v] of Object.entries(h || {})) {
+    if (k.startsWith(':') || H2_DROP_HEADERS.has(k.toLowerCase())) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * HTTP/2 流的请求侧适配层：把 Http2Stream 伪装成 http1 的 req
+ * （method / url / headers / socket / data / pipe / resume / aborted），
+ * 让 _handle / _forward / _replyMock / _simBlockHttp 一套主链路两端复用。
+ */
+class H2ReqShim extends EventEmitter {
+  constructor(stream, headers) {
+    super();
+    this.stream = stream;
+    this.isH2 = true;
+    this.httpVersion = '2.0';
+    this.method = String(headers[':method'] || 'GET').toUpperCase();
+    this.url = String(headers[':path'] || '/');
+    this.headers = h2CleanHeaders(headers);
+    this.socket = (stream.session && stream.session.socket) || stream;
+    stream.on('data', (c) => this.emit('data', c));
+    stream.on('end', () => this.emit('end'));
+    stream.on('aborted', () => this.emit('aborted'));
+    // 会话级错误统一由 server 的 sessionError / socket error 收口，这里只防未捕获崩溃
+    stream.on('error', () => {});
+    stream.on('close', () => this.emit('close'));
+  }
+  pipe(dest) {
+    return this.stream.pipe(dest);
+  }
+  resume() {
+    return this.stream.resume();
+  }
+}
+
+/**
+ * HTTP/2 流的响应侧适配层：writeHead 先缓存，首写时统一 respond。
+ * 上游 HTTP/1.1 的 hop-by-hop 头（transfer-encoding 等）剥掉，状态码原样映射。
+ */
+class H2ResShim extends EventEmitter {
+  constructor(stream) {
+    super();
+    this.stream = stream;
+    this._status = 0;
+    this._headers = {};
+    this._sent = false;
+    stream.on('close', () => this.emit('close'));
+    stream.on('error', () => this.emit('close'));
+  }
+  get headersSent() {
+    return this._sent || Boolean(this.stream.headersSent);
+  }
+  get statusCode() {
+    return this._status || 200;
+  }
+  writeHead(status, a, b) {
+    this._status = Number(status) || 200;
+    const headers = b && typeof b === 'object' ? b : a && typeof a === 'object' ? a : {};
+    this._headers = h2CleanHeaders(headers);
+    return this;
+  }
+  _flush() {
+    if (this._sent) return;
+    this._sent = true;
+    try {
+      this.stream.respond({ ':status': this._status || 200, ...this._headers });
+    } catch (_) {
+      try {
+        this.stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+      } catch (__) {
+        /* 流已经没了 */
+      }
+    }
+  }
+  write(chunk, cb) {
+    this._flush();
+    return this.stream.write(chunk, cb);
+  }
+  end(chunk, cb) {
+    this._flush();
+    return this.stream.end(chunk, cb);
+  }
+  destroy(err) {
+    try {
+      this.stream.close(err ? http2.constants.NGHTTP2_INTERNAL_ERROR : http2.constants.NGHTTP2_NO_ERROR);
+    } catch (_) {
+      /* noop */
+    }
+    try {
+      this.stream.destroy(err);
+    } catch (_) {
+      /* noop */
+    }
+  }
+}
 
 function isTextual(contentType) {
   return !!contentType && TEXTUAL_RE.test(String(contentType));
@@ -151,6 +269,7 @@ class ProxyServer extends EventEmitter {
     if (!Array.isArray(cfg.passthrough)) cfg.passthrough = [];
     if (!cfg.passthroughMeta || typeof cfg.passthroughMeta !== 'object') cfg.passthroughMeta = {};
     if (!Array.isArray(cfg.mitmPorts)) cfg.mitmPorts = [443];
+    if (cfg.h2Enabled === undefined) cfg.h2Enabled = true;
     cfg.networkSim = normalizeNetworkSim(cfg.networkSim);
     this.config = cfg;
     this.connections = new Set();
@@ -168,6 +287,8 @@ class ProxyServer extends EventEmitter {
       this.server = http.createServer((req, res) => this._handle(req, res));
       this.server.on('connect', (req, socket, head) => this._handleConnect(req, socket, head));
       this.server.on('upgrade', (req, socket, head) => this._handleUpgrade(req, socket, head));
+      // MITM 解密服务器：h2 / http1.1 统一在这里握手，见 _createMitmServer
+      this.mitmServer = this._createMitmServer();
       this.server.on('connection', (socket) => {
         this.connections.add(socket);
         // 连接一建立就登记源端口：lsof 快照是异步的，等请求进来再查可能已经错过短连接
@@ -206,7 +327,89 @@ class ProxyServer extends EventEmitter {
     }
     this.connections.clear();
     this.processMap.stop();
+    for (const s of [this.mitmServer, this.h2Server]) {
+      try {
+        if (s) s.close();
+      } catch (_) {
+        /* noop */
+      }
+    }
     return new Promise((resolve) => (this.server ? this.server.close(resolve) : resolve()));
+  }
+
+  /**
+   * MITM 解密服务器：一个 http2.createSecureServer 同时服务两种协议。
+   *  - 客户端只提 h2（Apple 认证端点、部分 CDN）不再因 ALPN 不匹配握手失败；
+   *  - http/1.1 走 allowHTTP1 回退，WebSocket upgrade 事件原样保留；
+   *  - SNICallback 以 CONNECT 的域名动态签证书。
+   * 该服务器无条件广播 h2（Node 行为如此），所以 h2Enabled=false 时 CONNECT
+   * 分支直接走 _handshakeHttp1 的手动 TLSSocket 回退，不经过这里。
+   */
+  _createMitmServer() {
+    const server = http2.createSecureServer({
+      allowHTTP1: true,
+      // 客户端在握手完成前断开时，Node 不会把 EOF 当 TLS 错误报（静默等待），
+      // 只能靠握手超时兜底生成 tlsClientError → 诊断行；真实握手 <1s，8s 足够宽
+      handshakeTimeout: 8000,
+      // 以客户端给的 SNI 动态签证书：CONNECT 到 IP、SNI 是域名时也能对上
+      SNICallback: (servername, cb) => {
+        try {
+          cb(null, this.ca.getSecureContext(servername));
+        } catch (err) {
+          cb(err);
+        }
+      },
+    });
+    // h2 流量：剥掉伪首部后走与 HTTP/1.1 相同的主链路
+    server.on('stream', (stream, headers) => {
+      try {
+        this._handleH2Stream(stream, headers);
+      } catch (_) {
+        try {
+          stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+        } catch (__) {
+          /* noop */
+        }
+      }
+    });
+    // allowHTTP1 的 HTTP/1.1 回退走这里。注意 h2 流量也会触发兼容层 request 事件，
+    // 用 req.stream 识别后跳过（stream 处理器已经接管），否则同一条流会被两边响应。
+    server.on('request', (req, res) => {
+      if (req.stream) return;
+      try {
+        this._handle(req, res);
+      } catch (_) {
+        try {
+          res.destroy();
+        } catch (__) {
+          /* noop */
+        }
+      }
+    });
+    // WebSocket over MITM：h1 回退路径的 upgrade 原样交给既有处理器
+    server.on('upgrade', (req, socket, head) => {
+      try {
+        this._handleUpgrade(req, socket, head);
+      } catch (_) {
+        try {
+          socket.destroy();
+        } catch (__) {
+          /* noop */
+        }
+      }
+    });
+    server.on('secureConnection', (tlsSocket) => this._noteMitmSecure(tlsSocket));
+    server.on('tlsClientError', (err, socket) => this._noteMitmTlsError(err, socket));
+    // 不监听就没有默认错误处理：静默收口，握手失败仍走 TLS 诊断链路
+    server.on('sessionError', () => {});
+    server.on('streamError', () => {});
+    server.on('error', () => {});
+    return server;
+  }
+
+  /** h2 开关只影响新握手：CONNECT 分支按它选择握手方式，无需重建实例 */
+  setH2Enabled(enabled) {
+    this.config.h2Enabled = enabled !== false;
   }
 
   // ---------------------------------------------------------------- CONNECT
@@ -443,7 +646,24 @@ class ProxyServer extends EventEmitter {
 
     clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
     if (head && head.length) clientSocket.unshift(head);
+    clientSocket.__mitmHost = host;
+    clientSocket.__mitmPort = port;
 
+    // h2 开关关闭：走旧的纯 HTTP/1.1 握手（ALPN 只给 http/1.1，行为与历史版本一致）。
+    // createSecureServer 会无条件广播 h2、且 ALPNCallback 在不同 Node 版本下形参不一致，
+    // 所以回退模式保留手动 TLSSocket 的确定性实现。
+    if (this.config.h2Enabled === false) return this._handshakeHttp1(clientSocket, host, port);
+
+    // TLS 交给 mitmServer（http2.createSecureServer）接管：
+    // SNICallback 动态签证书，ALPN 协商 h2 / http1.1，握手事件统一在 _createMitmServer 里挂。
+    // CONNECT 阶段的元数据挂在原始 socket 上，握手完成后 _noteMitmSecure 搬到 TLSSocket。
+    // 注意：客户端在握手完成前就断开（预连接失败、端口探测）时，Node 不会把
+    // TLS 层的 EOF 当错误报，只能等 handshakeTimeout 兜底（见 _createMitmServer）。
+    this.mitmServer.emit('connection', clientSocket);
+  }
+
+  /** h2 关闭时的回退握手：手动 TLSSocket + ALPN ['http/1.1']，与 v1.3.6 行为一致 */
+  _handshakeHttp1(clientSocket, host, port) {
     let ctx;
     try {
       ctx = this.ca.getSecureContext(host);
@@ -451,12 +671,10 @@ class ProxyServer extends EventEmitter {
       clientSocket.destroy();
       return;
     }
-
     let secure = false;
     const tlsSocket = new tls.TLSSocket(clientSocket, {
       isServer: true,
       secureContext: ctx,
-      // 以客户端给的 SNI 动态签证书：CONNECT 到 IP、SNI 是域名时也能对上
       SNICallback: (servername, cb) => {
         try {
           tlsSocket.__sni = servername;
@@ -469,48 +687,33 @@ class ProxyServer extends EventEmitter {
     });
     tlsSocket.__mitmHost = host;
     tlsSocket.__mitmPort = port;
-    // 底层 socket 也带上域名：规则变更时要按它找出「还在解密中的旧连接」
-    clientSocket.__mitmHost = host;
+    tlsSocket.__reqliteClientSocket = clientSocket;
+    tlsSocket.__reqliteClientPort = clientSocket.remotePort;
+    tlsSocket.__reqliteClientIp = clientSocket.remoteAddress;
     const failureInfo = () => ({
       sni: tlsSocket.__sni || '',
       alpn: tlsSocket.alpnProtocol || false,
       established: secure,
     });
-    // 保留原始 TCP socket 的地址/端口：进程识别只认这一层，TLSSocket 上取不到
-    tlsSocket.__reqliteClientSocket = clientSocket;
-    tlsSocket.__reqliteClientPort = clientSocket.remotePort;
-    tlsSocket.__reqliteClientIp = clientSocket.remoteAddress;
     tlsSocket.once('secure', () => {
       secure = true;
       // 后端删了也要通知前端：否则控制台要刷新页面才会消掉那条诊断行
       this.clearTlsFailures(host);
     });
     tlsSocket.once('close', () => {
-      // 走到这里说明这条 TLS 连接一次请求都没成功发出来（_handle 会打 __used）
-      // 这通常就是"App 连不上"的真凶：客户端不认证书、或协议不是 HTTP
-      if (!tlsSocket.__used) {
-        // getCipher() 在 socket 已销毁时会抛，用内部标记判断"握手是否真正完成"
-        let established = tlsSocket._secureEstablished === true;
-        if (!established) {
-          try {
-            established = !!tlsSocket.getCipher();
-          } catch (_) {
-            /* 没协商出来 */
-          }
+      // 一次请求都没发出来（_handle 会打 __used）就断开：客户端不认证书、或协议不是 HTTP
+      if (tlsSocket.__used) return;
+      let established = tlsSocket._secureEstablished === true;
+      if (!established) {
+        try {
+          established = !!tlsSocket.getCipher();
+        } catch (_) {
+          /* 没协商出来 */
         }
-        // 只有"握手根本没成"才算失败；握手成功但没发请求多半是预连接，不算问题
-        if (!established) {
-          // close 和 error 可能都触发，同一条连接只算一次
-          if (!tlsSocket.__tlsFailureNoted) {
-            tlsSocket.__tlsFailureNoted = true;
-            this._noteTlsFailure(
-              host,
-              port,
-              new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'),
-              failureInfo()
-            );
-          }
-        }
+      }
+      if (!established && !tlsSocket.__tlsFailureNoted) {
+        tlsSocket.__tlsFailureNoted = true;
+        this._noteTlsFailure(host, port, new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'), failureInfo());
       }
     });
     tlsSocket.on('error', (err) => {
@@ -524,7 +727,86 @@ class ProxyServer extends EventEmitter {
         /* noop */
       }
     });
+    // 构造后立即交给 http1 server 驱动读取（v1.3.6 语义）：客户端握手后立刻断开时，
+    // close 赶在握手真正落地之前，才能按「no-request」记进诊断
     this.server.emit('connection', tlsSocket);
+  }
+
+  /** MITM TLS 握手完成：把 CONNECT 元数据搬到 TLSSocket，并登记成功 / 失败诊断 */
+  _noteMitmSecure(tlsSocket) {
+    const base = tlsSocket._parent || {};
+    const host = base.__mitmHost || '';
+    const port = Number(base.__mitmPort) || 443;
+    // 保留原始 TCP socket 的地址/端口：进程识别只认这一层，TLSSocket 上取不到
+    tlsSocket.__reqliteClientSocket = base;
+    tlsSocket.__reqliteClientPort = base.remotePort;
+    tlsSocket.__reqliteClientIp = base.remoteAddress;
+    tlsSocket.__mitmHost = host;
+    tlsSocket.__mitmPort = port;
+    tlsSocket.__sni = tlsSocket.servername || '';
+    tlsSocket.__simFact = base.__simFact;
+    base.__tlsEstablished = true; // 握手完成了：TCP 层的提前断开不再算失败
+    // 后端删了也要通知前端：否则控制台要刷新页面才会消掉那条诊断行
+    this.clearTlsFailures(host);
+    tlsSocket.once('close', () => {
+      // 一次请求都没成功发出来（_handle 会打 __used）就断开，通常是"App 连不上"：
+      // 客户端不认证书、或协议不是 HTTP。握手成功但没发请求多半是预连接，不算失败。
+      if (tlsSocket.__used) return;
+      let established = tlsSocket._secureEstablished === true;
+      if (!established) {
+        try {
+          established = !!tlsSocket.getCipher();
+        } catch (_) {
+          /* 没协商出来 */
+        }
+      }
+      if (!established && !tlsSocket.__tlsFailureNoted) {
+        tlsSocket.__tlsFailureNoted = true;
+        this._noteTlsFailure(
+          host,
+          port,
+          new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'),
+          { sni: tlsSocket.__sni || '', alpn: tlsSocket.alpnProtocol || false, established: false }
+        );
+      }
+    });
+  }
+
+  /** MITM TLS 握手失败（tlsClientError）：证书被拒 / alert / ECONNRESET 都在这 */
+  _noteMitmTlsError(err, socket) {
+    // 第二个参数在不同 Node 版本可能是 TLSSocket 或原始 socket，往 __mitmHost 上归位
+    const s = [socket, socket && socket._parent, err && err.socket, err && err.socket && err.socket._parent].find(
+      (x) => x && x.__mitmHost
+    );
+    if (!s || s.__tlsFailureNoted) return;
+    s.__tlsFailureNoted = true;
+    this._noteTlsFailure(s.__mitmHost, Number(s.__mitmPort) || 443, err, {
+      sni: (socket && socket.servername) || '',
+      alpn: false,
+      established: false,
+    });
+    try {
+      s.destroy();
+    } catch (_) {
+      /* noop */
+    }
+  }
+
+  /** HTTP/2 解密流：剥掉伪首部后走与 HTTP/1.1 相同的主链路（转发 / Mock / 模拟 / 记录） */
+  _handleH2Stream(stream, headers) {
+    const socket = stream.session && stream.session.socket;
+    if (!socket || stream.destroyed) return;
+    const req = new H2ReqShim(stream, headers);
+    const res = new H2ResShim(stream);
+    try {
+      this._handle(req, res);
+    } catch (_) {
+      try {
+        stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+      } catch (__) {
+        /* noop */
+      }
+    }
   }
 
   /**
@@ -857,6 +1139,8 @@ class ProxyServer extends EventEmitter {
       reqHeaders: { ...req.headers },
       ...this._appMeta(req),
       route: routeOf(req.method, target.pathname || '/'),
+      // 筛选条按 HTTP1 / HTTP2 分流：MITM 隧道按 ALPN 协商出 h2 的标记 2.0
+      ...(req.isH2 ? { httpVersion: 'HTTP/2.0' } : {}),
     };
 
     const ctx = { req, res, target, startedAt, reqCapture, meta };
@@ -1195,8 +1479,8 @@ class ProxyServer extends EventEmitter {
       flow.deviceKey = deviceKeyOf(flow.clientIp);
       flow.deviceLabel = deviceLabelOf(flow.clientIp, flow.platform);
     }
-    // 筛选条按 HTTP1 / HTTP2 分流：本代理与上游固定 ALPN http/1.1，明文请求也是 1.1
-    // 解析，所以真实发生 HTTP 交换的记录都是 HTTP/1.1；CONNECT 透传未解密，版本未知不标。
+    // 筛选条按 HTTP1 / HTTP2 分流：明文请求按 HTTP/1.1 解析，h2 流量在 _handle
+    // 的 meta 里已标 HTTP/2.0；CONNECT 透传未解密，版本未知不标。
     if (flow.method !== 'CONNECT' && !flow.httpVersion) flow.httpVersion = 'HTTP/1.1';
   }
 

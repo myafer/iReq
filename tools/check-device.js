@@ -232,9 +232,13 @@ function viaLan(lan) {
 
   await page.click('#chips [data-clear="ip"]');
   await page.waitForTimeout(400);
+  // 诊断行（TLS 握手失败）固定在列表顶部且不是 HTTP 流量，点它拿不到「设备」行；
+  // 前置套件（如代理转发）可能留下握手超时诊断，这里先清掉再只点真实流量行
+  await api('/api/diagnostics', { method: 'DELETE' });
+  await page.waitForTimeout(200);
   // 用页面内同步 click：SSE 随时会重绘列表，拿 ElementHandle 再点容易 detached
   const clicked = await page.evaluate(() => {
-    const r = document.querySelector('.row');
+    const r = document.querySelector('#list .row:not(.tls)');
     if (!r) return false;
     r.click();
     return true;

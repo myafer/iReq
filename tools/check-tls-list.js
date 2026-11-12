@@ -59,7 +59,10 @@ async function api(pathname, options = {}) {
     ok('初始角标隐藏', await page.locator('#tlsCount').isHidden());
 
     await Promise.all([abruptHandshake(), abruptHandshake(), abruptHandshake()]);
-    await page.waitForTimeout(1000);
+    // 握手完成前的 EOF 会被 Node 静默吞掉，要等 handshakeTimeout(8s) 兜底报 tlsClientError 才有记录
+    await page
+      .waitForFunction(() => document.querySelectorAll('.row.tls').length > 0, null, { timeout: 12000 })
+      .catch(() => {});
 
     const rows = await page.locator('.row.tls').count();
     ok('SSE 实时出现诊断行（无需刷新）', rows === 1, 'rows=' + rows);

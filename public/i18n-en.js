@@ -542,6 +542,7 @@ window.ReqLiteI18N_EN = {
   "点击接管本机系统代理": "Click to take over the local system proxy",
   "Mock 总开关：单击切换，右键打开规则工作区": "Mock master switch: click to toggle, right-click for the rules workspace",
   "清空请求列表": "Clear the request list",
+  "协商 HTTP/2": "Negotiate HTTP/2",
   "连接与证书设置": "Connection & certificate settings",
 
   /* 跳过解密白名单 · 管理列表 */

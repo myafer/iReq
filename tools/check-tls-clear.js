@@ -66,6 +66,16 @@ function abruptHandshake(host) {
 
 const diagHosts = (d) => (d.tlsFailures || []).map((f) => f.host).sort();
 
+/** 轮询诊断接口直到条件满足：握手前 EOF 被 Node 静默吞掉，记录要等 handshakeTimeout(8s) 兜底 */
+async function waitDiag(expect, timeout = 12000) {
+  const start = Date.now();
+  for (;;) {
+    const hosts = diagHosts(await api('/api/diagnostics'));
+    if (expect(hosts) || Date.now() - start > timeout) return hosts;
+    await sleep(300);
+  }
+}
+
 (async () => {
   push('隔离服务可达', await waitUi());
   const cfg0 = await api('/api/config');
@@ -104,9 +114,8 @@ const diagHosts = (d) => (d.tlsFailures || []).map((f) => f.host).sort();
 
     // 三个域名各造一次握手失败
     await Promise.all([abruptHandshake(HOST_A), abruptHandshake(HOST_B), abruptHandshake(HOST_C)]);
-    await sleep(900);
-    const diag0 = await api('/api/diagnostics');
-    push('后端先记下三条诊断', diagHosts(diag0).join() === [HOST_A, HOST_B, HOST_C].sort().join(), JSON.stringify(diagHosts(diag0)));
+    const diag0Hosts = await waitDiag((h) => h.length === 3);
+    push('后端先记下三条诊断', diag0Hosts.join() === [HOST_A, HOST_B, HOST_C].sort().join(), JSON.stringify(diag0Hosts));
 
     browser = await chromium.launch({ headless: true, executablePath: EXEC, args: ['--no-sandbox'] });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN' });
@@ -145,8 +154,8 @@ const diagHosts = (d) => (d.tlsFailures || []).map((f) => f.host).sort();
 
     // 详情里的「加入跳过解密」：行 + 选中详情一起清干净
     await abruptHandshake(HOST_D);
-    await sleep(700);
-    push('新域名的诊断行出现', (await page.locator('.row.tls').count()) === 1);
+    const diagDHosts = await waitDiag((h) => h.includes(HOST_D));
+    push('新域名的诊断行出现', diagDHosts.includes(HOST_D) && (await page.locator('.row.tls').count()) === 1, JSON.stringify(diagDHosts));
     await page.locator('.row.tls').first().click();
     await page.waitForTimeout(180);
     push('选中后详情有透传按钮', (await page.locator('#detail [data-block-host]').count()) === 1);

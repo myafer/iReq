@@ -333,6 +333,7 @@ class ConsoleServer {
         store: this.store.stats(),
         capture: this.config.capture,
         mockEnabled: this.config.mockEnabled !== false,
+        h2Enabled: this.config.h2Enabled !== false,
         passthrough: this.config.passthrough,
         mitmPorts: this.config.mitmPorts,
         rules: this.rules.list().length,
@@ -668,6 +669,10 @@ class ConsoleServer {
         if (typeof body.capture === 'boolean') this.config.capture = body.capture;
         // Mock 总开关：会话级，dock / 设置里一键旁路所有规则
         if (typeof body.mockEnabled === 'boolean') this.config.mockEnabled = body.mockEnabled;
+        // HTTP/2 协商开关：只影响之后的 TLS 握手（重建 mitm 服务器换 ALPN），不改存量连接
+        if (body.h2Enabled !== undefined && this.proxy && typeof this.proxy.setH2Enabled === 'function') {
+          this.proxy.setH2Enabled(body.h2Enabled);
+        }
         if (Array.isArray(body.passthrough)) {
           // 用户把域名加进「跳过解密的域名」＝这个握手失败已经被处理。
           // 统一入口会清诊断、断掉还在解密的存量连接、落盘并广播给所有窗口。
