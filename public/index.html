@@ -311,8 +311,8 @@
             </div>
             <div class="ws-section">
               <div class="ws-section-title">规则文件夹 <span class="ws-section-ops">
-                <button type="button" class="btn ghost" id="rtNewRule" title="在当前文件夹新建规则">+ 规则</button>
-                <button type="button" class="btn ghost" id="rtNewDir" title="在当前文件夹新建子文件夹">+ 文件夹</button>
+                <button type="button" class="btn ghost" id="rtNewFile" title="在当前文件夹新建文件（*.rule.json）">+ 文件</button>
+                <button type="button" class="btn ghost" id="rtNewDir" title="在当前文件夹新建文件夹">+ 文件夹</button>
                 <button type="button" class="btn ghost" id="rtRefresh" title="重新扫描 rules 目录">⟳</button>
                 <button type="button" class="btn ghost" id="rtToggleBody" title="显示 / 隐藏响应体文件" aria-pressed="false">≡</button>
               </span></div>
@@ -320,7 +320,7 @@
                 <input id="rulesSearch" class="input" placeholder="搜索规则" title="搜索名称 / URL / 域名 / 状态码" spellcheck="false" data-autofocus />
               </div>
               <div id="rulesTree" class="rt-tree" role="tree" aria-label="规则文件夹" spellcheck="false"></div>
-              <p class="rt-hint">点文件夹筛选 · 右键或 ⋯ 管理</p>
+              <p class="rt-hint">双击改名 · 右键或 ⋯ 复制 / 粘贴 / 定位</p>
             </div>
             <details class="rules-help ws-help" id="wsHelp">
               <summary>规则文件怎么用</summary>

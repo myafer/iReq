@@ -131,8 +131,15 @@
     [/^操作失败：(.+)$/, function (m, a) { return 'Operation failed: ' + a; }],
     [/^移动失败：(.+)$/, function (m, a) { return 'Move failed: ' + a; }],
     [/^已新建文件夹 (.+)$/, function (m, a) { return 'Created folder ' + a; }],
+    [/^已新建规则文件 (.+)$/, function (m, a) { return 'Created rule file ' + a; }],
     [/^已复制路径：(.+)$/, function (m, a) { return 'Copied path: ' + a; }],
     [/^已移动到 (.+)$/, function (m, a) { return 'Moved to ' + a; }],
+    // 文件树：复制 / 剪切 / 粘贴 / 改名
+    [/^已复制 (.+)$/, function (m, a) { return 'Copied ' + a; }],
+    [/^已剪切 (.+)$/, function (m, a) { return 'Cut ' + a; }],
+    [/^已粘贴 (.+)$/, function (m, a) { return 'Pasted ' + a; }],
+    [/^已重命名为 (.+)$/, function (m, a) { return 'Renamed to ' + a; }],
+    [/^已经在「(.+)」里了$/, function (m, a) { return 'Already in "' + a + '"'; }],
     [/^正在编辑响应体（保存后写入 (.+)）$/, function (m, a) { return 'Editing response body (will be written to ' + a + ' on save)'; }],
     [/^(.+)：(.+)$/, function (m, a, b) { return EN[a] ? EN[a] + ': ' + b : m; }],
   ];

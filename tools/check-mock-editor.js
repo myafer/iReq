@@ -333,10 +333,16 @@ function proxyGet(path) {
     const treeRows = await page.evaluate(() => document.querySelectorAll('#rulesTree .rt-row').length);
     ok('规则文件树渲染出节点', treeRows >= 1, String(treeRows));
 
-    // 新建文件夹（页面 prompt 弹窗）
-    page.once('dialog', (d) => d.accept(TREE_DIR));
+    // 新建文件夹：行内输入框（桌面端没有 window.prompt，不能再用浏览器弹窗）
     await page.click('#rtNewDir');
-    await sleep(600);
+    await sleep(300);
+    const draftInput = await page.evaluate(
+      () => !!document.querySelector('#rulesTree .rt-draft [data-tree-input]')
+    );
+    ok('新建文件夹弹出树内输入框', draftInput);
+    await page.keyboard.type(TREE_DIR);
+    await page.keyboard.press('Enter');
+    await sleep(700);
     const dirInTree = await page.evaluate(
       (p) => [...document.querySelectorAll('#rulesTree .rt-dir')].some((n) => n.dataset.path === p),
       TREE_DIR

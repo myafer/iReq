@@ -287,7 +287,9 @@ CFNetwork=我的 iOS 客户端
 点顶栏「规则」打开**全屏工作区**，不再是「列表 + 弹窗」来回切：
 
 - **活动栏**（最左细条）：资源管理器显隐、搜索、新建规则、命令面板、帮助。
-- **资源管理器**：`data/rules/` 的真实文件夹树 + 侧栏搜索框 + 「打开的编辑器」列表。点文件夹把右侧列表筛到该目录（含子目录）；搜索同时收敛树和列表。`.body.*` 响应体文件默认收起，工具栏 `≡` 可展开。树行支持键盘（`↑ ↓` / `→ ←` / `Enter` / `F2` / `Delete`），右键或行尾 `⋯` 打开就近菜单（在此新建规则 / 子文件夹、重命名、复制路径、删除）。
+- **资源管理器**：`data/rules/` 的真实文件夹树 + 侧栏搜索框 + 「打开的编辑器」列表。点文件夹把右侧列表筛到该目录（含子目录）并顺手展开；搜索同时收敛树和列表。`.body.*` 响应体文件默认收起，工具栏 `≡` 可展开。
+- **文件树当文件管理器用**：`+ 文件` / `+ 文件夹` 在树里就地输入名字（不弹系统对话框，桌面端和网页端表现一致）；**双击文件名改名**（就地改，不会把文件挪到别的目录）；右键或 `⋯` 有 **复制 / 剪切 / 粘贴到此处 / 创建副本 / 重命名 / 复制路径（绝对路径）/ 在「访达」中显示 / 删除**，快捷键 `⌘C` `⌘X` `⌘V` `⌘D` `F2` `⌫`。复制规则会连带响应体一起复制并换新 id，重复粘贴自动编号不覆盖原件；「在文件管理器中显示」在不同平台分别打开访达 / 资源管理器 / 文件管理器。
+- **键盘**：树行支持 `↑ ↓` 移动、`→ ←` 展开折叠、`Enter` 打开、`F2` 改名、`Delete` 删除。
 - **编辑区**：点规则直接在右侧开一个**标签页**，左侧树始终可见；可以同时开多条，切换时未保存内容留在内存里，标签出现橙色圆点，关闭前二次确认。顶部是文件面包屑，底部是状态栏（规则数 / 当前目录 / 标签数 / 保存状态）。
 - **欢迎页**：没有标签时显示快捷入口（新建 / 导入 / 导出）和全部规则卡片列表。
 - **快捷键**：`⌘S` 保存、`⌘W` 关当前标签、`⌘1..9` 切标签、`⌘K` 命令面板、`Esc` 关当前标签（无标签时退出工作区）。
@@ -385,6 +387,14 @@ POST   /api/rules                 { name, method, urlMatch, matchMode, host, sta
 PUT    /api/rules/:id
 POST   /api/rules/reorder         { ids: [] }
 DELETE /api/rules/:id
+GET    /api/rules/tree            文件树（文件夹 / 规则 / 响应体三类节点，带 rootAbs）
+GET    /api/rules/file?path=a/b.rule.json      读单个文件
+PUT    /api/rules/file?path=a/b.body.json      { text } 或 { base64 } 写响应体
+POST   /api/rules/fs              { type: 'dir'|'rule', dir, name }
+POST   /api/rules/move            { from, toDir?, newName? }   只给 newName = 就地改名
+POST   /api/rules/copy            { from, toDir, newName? }    规则连带响应体，换新 id
+POST   /api/rules/reveal          { path, dryRun? }            在访达 / 资源管理器 / 文件管理器中显示
+DELETE /api/rules/file?path=...    删除文件或文件夹（递归）
 GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }

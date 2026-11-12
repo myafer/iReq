@@ -3425,11 +3425,13 @@ pre.raw-view {
 .rt-row.drop-hover { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
 .rt-caret {
-  width: 14px;
+  width: 16px;
   flex: none;
   color: var(--muted);
   font-size: 11px;
   text-align: center;
+  padding: 2px 0; /* 命中区域放大一点，单击箭头就能折叠 */
+  margin: -2px 0;
 }
 .rt-icon { flex: none; width: 16px; text-align: center; color: var(--text-2); font-size: 12px; }
 .rt-icon.on { color: var(--ok); }
@@ -3440,6 +3442,25 @@ pre.raw-view {
   flex: 1;
   min-width: 0;
 }
+
+/* 行内命名输入框：新建 / 改名就地输入，宽度贴着行，不再弹出模态框 */
+.rt-name-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg, #fff);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -2px 0;
+  outline: none;
+}
+.rt-row.renaming .rt-name-input,
+.rt-row.rt-draft .rt-name-input { margin-right: 4px; }
+.rt-row.renaming { background: var(--accent-soft); }
+.rt-row.rt-draft { background: var(--accent-soft); }
+.rt-row.rt-draft .rt-icon { color: var(--accent); }
 .rt-offtag {
   font-style: normal;
   font-size: 11px;

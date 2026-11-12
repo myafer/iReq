@@ -22,6 +22,12 @@ const S = {
   rulesTreeOpen: new Set(JSON.parse(localStorage.getItem('reqlite-rule-dirs') || '[]')),
   rulesTreeError: '',
   rulesActivePath: '', /* 当前打开的规则在树里的路径 */
+  /* 行内命名：桌面端没有 window.prompt（Electron 不支持），新建/改名一律在树里就地输入
+   * treeRenaming = { path, value }，treeDraft = { dir, type:'dir'|'rule', value } */
+  treeRenaming: null,
+  treeDraft: null,
+  /* 文件树剪贴板：{ mode:'copy'|'cut', path }，粘贴时按 mode 走复制或移动 */
+  rulesClip: null,
   ruleFromTree: false, /* 编辑器是否从规则工作区打开（关闭时回到工作区） */
   /* VSCode 式多标签编辑区：{ key, id, name, dir, data, pane, dirty, fromWorkspace } */
   ruleTabs: [],
@@ -3264,38 +3270,97 @@ function renderTree() {
   const tree = S.rulesTreeData && S.rulesTreeData.tree;
   if (S.rulesTreeError) {
     box.innerHTML = `<div class="rt-empty rt-error">文件树读取失败：${esc(S.rulesTreeError)}</div>`;
-  } else if (tree && tree.length) {
-    const html = renderTreeNode(tree, 0, ruleQuery());
-    box.innerHTML = html.trim() ? html : '<div class="rt-empty">没有匹配的规则</div>';
   } else {
-    box.innerHTML = '<div class="rt-empty">rules 目录还是空的<br>用「+ 规则」或抓包页的「Mock 此请求」创建</div>';
+    const html = (renderTreeNode(tree || [], 0, ruleQuery()) || '') + draftRowHTML('', 0);
+    if (html.trim()) box.innerHTML = html;
+    else if (tree && tree.length) box.innerHTML = '<div class="rt-empty">没有匹配的规则</div>';
+    else
+      box.innerHTML =
+        '<div class="rt-empty">rules 目录还是空的<br>用「+ 文件」或抓包页的「Mock 此请求」创建</div>';
   }
   bindTreeEvents(box);
   box.scrollTop = scroll; /* 展开 / 选中 / 刷新后保留滚动位置 */
+  focusTreeEditor();
 }
 
-function renderTreeNode(nodes, depth, q) {
+/** 行内命名输入框：新建与改名共用，避免依赖 window.prompt（Electron 里没有） */
+function treeNameInputHTML(value, placeholder, extraCls) {
+  return `<input class="rt-name-input${extraCls ? ' ' + extraCls : ''}" type="text" value="${esc(
+    value || ''
+  )}" placeholder="${esc(placeholder || '')}" spellcheck="false" autocomplete="off" data-tree-input>`;
+}
+
+/** 新建中的草稿行：出现在目标文件夹的末尾（根目录则在树底） */
+function draftRowHTML(dir, depth) {
+  const d = S.treeDraft;
+  if (!d || (d.dir || '') !== (dir || '')) return '';
+  const isDir = d.type === 'dir';
+  return `<div class="rt-row rt-draft" data-type="draft" data-dir="${esc(dir || '')}" style="--d:${depth}">
+    <span class="rt-icon">${isDir ? '▤' : '◉'}</span>
+    ${treeNameInputHTML(d.value, isDir ? '新文件夹名称' : '新规则文件名', 'rt-draft-input')}
+  </div>`;
+}
+
+/** 渲染后把光标放进正在编辑的输入框 */
+function focusTreeEditor() {
+  const box = $('#rulesTree');
+  if (!box) return;
+  const el = box.querySelector('[data-tree-input]');
+  if (!el) return;
+  el.focus();
+  const v = el.value;
+  const dot = v.lastIndexOf('.');
+  if (dot > 0) el.setSelectionRange(0, dot); /* 文件名只选中主名，不选 .rule.json */
+  else el.select();
+}
+
+function renderTreeNode(nodes, depth, q, parentPath) {
   return nodes
     .filter((n) => treeNodeMatches(n, q))
     .map((n) => {
+      const renaming = S.treeRenaming && S.treeRenaming.path === n.path;
+      const nameHTML = renaming
+        ? treeNameInputHTML(S.treeRenaming.value, '', 'rt-rename-input')
+        : `<span class="rt-name">${esc(n.name)}</span>`;
       if (n.type === 'dir') {
         const open = q ? true : S.rulesTreeOpen.has(n.path);
         return `<div class="rt-node">
-        <div class="rt-row rt-dir ${S.rulesDir === n.path ? 'active' : ''}" data-path="${esc(n.path)}" data-type="dir" data-name="${esc(n.name)}" title="${esc(n.path)}" tabindex="0" role="treeitem" aria-expanded="${open}" style="--d:${depth}" draggable="true">
+        <div class="rt-row rt-dir ${S.rulesDir === n.path ? 'active' : ''}${
+          renaming ? ' renaming' : ''
+        }" data-path="${esc(n.path)}" data-type="dir" data-name="${esc(n.name)}" title="${esc(
+          n.path
+        )}" tabindex="0" role="treeitem" aria-expanded="${open}" style="--d:${depth}" draggable="true">
           <span class="rt-caret" data-caret="${esc(n.path)}">${open ? '▾' : '▸'}</span>
           <span class="rt-icon">▤</span>
-          <span class="rt-name">${esc(n.name)}</span>
+          ${nameHTML}
           <span class="rt-ops"><button type="button" data-op="menu" title="更多操作">⋯</button></span>
         </div>
-        ${open ? `<div class="rt-kids">${renderTreeNode(n.children || [], depth + 1, q)}</div>` : ''}
+        ${
+          open
+            ? `<div class="rt-kids">${renderTreeNode(n.children || [], depth + 1, q, n.path)}${draftRowHTML(
+                n.path,
+                depth + 1
+              )}</div>`
+            : ''
+        }
       </div>`;
       }
       if (n.type === 'rule') {
         const active = S.rulesActivePath === n.path;
         return `<div class="rt-node">
-        <div class="rt-row rt-rule ${active ? 'active' : ''}" data-path="${esc(n.path)}" data-type="rule" data-id="${esc(n.rule.id)}" data-name="${esc(n.name)}" title="${esc(n.path)}" tabindex="0" role="treeitem" aria-selected="${active}" style="--d:${depth}" draggable="true">
+        <div class="rt-row rt-rule ${active ? 'active' : ''}${
+          renaming ? ' renaming' : ''
+        }" data-path="${esc(n.path)}" data-type="rule" data-id="${esc(n.rule.id)}" data-name="${esc(
+          n.name
+        )}" title="${esc(n.path)}" tabindex="0" role="treeitem" aria-selected="${active}" style="--d:${depth}" draggable="true">
           <span class="rt-icon ${n.rule.enabled ? 'on' : 'off'}">${n.rule.enabled ? '◉' : '○'}</span>
-          <span class="rt-name">${esc(n.name)}${n.rule.enabled ? '' : ' <i class="rt-offtag">停用</i>'}</span>
+          ${
+            renaming
+              ? nameHTML
+              : `<span class="rt-name">${esc(n.name)}${
+                  n.rule.enabled ? '' : ' <i class="rt-offtag">停用</i>'
+                }</span>`
+          }
           <span class="rt-ops"><button type="button" data-op="menu" title="更多操作">⋯</button></span>
         </div>
         ${(n.children || [])
@@ -3357,6 +3422,7 @@ function bindTreeEvents(box) {
   };
 
   box.onclick = async (e) => {
+    if (e.target.closest('[data-tree-input]')) return; /* 输入框内的点击不触发选中 */
     const caret = e.target.closest('[data-caret]');
     if (caret) {
       const p = caret.getAttribute('data-caret');
@@ -3380,18 +3446,66 @@ function bindTreeEvents(box) {
     activateTreeRow(row);
   };
 
-  box.oncontextmenu = (e) => {
+  /* 双击文件名就地改名（文件管理器里最基本的动作） */
+  box.ondblclick = (e) => {
+    if (e.target.closest('[data-tree-input]')) return;
     const row = e.target.closest('.rt-row');
     if (!row) return;
+    const type = row.dataset.type;
+    if (type !== 'dir' && type !== 'rule') return;
     e.preventDefault();
+    startTreeRename(row.dataset.path, row.dataset.name);
+  };
+
+  /* 行内输入：边打字边同步状态，回车提交 / Esc 取消 / 失焦提交 */
+  box.oninput = (e) => {
+    const el = e.target.closest('[data-tree-input]');
+    if (!el) return;
+    if (S.treeDraft) S.treeDraft.value = el.value;
+    else if (S.treeRenaming) S.treeRenaming.value = el.value;
+  };
+
+  box.onfocusout = (e) => {
+    const el = e.target.closest('[data-tree-input]');
+    if (!el) return;
+    if (S.treeCommitting) return;
+    /* 焦点移到树内的另一个元素（比如刚提交后重新聚焦行）不算「离开」 */
+    const next = e.relatedTarget;
+    if (next && box.contains(next) && next.closest('[data-tree-input]')) return;
+    commitTreeEditor();
+  };
+
+  box.oncontextmenu = (e) => {
+    const row = e.target.closest('.rt-row');
+    e.preventDefault();
+    if (!row) {
+      /* 空白处右键 = 根目录：新建 / 粘贴到根目录 */
+      openTreeRootMenu(e.clientX, e.clientY);
+      return;
+    }
     openTreeRowMenu(row, e.clientX, e.clientY);
   };
 
-  /* 键盘可达：↑↓ 移动、→← 展开折叠、Enter 打开、F2 重命名、Delete 删除 */
+  /* 键盘可达：↑↓ 移动、→← 展开折叠、Enter 打开、F2 重命名、Delete 删除，
+   * 以及文件管理器那套 ⌘/Ctrl + C / X / V */
   box.onkeydown = (e) => {
+    const input = e.target.closest('[data-tree-input]');
+    if (input) {
+      if (e.key === 'Enter') { e.preventDefault(); commitTreeEditor(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelTreeEditor(); }
+      return;
+    }
     const rows = [...box.querySelectorAll('.rt-row')].filter((r) => r.offsetParent !== null);
     const cur = e.target.closest('.rt-row');
     const i = cur ? rows.indexOf(cur) : -1;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && cur) {
+      const k = e.key.toLowerCase();
+      if (k === 'c') { e.preventDefault(); treeOp('copy', cur); return; }
+      if (k === 'x') { e.preventDefault(); treeOp('cut', cur); return; }
+      if (k === 'v') { e.preventDefault(); treeOp('paste', cur); return; }
+      if (k === 'd') { e.preventDefault(); treeOp('duplicate', cur); return; }
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
@@ -3439,6 +3553,124 @@ function focusTreePath(p) {
   if (el) el.focus();
 }
 
+/* ------------------------------------------------- 行内命名（新建 / 改名） */
+
+/** 规则的绝对路径：复制路径、贴到终端或编辑器里直接用 */
+function treeAbsPath(rel) {
+  const rootAbs = (S.rulesTreeData && S.rulesTreeData.rootAbs) || '';
+  const p = String(rel || '');
+  if (!p) return rootAbs;
+  return rootAbs ? rootAbs + '/' + p : p;
+}
+
+function startTreeRename(path, name) {
+  S.treeDraft = null;
+  S.treeRenaming = { path, value: name || path.split('/').pop() };
+  renderTree();
+  focusTreeEditor();
+}
+
+/** 新建：dir = 落点文件夹，type = 'dir' 文件夹 / 'rule' 文件（规则文件） */
+function startTreeDraft(dir, type) {
+  S.treeRenaming = null;
+  const d = dir || '';
+  if (d && !S.rulesTreeOpen.has(d)) {
+    S.rulesTreeOpen.add(d);
+    localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+  }
+  S.treeDraft = { dir: d, type: type === 'dir' ? 'dir' : 'rule', value: '' };
+  renderTree();
+  focusTreeEditor();
+}
+
+function cancelTreeEditor() {
+  if (!S.treeDraft && !S.treeRenaming) return;
+  S.treeDraft = null;
+  S.treeRenaming = null;
+  renderTree();
+}
+
+/** 提交当前行内输入（新建或改名）；失焦、回车都走这里 */
+async function commitTreeEditor() {
+  if (S.treeCommitting) return;
+  const draft = S.treeDraft;
+  const ren = S.treeRenaming;
+  if (!draft && !ren) return;
+  /* 从 DOM 兜底取值：输入过程中可能没触发 input 事件（比如输入法直接上屏） */
+  const box = $('#rulesTree');
+  const el = box && box.querySelector('[data-tree-input]');
+  const typed = (el ? el.value : (draft || ren).value || '').trim();
+
+  S.treeCommitting = true;
+  if (draft) {
+    S.treeDraft = null;
+  } else {
+    S.treeRenaming = null;
+  }
+  try {
+    if (draft) {
+      if (!typed) { renderTree(); return; }
+      if (draft.type === 'dir') {
+        const out = await api('/api/rules/fs', {
+          method: 'POST',
+          body: { type: 'dir', dir: draft.dir, name: typed },
+        });
+        if (out && out.path) {
+          S.rulesTreeOpen.add(out.path);
+          localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
+        }
+        await loadRules();
+        toast('已新建文件夹 ' + typed);
+      } else {
+        const rule = await api('/api/rules/fs', {
+          method: 'POST',
+          body: { type: 'rule', dir: draft.dir, name: typed, urlMatch: '' },
+        });
+        setRulesDir(draft.dir);
+        await loadRules();
+        toast('已新建规则文件 ' + typed + '.rule.json');
+        if (rule && rule.id) {
+          const fresh = S.rules.find((r) => r.id === rule.id);
+          if (fresh) {
+            S.rulesActivePath = fresh.file;
+            openRuleFromTree(fresh);
+          }
+        }
+      }
+      return;
+    }
+
+    const cur = ren.path.split('/').pop();
+    if (!typed || typed === cur) { renderTree(); return; }
+    const out = await api('/api/rules/move', {
+      method: 'POST',
+      body: { from: ren.path, newName: typed },
+    });
+    /* 旧路径下的选中目录与展开态必须一起迁移，否则面包屑指向已不存在的目录 */
+    if (S.rulesDir === ren.path || S.rulesDir.startsWith(ren.path + '/')) {
+      setRulesDir((out.path || ren.path) + S.rulesDir.slice(ren.path.length));
+    }
+    const nextOpen = new Set();
+    S.rulesTreeOpen.forEach((d) =>
+      nextOpen.add(
+        d === ren.path || d.startsWith(ren.path + '/')
+          ? (out.path || ren.path) + d.slice(ren.path.length)
+          : d
+      )
+    );
+    S.rulesTreeOpen = nextOpen;
+    localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...nextOpen]));
+    if (S.rulesActivePath === ren.path) S.rulesActivePath = out.path || S.rulesActivePath;
+    await loadRules();
+    toast('已重命名为 ' + typed);
+  } catch (err) {
+    toast('操作失败：' + err.message);
+    renderTree();
+  } finally {
+    S.treeCommitting = false;
+  }
+}
+
 /** 树行的就近菜单：⋯ 按钮与右键共用，替代原来只在 hover 出现的 ＋/✎/✕ */
 function openTreeRowMenu(row, x, y) {
   const p = row.dataset.path;
@@ -3446,8 +3678,8 @@ function openTreeRowMenu(row, x, y) {
   const name = row.dataset.name || p.split('/').pop();
   const items = [];
   if (type === 'dir') {
-    items.push(['new-rule', '＋ 在此新建规则']);
-    items.push(['new-dir', '＋ 在此新建子文件夹']);
+    items.push(['new-file', '＋ 新建文件']);
+    items.push(['new-dir', '＋ 新建文件夹']);
     items.push(['open', '筛选到此文件夹']);
   } else if (type === 'rule') {
     items.push(['open', '编辑这条规则']);
@@ -3455,22 +3687,87 @@ function openTreeRowMenu(row, x, y) {
   } else {
     items.push(['open', '编辑响应体']);
   }
+  items.push(['sep', '']);
+  items.push(['copy', '复制']);
+  items.push(['cut', '剪切']);
+  /* 粘贴落点：文件夹 = 自己；文件 = 所在文件夹 */
+  items.push(['paste', '粘贴到此处']);
+  if (type === 'rule' || type === 'dir') items.push(['duplicate', '创建副本']);
+  items.push(['sep', '']);
   if (type === 'rule' || type === 'dir') items.push(['rename', '重命名']);
-  items.push(['copy', '复制文件路径']);
-  if (type === 'rule' || type === 'dir') items.push(['del', '删除']);
+  items.push(['copy-path', '复制路径']);
+  items.push(['reveal', revealLabel()]);
+  if (type === 'rule' || type === 'dir') {
+    items.push(['sep', '']);
+    items.push(['del', '删除']);
+  }
   showCtxMenu(
     x,
     y,
     `<div class="ctx-title">${esc(name)}</div>` +
       items
-        .map(([op, label]) => `<button class="ctx-item" data-rt="${op}" data-rt-path="${esc(p)}" data-rt-type="${type}" data-rt-rule-id="${esc(row.dataset.ruleId || row.dataset.id || '')}">${esc(label)}</button>`)
+        .map(([op, label]) =>
+          op === 'sep'
+            ? '<div class="ctx-sep"></div>'
+            : `<button class="ctx-item" data-rt="${op}" data-rt-path="${esc(p)}" data-rt-type="${type}" data-rt-rule-id="${esc(
+                row.dataset.ruleId || row.dataset.id || ''
+              )}">${esc(label)}</button>`
+        )
         .join('')
   );
+}
+
+/** 树空白处（根目录）的就近菜单 */
+function openTreeRootMenu(x, y) {
+  const items = [
+    ['new-file', '＋ 新建文件'],
+    ['new-dir', '＋ 新建文件夹'],
+    ['sep', ''],
+    ['paste', '粘贴到此处'],
+    ['sep', ''],
+    ['reveal', revealLabel()],
+  ];
+  showCtxMenu(
+    x,
+    y,
+    '<div class="ctx-title">rules 根目录</div>' +
+      items
+        .map(([op, label]) =>
+          op === 'sep'
+            ? '<div class="ctx-sep"></div>'
+            : `<button class="ctx-item" data-rt="${op}" data-rt-path="" data-rt-type="root" data-rt-rule-id="">${esc(
+                label
+              )}</button>`
+        )
+        .join('')
+  );
+}
+
+/** 文件管理器名字按平台走：macOS 访达 / Windows 资源管理器 / 其它叫文件管理器 */
+function treePlatform() {
+  return (S.status && S.status.platform) || '';
+}
+
+function revealLabel() {
+  const plat = treePlatform();
+  if (plat === 'darwin') return '在「访达」中显示';
+  if (plat === 'win32') return '在「资源管理器」中显示';
+  if (plat === 'linux') return '在文件管理器中显示';
+  return '在文件管理器中打开所在位置';
+}
+
+function revealDoneText() {
+  const plat = treePlatform();
+  if (plat === 'darwin') return '已在访达中显示';
+  if (plat === 'win32') return '已在资源管理器中定位';
+  if (plat === 'linux') return '已在文件管理器中打开所在位置';
+  return '已打开所在位置';
 }
 
 function activateTreeRow(row) {
   if (row.dataset.type === 'dir') {
     setRulesDir(row.dataset.path);
+    /* 单击文件夹顺手展开：不给反馈会让人以为「点不动」 */
     if (!S.rulesTreeOpen.has(S.rulesDir)) {
       S.rulesTreeOpen.add(S.rulesDir);
       localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
@@ -3685,54 +3982,55 @@ function newRuleInDir(dir) {
   openRuleFromTree(null);
 }
 
+/** 新建文件夹：行内输入名字（桌面端没有 window.prompt，不能再用弹窗） */
 async function newDirIn(dir) {
-  const name = prompt('新文件夹名称：', '新文件夹');
-  if (!name) return;
-  try {
-    await api('/api/rules/fs', { method: 'POST', body: { type: 'dir', dir: dir || '', name } });
-    const p = (dir ? dir + '/' : '') + name;
-    S.rulesTreeOpen.add(p);
-    localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...S.rulesTreeOpen]));
-    await loadRules();
-    toast('已新建文件夹 ' + name);
-  } catch (err) {
-    toast('新建失败：' + err.message);
-  }
+  startTreeDraft(dir || '', 'dir');
+}
+
+/** 新建文件（规则文件，落盘为 *.rule.json）：行内输入名字 */
+async function newFileIn(dir) {
+  startTreeDraft(dir || '', 'rule');
 }
 
 async function treeOp(op, row) {
   const p = row.dataset.path;
   const type = row.dataset.type;
+  /* 新建/粘贴的落点：文件夹就是自己，其它取所在文件夹 */
+  const targetDir = type === 'dir' ? p : p.split('/').slice(0, -1).join('/');
+  const name = row.dataset.name || p.split('/').pop();
   try {
     if (op === 'new-rule') {
-      newRuleInDir(type === 'dir' ? p : p.split('/').slice(0, -1).join('/'));
+      newRuleInDir(targetDir);
+    } else if (op === 'new-file') {
+      newFileIn(targetDir);
     } else if (op === 'new-dir') {
-      await newDirIn(type === 'dir' ? p : p.split('/').slice(0, -1).join('/'));
+      await newDirIn(targetDir);
     } else if (op === 'open') {
       activateTreeRow(row);
     } else if (op === 'open-body') {
       const rule = S.rules.find((r) => r.id === (row.dataset.ruleId || row.dataset.id));
       if (rule) openRuleFromTree(rule, 'body');
-    } else if (op === 'copy') {
-      try { await navigator.clipboard.writeText(p); } catch (_) { /* 非安全上下文时退化为只提示 */ }
-      toast('已复制路径：' + p);
-    } else if (op === 'rename') {
-      const cur = p.split('/').pop();
-      const name = prompt('重命名为：', cur);
-      if (!name || name === cur) return;
-      const out = await api('/api/rules/move', { method: 'POST', body: { from: p, newName: name } });
-      /* 旧路径下的选中目录与展开态必须一起迁移，否则面包屑指向已不存在的目录 */
-      if (S.rulesDir === p || S.rulesDir.startsWith(p + '/')) {
-        setRulesDir((out.path || p) + S.rulesDir.slice(p.length));
+    } else if (op === 'copy' || op === 'cut') {
+      S.rulesClip = { mode: op, path: p };
+      toast((op === 'copy' ? '已复制 ' : '已剪切 ') + name);
+    } else if (op === 'duplicate') {
+      /* 副本落在同级：文件 = 它所在的文件夹，文件夹 = 它的父目录（不能复制进自己） */
+      const parentDir = p.split('/').slice(0, -1).join('/');
+      await pasteTreeItem(p, type === 'dir' ? parentDir : targetDir, 'copy');
+    } else if (op === 'paste') {
+      if (!S.rulesClip) return toast('剪贴板是空的：先复制或剪切一个文件 / 文件夹');
+      /* 剪切粘贴到原位置等于什么都没做，别白跑一趟 */
+      if (S.rulesClip.mode === 'cut' && (S.rulesClip.path || '').split('/').slice(0, -1).join('/') === targetDir) {
+        return toast('已经在「' + (targetDir || '根目录') + '」里了');
       }
-      const nextOpen = new Set();
-      S.rulesTreeOpen.forEach((d) =>
-        nextOpen.add(d === p || d.startsWith(p + '/') ? (out.path || p) + d.slice(p.length) : d)
-      );
-      S.rulesTreeOpen = nextOpen;
-      localStorage.setItem('reqlite-rule-dirs', JSON.stringify([...nextOpen]));
-      await loadRules();
-      toast('已重命名');
+      await pasteTreeItem(S.rulesClip.path, targetDir, S.rulesClip.mode);
+    } else if (op === 'copy-path') {
+      await copyText(treeAbsPath(p), '已复制路径：' + treeAbsPath(p));
+    } else if (op === 'reveal') {
+      await api('/api/rules/reveal', { method: 'POST', body: { path: p } });
+      toast(revealDoneText());
+    } else if (op === 'rename') {
+      startTreeRename(p, name);
     } else if (op === 'del') {
       const kids = type === 'dir' ? '文件夹里的全部规则' : '这条规则';
       if (!confirm(`确定删除「${p}」？\n将删除${kids}，不可恢复。`)) return;
@@ -3743,6 +4041,25 @@ async function treeOp(op, row) {
     }
   } catch (err) {
     toast('操作失败：' + err.message);
+  }
+}
+
+/** 把树里的某个文件/文件夹放到 targetDir 里：copy = 复制一份，cut = 移动 */
+async function pasteTreeItem(from, targetDir, mode) {
+  const name = from.split('/').pop();
+  if (mode === 'cut') {
+    await api('/api/rules/move', { method: 'POST', body: { from, toDir: targetDir } });
+    await loadRules();
+    toast('已移动到 ' + (targetDir || '根目录'));
+    return;
+  }
+  const out = await api('/api/rules/copy', { method: 'POST', body: { from, toDir: targetDir } });
+  await loadRules();
+  const base = (out && out.path ? out.path.split('/').pop() : name);
+  toast('已粘贴 ' + base);
+  if (out && out.path) {
+    S.rulesActivePath = out.type === 'rule' ? out.path : S.rulesActivePath;
+    focusTreePath(out.path);
   }
 }
 
@@ -4739,7 +5056,7 @@ function bind() {
   $('#rulesImport').addEventListener('click', () => openJsonIO('import'));
   $('#rulesExport').addEventListener('click', () => openJsonIO('export'));
   /* 文件树工具栏：在当前选中目录里新建 */
-  $('#rtNewRule').addEventListener('click', () => newRuleInDir(S.rulesDir));
+  $('#rtNewFile').addEventListener('click', () => newFileIn(S.rulesDir));
   $('#rtNewDir').addEventListener('click', () => newDirIn(S.rulesDir));
   $('#rtRefresh').addEventListener('click', async () => {
     try {
