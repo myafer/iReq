@@ -5072,7 +5072,32 @@ function toggleMoreMenu(which, force) {
   }
   menu.hidden = !open;
   if (trigger) trigger.setAttribute('aria-expanded', String(open));
+  // 筛选菜单是 fixed 的（要跳出 .fbar 的横向滚动裁剪），展开前得先算好坐标
+  if (open && !top) placeFilterMenu();
   if (open) closeCtxMenu();
+}
+
+/** 把筛选「更多」菜单贴到触发器下方；下方放不开就往上翻，左右夹在视口内 */
+function placeFilterMenu() {
+  const trig = $('#btnFilterMore');
+  const menu = $('#filterMoreMenu');
+  if (!trig || !menu) return;
+  const r = trig.getBoundingClientRect();
+  // 先归位再量尺寸，避免用到上一次的位置
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  const mw = menu.offsetWidth;
+  const mh = menu.offsetHeight;
+  const pad = 8;
+  let left = r.right - mw;
+  left = Math.max(pad, Math.min(left, window.innerWidth - mw - pad));
+  let top = r.bottom + 6;
+  if (top + mh > window.innerHeight - pad) {
+    const above = r.top - mh - 6;
+    top = above >= pad ? above : Math.max(pad, window.innerHeight - mh - pad);
+  }
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
 }
 
 function closeCtxMenu() {
@@ -5557,6 +5582,9 @@ async function init() {
     applyPaneWidths();
   });
   window.addEventListener('resize', applyPaneWidths);
+  // 筛选「更多」是 fixed 定位，窗口缩放或筛选条横向滚动后会和触发器脱钩，直接收起
+  window.addEventListener('resize', () => toggleMoreMenu('filter', false));
+  $('#filters').addEventListener('scroll', () => toggleMoreMenu('filter', false), { passive: true });
   setInterval(loadStatus, 5000);
 }
 

@@ -95,11 +95,15 @@ async function api(pathname, options = {}) {
     await page.waitForTimeout(400);
     const enRow = await page.locator('.row.tls').first().innerText();
     ok('英文模式诊断行无中文残留', !/[\u4e00-\u9fff]/.test(enRow), JSON.stringify(enRow.replace(/\n/g, ' ')));
-    const enBtn = await page.locator('#filters button[data-status="tls"]').innerText();
+    // 菜单收起时元素不可见，innerText 可能取空，直接读 textContent
+    const enBtn = await page.locator('#filters button[data-status="tls"]').evaluate((el) => el.textContent.trim());
     ok('英文模式筛选按钮已翻译', /Handshake/i.test(enBtn));
     await page.evaluate(() => window.ReqLiteI18N.setLang('auto'));
 
-    await page.click('#filters button[data-status="tls"]');
+    // 「握手失败」收在筛选条的「更多」菜单里，先展开再点
+    await page.click('#btnFilterMore');
+    await page.waitForTimeout(200);
+    await page.click('#filterMoreMenu button[data-status="tls"]');
     await page.waitForTimeout(180);
     ok(
       '「握手失败」筛选只显示诊断行',

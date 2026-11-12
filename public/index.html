@@ -99,35 +99,39 @@
       <div class="count" id="count">0 条</div>
     </div>
 
-    <!-- 筛选条：单选（同顶部搜索一样是「视图」），分组用竖线隔开，超出横向滚动 -->
+    <!-- 筛选条：单选（同顶部搜索一样是「视图」）。一行只放最高频的几项，
+         其余收进「更多」菜单（协议版本 / 内容类型 / 状态码 / 其他），避免一眼看过去 20 个按钮 -->
     <div class="fbar" id="filters">
       <button class="on" data-status="">全部</button>
       <span class="fbar-sep" aria-hidden="true"></span>
       <button data-status="http">HTTP</button>
       <button data-status="https">HTTPS</button>
       <button data-status="ws">WebSocket</button>
-      <button data-status="sse">SSE</button>
       <span class="fbar-sep" aria-hidden="true"></span>
-      <button data-status="http1">HTTP1</button>
-      <button data-status="http2">HTTP2</button>
-      <span class="fbar-sep" aria-hidden="true"></span>
-      <button data-status="json">JSON</button>
-      <button data-status="xml">XML</button>
-      <button data-status="text">文本</button>
-      <button data-status="html">HTML</button>
-      <button data-status="js">JS</button>
-      <button data-status="image">图片</button>
-      <button data-status="media">媒体</button>
-      <button data-status="binary">二进制</button>
-      <span class="fbar-sep" aria-hidden="true"></span>
-      <button data-status="1xx">1xx</button>
       <button data-status="2xx">2xx</button>
       <button data-status="3xx">3xx</button>
       <button data-status="4xx">4xx</button>
       <button data-status="5xx">5xx</button>
+      <span class="fbar-sep" aria-hidden="true"></span>
+      <button data-status="json">JSON</button>
+      <button data-status="html">HTML</button>
       <div class="more-wrap filter-more-wrap" id="filterMoreWrap">
         <button class="filter-more-trigger" id="btnFilterMore" aria-expanded="false" title="更多筛选">更多 ▾ <b id="filterMoreDot" hidden>·</b></button>
         <div class="more-menu filter-more-menu" id="filterMoreMenu" hidden>
+          <div class="more-head">协议</div>
+          <button data-status="sse">SSE</button>
+          <button data-status="http1">HTTP1</button>
+          <button data-status="http2">HTTP2</button>
+          <div class="more-head">内容类型</div>
+          <button data-status="xml">XML</button>
+          <button data-status="text">文本</button>
+          <button data-status="js">JS</button>
+          <button data-status="image">图片</button>
+          <button data-status="media">媒体</button>
+          <button data-status="binary">二进制</button>
+          <div class="more-head">状态码</div>
+          <button data-status="1xx">1xx</button>
+          <div class="more-head">其他</div>
           <button data-status="error">错误</button>
           <button data-mocked="1">Mock</button>
           <button data-status="tls">握手失败 <b id="tlsCount" hidden>0</b></button>

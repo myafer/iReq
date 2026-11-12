@@ -52,8 +52,10 @@ const log = (...a) => console.log(...a);
   await page.fill('#search', '');
   await page.waitForTimeout(500);
 
-  // 5) 过滤按钮
-  await page.click('#filters button[data-mocked="1"]');
+  // 5) 过滤按钮（Mock 在筛选条的「更多」菜单里）
+  await page.click('#btnFilterMore');
+  await page.waitForTimeout(200);
+  await page.click('#filterMoreMenu button[data-mocked="1"]');
   await page.waitForTimeout(500);
   log('Mock 过滤行数:', await page.$$eval('.row', (r) => r.length));
   await page.click('#filters button[data-status=""]');

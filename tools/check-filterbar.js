@@ -163,11 +163,18 @@ async function waitUi() {
       const b = document.querySelector('#filters');
       return b && b.classList.contains('fbar') && b.offsetHeight > 0;
     }));
-    push('20 个筛选选项 + 更多菜单齐全', await page.evaluate(() => {
+    // 一行只露高频项：全部 / 协议三个 / 状态码四段 / JSON·HTML + 更多
+    push('筛选条只露 10 个高频项 + 更多', await page.evaluate(() => {
       const chips = [...document.querySelectorAll('#filters > button[data-status]')];
-      const want = ['', 'http', 'https', 'ws', 'sse', 'http1', 'http2', 'json', 'xml', 'text',
-        'html', 'js', 'image', 'media', 'binary', '1xx', '2xx', '3xx', '4xx', '5xx'];
+      const want = ['', 'http', 'https', 'ws', '2xx', '3xx', '4xx', '5xx', 'json', 'html'];
       return JSON.stringify(chips.map((b) => b.dataset.status)) === JSON.stringify(want);
+    }));
+    // 选项一个都不能少，只是低频的收进了「更多」菜单（另有 error / tls，Mock 走 data-mocked）
+    push('20 个筛选项齐全（低频收在更多菜单）', await page.evaluate(() => {
+      const all = [...document.querySelectorAll('#filters button[data-status]')].map((b) => b.dataset.status);
+      const want = ['', 'http', 'https', 'ws', 'sse', 'http1', 'http2', 'json', 'xml', 'text',
+        'html', 'js', 'image', 'media', 'binary', '1xx', '2xx', '3xx', '4xx', '5xx', 'error', 'tls'];
+      return all.length === want.length && want.every((s) => all.includes(s));
     }));
     push('默认「全部」高亮', await page.evaluate(() =>
       document.querySelector('#filters > button[data-status=""]').classList.contains('on')
@@ -195,6 +202,30 @@ async function waitUi() {
     // 更多菜单：错误可用，且单选互斥
     await page.click('#btnFilterMore');
     await page.waitForTimeout(300);
+    // 曾经的 bug：菜单是 .fbar 的 absolute 子元素，被 overflow-y:hidden 裁在 37px 高的条里，
+    // 展开看不到也点不到。现在改 fixed 定位，必须整体落在条下方且中心点能命中自己
+    push('更多菜单不被筛选条裁剪', await page.evaluate(() => {
+      const m = document.querySelector('#filterMoreMenu');
+      const bar = document.querySelector('#filters').getBoundingClientRect();
+      if (m.hidden) return false;
+      const r = m.getBoundingClientRect();
+      return r.height > 40 && r.top >= bar.bottom - 1 && r.bottom <= window.innerHeight;
+    }));
+    push('更多菜单项可点（document.elementFromPoint 命中自身）', await page.evaluate(() => {
+      const m = document.querySelector('#filterMoreMenu');
+      return ['sse', 'http2', 'xml', 'binary', '1xx', 'error'].every((s) => {
+        const b = m.querySelector(`button[data-status="${s}"]`);
+        if (!b) return false;
+        const r = b.getBoundingClientRect();
+        return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b;
+      });
+    }));
+    // 触发器不在 .fbar > button 的直系选择器里，曾落到全局 button 的 14px，比旁边大一圈
+    push('更多触发器字号与相邻筛选按钮一致', await page.evaluate(() => {
+      const a = getComputedStyle(document.querySelector('#btnFilterMore'));
+      const b = getComputedStyle(document.querySelector('#filters > button[data-status="json"]'));
+      return a.fontSize === b.fontSize && Math.abs(parseFloat(a.fontSize) - parseFloat(b.fontSize)) < 0.1;
+    }));
     push('更多菜单含 错误/Mock/握手失败', await page.evaluate(() => {
       const bs = [...document.querySelectorAll('#filterMoreMenu button')];
       return !!bs.find((b) => b.dataset.status === 'error') &&
@@ -213,15 +244,19 @@ async function waitUi() {
     await page.click('#filters > button[data-status=""]');
     await page.waitForTimeout(500);
 
-    // 英文界面：筛选条无中文残留
+    // 英文界面：筛选条无中文残留（含收起状态下的「更多」菜单，i18n 会遍历整棵 body）
     await page.evaluate(() => { if (window.ReqLiteI18N) window.ReqLiteI18N.setLang('en'); });
     await page.waitForTimeout(400);
     push('英文：筛选条无中文残留', await page.evaluate(() => {
       const t = document.querySelector('#filters').textContent;
       return !/[\u4e00-\u9fff]/.test(t);
     }));
+    push('英文：更多菜单分组标题已翻译', await page.evaluate(() => {
+      const heads = [...document.querySelectorAll('#filterMoreMenu .more-head')].map((h) => h.textContent.trim());
+      return heads.length >= 3 && heads.every((h) => !/[\u4e00-\u9fff]/.test(h));
+    }));
     push('英文：图片/媒体/二进制已翻译', await page.evaluate(() => {
-      const txt = (s) => document.querySelector(`#filters > button[data-status="${s}"]`).textContent.trim();
+      const txt = (s) => document.querySelector(`#filters button[data-status="${s}"]`).textContent.trim();
       return txt('image') === 'Image' && txt('media') === 'Media' && txt('binary') === 'Binary';
     }));
     push('页面无 JS 报错', errs.length === 0);

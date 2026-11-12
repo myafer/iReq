@@ -94,6 +94,7 @@ window.ReqLiteI18N_EN = {
   "关闭": "Close",
   "内存保留条数": "Flows kept in memory",
   "内容类型": "Content type",
+  "其他": "Other",
   "减小字号": "Decrease font size",
   "分组": "Groups",
   "切换主题": "Toggle theme",

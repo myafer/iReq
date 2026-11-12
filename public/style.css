@@ -3879,37 +3879,61 @@ html[data-electron-titlebar='hidden'] .more-wrap {
 
 .filter-more-wrap {
   position: relative;
+  flex: none;
 }
+/* 触发器和相邻筛选按钮必须是同一档字号：它不在 .fbar > button 的直系选择器里，
+   曾经落到全局 button 的 14px，看上去比旁边大一圈 */
 .filter-more-trigger {
   border: 0;
   background: transparent;
   color: var(--muted);
-  padding: 4px 9px;
+  padding: 2px 8px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
+  font-size: calc(12px * var(--hd));
+  line-height: inherit;
 }
 .filter-more-trigger:hover,
 .filter-more-trigger.on {
   color: var(--text);
-  background: var(--panel);
+  background: var(--panel-2);
 }
 .filter-more-trigger b {
   color: var(--accent);
 }
+/* .fbar 为了横向滚动带 overflow-x:auto / overflow-y:hidden，
+   任何 absolute 子菜单都会被裁在 37px 高的条里 —— 看不见、也点不到。
+   所以这里改成 fixed，由 placeFilterMenu() 在展开时算坐标 */
 .filter-more-menu {
-  min-width: 164px;
-  top: calc(100% + 6px);
+  position: fixed;
+  left: auto;
+  right: auto;
+  top: auto;
+  z-index: 60;
+  min-width: 172px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+.filter-more-menu .more-head {
+  padding: 5px 10px 3px;
+  color: var(--muted);
+  font-size: calc(10.5px * var(--hd));
+  letter-spacing: 0.02em;
+  cursor: default;
+}
+.filter-more-menu .more-head + .more-head {
+  margin-top: 2px;
 }
 .filter-more-menu button {
   display: block;
   width: 100%;
-  padding: 7px 10px;
+  padding: 5px 10px;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--text-2);
-  font-size: calc(12px * var(--ui-scale));
+  font-size: calc(11.5px * var(--hd));
   text-align: left;
   cursor: pointer;
 }
