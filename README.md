@@ -19,7 +19,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
 | Exclude specific domains | Add certificate-pinned apps to "skip decryption domains" and pass them through as a raw tunnel |
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
-| Connection diagnostics | Domains with repeated TLS handshake failures are listed (filter under "More ▾"), with one-click "add to skip decryption" — the most common cause of an app "not connecting" |
+| Connection diagnostics | Domains with repeated TLS handshake failures are listed (filter under "More ▾"), with one-click "add to skip decryption" — the most common cause of an app "not connecting". Once a host is allowlisted, its diagnostic row disappears immediately instead of sticking to the top of the list |
 | Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
 | Export | One-click **HAR 1.2** export of the current filter ("⋯ More → Export HAR", or ⌘K → "export"); full headers / bodies + iReq app / device metadata; raw JSON at `/api/export/json` |
 | Instant settings | Settings save automatically as you type (short debounce); closing the dialog flushes pending edits — no Save button to remember |
@@ -238,7 +238,7 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 - **Top bar**: only "Capture / Rules / Clear / ⋯ More" stay visible; certificates, settings, export, network simulation, theme, language and font size live in "⋯ More". The address pill shows the LAN IP by default, with IP / port / full-string copy and ▾ to switch interfaces (see above)
 - **Dock** (a permanent strip at the bottom): on the left, the **system proxy takeover state** (● green = taking over `IP:port`, yellow = taking over but HTTPS passing through, gray = not taken over) — click to toggle takeover/release, ✎ opens the connection wizard; on the right, three quick toggles: the **Mock master switch** (bypasses all rules at once without touching their content; badge = enabled rule count, right-click opens the rules workspace), **network simulation** (click to toggle, badge = active rule count, right-click opens settings), **Pause / Resume** capture (same state source as the top-bar "Capture" switch) and **Clear**
 - **List**: method, path, domain, status, duration; in-flight requests show a neutral grey `…` (subtle pulse, never mistaken for the red error state) and turn into the real status code in place; `MOCK` / `REPLAY` / `WS` / `Passthrough` badges distinguish the source
-- **Handshake failures**: when a client rejects the root CA (certificate pinning) or the port is not HTTP, that host appears as a red diagnostic row at the top of the list in real time — aggregated per host with a failure count, so retries never flood the list. The "More ▾ → Handshake failures" filter isolates them; opening a row shows the reason and a one-click "Skip decryption" action. These are connection-level events, not flows: they stay out of HAR exports and are cleared together with the list.
+- **Handshake failures**: when a client rejects the root CA (certificate pinning) or the port is not HTTP, that host appears as a red diagnostic row at the top of the list in real time — aggregated per host with a failure count, so retries never flood the list. The "More ▾ → Handshake failures" filter isolates them; opening a row shows the reason and a one-click "Skip decryption" action, and the ✕ on the row dismisses just that one. Rows stay pinned only while the problem is unresolved: **adding the host to "Skip decryption for hosts" (detail button / context menu / Settings textarea) immediately removes that host and all its subdomains from the backend and every open window**. A later successful handshake clears it too, and a late error from a connection opened before the allowlist cannot bring it back. These are connection-level events, not flows: they stay out of HAR exports and are cleared together with the list.
 - **Network simulation** ("⋯ More → Network Simulation", or the sidebar app dot / "Network ▾" in details / right-click a row): match by app / host / IP (or `*` for everything) and apply **Offline** (connection reset at CONNECT / request time), **Timeout** (no response until the deadline), or **Slow** (extra latency + response throttled to a target KB/s; passthrough tunnels throttled at the byte level). Rules are session-only — never written to disk, cleared on restart. Clicking the dot next to a sidebar app switches Normal / Slow / Offline / Timeout in place; the badge shows the active rule count, and changes sync to every window over SSE. Simulated requests are recorded as flows with a mode badge.
 - **Details**: four tabs — Overview / Request / Response / Raw — with auto-formatted, syntax-highlighted JSON;
   both request and response bodies have a "Structured / Raw / Expand all / Collapse all / Copy" toolbar: the structured view merges
@@ -360,7 +360,7 @@ GET    /api/facets              { flows, hosts, apps, devices, routes }
 GET    /api/app-icons?names=A,B   Batch-find real icons by app name → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      Icon file (only hash filenames inside data/app-icons/)
 GET    /api/diagnostics         { tlsFailures: [{host, count, error}], tunneled, stats }
-DELETE /api/diagnostics         Clear recorded handshake failures
+DELETE /api/diagnostics         Clear recorded handshake failures; with ?host=xxx dismiss only that host (and its subdomains)
 GET    /api/system-proxy        Local system proxy status + copiable on/off commands + caTrust/safeMode
 POST   /api/system-proxy        { enabled: true|false, service? } take over / release
 GET    /api/ca-trust            Local root CA trust status + copiable trust command (30s cache; verdict persisted by fingerprint)
@@ -380,9 +380,10 @@ DELETE /api/rules/:id
 GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
-GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-clear / network-sim
+GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-remove / tls-clear / network-sim
                                   (flow = in-flight placeholder emitted when the request starts; flow-update = response
-                                   completion in place, plus async local process name backfill; clear = list + sidebar reset)
+                                   completion in place, plus async local process name backfill; clear = list + sidebar reset;
+                                   tls-remove = resolved handshake failures after allowlisting / a successful handshake)
 GET    /ca.pem                    Root CA (served by both the console and the proxy port)
 GET    /ca.cer                    DER form of the same root CA (for iOS / Android installs)
 ```
@@ -432,7 +433,8 @@ node tools/check-app-name.js     # real local process name / HTTPS decryption / 
 node tools/check-app-icon.js     # local .app icon extraction / PNG cache / API / three-layer fallback / rendering / no flicker on select (56 items)
 node tools/check-ca-trust.js     # trust detection / safe mode branch / passthrough trace / guidance UI (42 items)
 node tools/check-address.js      # top-bar default LAN IP / three copy ways / switch persistence / sync everywhere / dark and narrow screens (35 items)
-node tools/check-tls-list.js     # handshake failures in the main list: SSE / aggregation / filter / one-click passthrough (14 items)
+node tools/check-tls-list.js     # handshake failures in the main list: SSE / aggregation / filter / cleared after passthrough / EN mode (19 items)
+node tools/check-tls-clear.js    # clearing resolved rows: subdomain cascade / Settings save / dismiss / no resurrection / SSE (30 items)
 node tools/check-network-sim.js  # offline / slow / timeout on HTTP + CONNECT, rule matching, panel, sidebar mode switch, SSE, EN mode (33 items)
 node tools/check-simple-ui.js    # top-bar More / filter More / connection guide / Quick Mock / ⌘K palette / context menus (26 items)
 ```

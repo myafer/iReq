@@ -331,6 +331,7 @@ window.ReqLiteI18N_EN = {
   "没有握手失败的域名": "No hosts with handshake failures",
   "客户端不信任根证书、或端口跑的不是 HTTP 时，连不上的域名会实时出现在这里。": "Hosts that fail to connect show up here in real time when the client does not trust the root CA or the port is not HTTP.",
   "加入跳过解密": "Skip decryption",
+  "忽略这条提醒": "Dismiss this warning",
   "失败原因": "Reason",
   "说明": "About",
   "次数": "Failures",

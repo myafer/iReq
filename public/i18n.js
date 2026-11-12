@@ -41,7 +41,7 @@
     [/^导出失败: (.+)$/, function (m, a) { return 'Export failed: ' + a; }],
     // 握手失败诊断行：次数是动态的，整句翻译才不会把数字后面译成中文
     [/^(\d+) 次握手失败$/, function (m, a) { return a === '1' ? '1 handshake failure' : a + ' handshake failures'; }],
-    [/^已让 (.+) 走透传，重新打开 App 试试$/, function (m, a) { return a + ' will now be passed through; reopen the app and try again'; }],
+    [/^已让 (.+) 走透传，握手失败记录已清除$/, function (m, a) { return a + ' will now be passed through; handshake failures cleared'; }],
     [/^加入白名单失败: (.+)$/, function (m, a) { return 'Failed to add to allowlist: ' + a; }],
     // 进程识别诊断提示：运行时数字 + 片段替换可能已把「次」变成 requests，两种形态都收
     [/^lsof 快照\s+(\d+)\s*(?:次|requests)?\s*·\s*解析到\s+(\d+)\s*个连接\s*·\s*未命中\s+(\d+)$/,

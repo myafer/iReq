@@ -1736,8 +1736,34 @@ pre.code {
 
 .row.tls .cellurl .h .hint {
   color: var(--muted);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 诊断行右侧的「忽略」：已加白名单 / 不想再看的提醒可以就地撤掉，
+   不占 grid 列，避免把状态、耗时挤歪 */
+.tls-dismiss {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: calc(18px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: calc(10.5px * var(--ui-scale));
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.tls-dismiss:hover {
+  opacity: 1;
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 35%, transparent);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
 }
 
 .st.fail {

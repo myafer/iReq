@@ -43,6 +43,16 @@ function splitHostPort(value) {
   return [withoutBrackets(s.slice(0, i)), Number(s.slice(i + 1)) || 443];
 }
 
+/** 跳过解密规则的域名匹配：规则可写 example.com 或 *.example.com，命中自身与所有子域 */
+function passthroughMatches(host, rules) {
+  const h = String(host || '').toLowerCase();
+  if (!h) return false;
+  return (rules || []).some((p) => {
+    const rule = String(p || '').trim().toLowerCase().replace(/^\*?\./, '');
+    return !!rule && (h === rule || h.endsWith('.' + rule));
+  });
+}
+
 function decompress(buf, encoding) {
   const enc = String(encoding || '').toLowerCase();
   if (!enc || !buf || !buf.length) return buf;
@@ -182,13 +192,12 @@ class ProxyServer extends EventEmitter {
    * 只限制「本机 + 系统代理接管」：手机流量不受影响，显式 --proxy 的自检/开发流量也不受影响。
    */
   _shouldDecrypt(host, port, clientIp) {
-    const bypass = (this.config.passthrough || []).some((p) => {
-      const rule = String(p || '').trim().toLowerCase().replace(/^\*?\./, '');
-      if (!rule) return false;
-      const h = String(host || '').toLowerCase();
-      return h === rule || h.endsWith('.' + rule);
-    });
-    if (bypass) return { decrypt: false, reason: 'passthrough' };
+    if (passthroughMatches(host, this.config.passthrough)) {
+      // 兜底：白名单也可能来自启动配置 / 落盘文件，没经过 /api/config PUT。
+      // 这里顺手清掉该域名遗留的握手失败诊断，避免「已加白名单还挂在列表顶部」。
+      this.clearTlsFailures(host);
+      return { decrypt: false, reason: 'passthrough' };
+    }
 
     // 只有 443（或显式配置的端口）才尝试解密，其余端口原样透传。
     // 否则 MQTT / IMAP / 私有二进制 TLS 协议都会被我们"HTTP 化"，App 直接连不上。
@@ -395,7 +404,8 @@ class ProxyServer extends EventEmitter {
     tlsSocket.__reqliteClientIp = clientSocket.remoteAddress;
     tlsSocket.once('secure', () => {
       secure = true;
-      if (this.tlsFailures.has(host)) this.tlsFailures.delete(host);
+      // 后端删了也要通知前端：否则控制台要刷新页面才会消掉那条诊断行
+      this.clearTlsFailures(host);
     });
     tlsSocket.once('close', () => {
       // 走到这里说明这条 TLS 连接一次请求都没成功发出来（_handle 会打 __used）
@@ -461,7 +471,27 @@ class ProxyServer extends EventEmitter {
     return meta;
   }
 
+  /**
+   * 清掉某个域名（或某条跳过解密规则覆盖的所有子域）的握手失败诊断。
+   * 只在真的删到记录时广播 tls-remove，避免高频 CONNECT 无谓刷 SSE。
+   */
+  clearTlsFailures(hostOrRule) {
+    const rule = String(hostOrRule || '').trim().toLowerCase().replace(/^\*?\./, '');
+    if (!rule || !this.tlsFailures.size) return 0;
+    const hosts = [];
+    for (const h of this.tlsFailures.keys()) {
+      const lh = String(h).toLowerCase();
+      if (lh === rule || lh.endsWith('.' + rule)) hosts.push(h);
+    }
+    for (const h of hosts) this.tlsFailures.delete(h);
+    if (hosts.length) this.emit('tls-remove', { hosts });
+    return hosts.length;
+  }
+
   _noteTlsFailure(host, port, err) {
+    // 已加入跳过解密的域名不再解密，理论上不会再失败；但加白名单之前建立的
+    // 旧 MITM 连接可能晚一点才报错，别让它把刚清掉的记录又顶回列表顶部。
+    if (passthroughMatches(host, this.config.passthrough)) return;
     this.stats.tlsFailed += 1;
     const rec = this.tlsFailures.get(host) || { host, port, count: 0, error: '', lastAt: 0 };
     rec.count += 1;
@@ -1103,4 +1133,4 @@ function elapsed(startedAt) {
   return Number((process.hrtime.bigint() - startedAt) / 1000000n);
 }
 
-module.exports = { ProxyServer, decompress, isTextual };
+module.exports = { ProxyServer, decompress, isTextual, passthroughMatches };

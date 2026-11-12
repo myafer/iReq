@@ -19,7 +19,7 @@
 | 重放 | 改 method / URL / header / body 重新发送，结果作为新请求入列并与原请求关联 |
 | 排除指定域名 | 证书固定（pinning）的 App 加进「跳过解密的域名」，走裸隧道透传 |
 | 只解密 HTTP | **默认只解密 443**，其它端口原样透传（MQTT / IMAP / 私有二进制协议不会被破坏）；设置里可加端口 |
-| 连接诊断 | 反复 TLS 握手失败的域名会列出来，「更多 ▾」里可单独筛选，一键「加入跳过解密」——这是 App「连不上」的最常见原因 |
+| 连接诊断 | 反复 TLS 握手失败的域名会列出来，「更多 ▾」里可单独筛选，一键「加入跳过解密」——这是 App「连不上」的最常见原因；加入白名单后该域名的诊断行立即撤掉，不会再顶在列表顶部 |
 | 落盘 | 当天流量写 `data/flows/flows-YYYY-MM-DD.jsonl`，重启可回看最近 300 条 |
 | 导出 | 「⋯ 更多 → 导出 HAR」或 ⌘K 输入「导出」，一键把当前筛选结果导出为 **HAR 1.2**（完整头 / body + iReq 应用、设备扩展字段）；原始 JSON 用 `/api/export/json` |
 | 设置自动保存 | 输入停顿即保存，关闭弹窗会兜底 flush，不用记着点「保存」 |
@@ -237,7 +237,7 @@ CFNetwork=我的 iOS 客户端
 - **顶栏**：常驻只有「抓包 / 规则 / 清空 / ⋯ 更多」；证书、设置、导出、网络模拟、主题、语言、字号都收在「⋯ 更多」里。地址胶囊默认局域网 IP，IP / 端口 / 整串分别可复制，▾ 切换多网卡与本机回环（见上节）
 - **控制坞**（底部常驻一条）：左侧是**系统代理接管状态**（● 绿 = 已接管 `IP:端口`，黄 = 接管但 HTTPS 透传中，灰 = 未接管），单击切换接管 / 释放，✎ 打开连接向导；右侧三个快捷开关：**Mock 总开关**（一键旁路所有规则，规则内容不动；徽章 = 已启用规则数，右键直达规则工作区）、**弱网模拟**（单击开关，徽章 = 生效规则数，右键打开设置）、**暂停 / 继续**抓包（与顶栏「抓包」开关同一状态源）和**清空**
 - **列表**：方法、路径、域名、状态、耗时；进行中的请求状态列是中性灰 `…`（轻微呼吸，不会误看成红色的错误态），完成后原地变成真实状态码；`MOCK` / `REPLAY` / `WS` / `透传` 角标区分来源
-- **握手失败域名**：客户端不认根证书（证书固定）或端口不是 HTTP 时，域名会实时以红色诊断行出现在列表顶部，按域名聚合并显示失败次数（重试不会刷屏）；「更多 ▾ → 握手失败」筛选可单独查看，点开详情能看原因并一键「加入跳过解密」。这类行属于连接层事件，不算 flow、不进 HAR 导出，清空列表时一起清掉。
+- **握手失败域名**：客户端不认根证书（证书固定）或端口不是 HTTP 时，域名会实时以红色诊断行出现在列表顶部，按域名聚合并显示失败次数（重试不会刷屏）；「更多 ▾ → 握手失败」筛选可单独查看，点开详情能看原因并一键「加入跳过解密」，行右侧 ✕ 可单独忽略。诊断行只在问题未解决时置顶：**加入「跳过解密的域名」（详情按钮 / 右键 / 设置页手填都算）后，该域名及其子域的记录立即从服务端和所有窗口一起撤掉**；后续握手成功也会自动撤掉，加白名单前残留的旧连接报错不会把它顶回来。这类行属于连接层事件，不算 flow、不进 HAR 导出，清空列表时一起清掉。
 - **网络模拟**（「⋯ 更多 → 网络模拟」，或侧栏应用小圆点 / 详情「网络 ▾」/ 列表右键）：按应用名 / 域名 / IP（或 `*` 全部）匹配，可设 **断网**（CONNECT / 请求进来即重置连接）、**超时**（挂起不响应直到时限）、**弱网**（附加延迟 + 按目标 KB/s 限速响应体；透传隧道在字节层限速）。规则是会话级、不落盘、重启自动清空。点侧栏应用旁的小圆点可就地切 正常 / 弱网 / 断网 / 超时，顶栏角标显示生效条数，改动通过 SSE 同步到所有窗口；被模拟的请求会记成带模式角标的 flow。
 - **详情**：概览 / 请求 / 响应 / 原始四个页签，JSON 自动格式化 + 语法着色，
   请求体和响应体都有「结构化 / 原始 / 展开全部 / 折叠全部 / 复制」工具条：结构化视图把
@@ -358,7 +358,7 @@ GET    /api/facets              { flows, hosts, apps, devices, routes }
 GET    /api/app-icons?names=A,B   按应用名批量找真实图标 → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      图标文件（仅 data/app-icons/ 里的 hash 文件名）
 GET    /api/diagnostics         { tlsFailures: [{host, count, error}], tunneled, stats }
-DELETE /api/diagnostics         清空已记录的握手失败域名
+DELETE /api/diagnostics         清空已记录的握手失败域名；带 ?host=xxx 只忽略这一个域名（含子域）
 GET    /api/system-proxy        本机系统代理状态 + 可复制的 on/off 命令 + caTrust/safeMode
 POST   /api/system-proxy        { enabled: true|false, service? } 接管 / 释放
 GET    /api/ca-trust            本机根证书信任状态 + 可复制的信任命令（带 30s 缓存，结果按指纹落盘）
@@ -378,9 +378,10 @@ DELETE /api/rules/:id
 GET    /api/config  PUT /api/config   { capture, mockEnabled, passthrough: [], mitmPorts: [443], maxFlows,
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
-GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-clear / network-sim
+GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-remove / tls-clear / network-sim
                                   （flow = 请求发起时的进行中占位记录；flow-update = 响应完成就地补完，
-                                   以及本机进程名异步回填；clear = 列表与侧栏同步清空）
+                                   以及本机进程名异步回填；clear = 列表与侧栏同步清空；
+                                   tls-remove = 加入跳过解密 / 握手成功后撤掉已解决的诊断行）
 GET    /ca.pem                    根证书（控制台与代理端口都提供）
 GET    /ca.cer                    同一张根证书的 DER 版（iOS / Android 安装用）
 ```
@@ -430,7 +431,8 @@ node tools/check-app-name.js     # 本机真实进程名 / HTTPS 解密 / UA 别
 node tools/check-app-icon.js     # 本机 .app 图标提取 / PNG 缓存 / API / 三层兜底 / 渲染 / 选中不闪动（56 项）
 node tools/check-ca-trust.js     # 信任检测 / 安全模式分支 / 透传留痕 / 引导 UI（42 项）
 node tools/check-address.js      # 顶栏默认局域网 IP / 三种复制 / 切换持久化 / 各处同步 / 深色与窄屏（35 项）
-node tools/check-tls-list.js     # 握手失败进主列表：SSE 实时 / 聚合 / 筛选 / 一键透传（14 项）
+node tools/check-tls-list.js     # 握手失败进主列表：SSE 实时 / 聚合 / 筛选 / 一键透传后消失 / 英文模式（19 项）
+node tools/check-tls-clear.js    # 处理后立即清除：子域规则级联 / 配置手填 / ✕ 忽略 / 不复活 / SSE 同步（30 项）
 node tools/check-network-sim.js  # HTTP/CONNECT 断网 / 弱网 / 超时、规则匹配、面板、侧栏模式切换、SSE、英文模式（33 项）
 node tools/check-simple-ui.js    # 顶栏更多 / 筛选更多 / 连接向导 / 快速 Mock / ⌘K 命令面板 / 就近菜单（26 项）
 ```

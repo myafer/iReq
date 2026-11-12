@@ -188,6 +188,10 @@ class ConsoleServer {
       this.proxy.on('tls-failure', (failure) =>
         this._broadcast({ type: 'tls-failure', failure })
       );
+      // 加入跳过解密 / 握手恢复 / 手动忽略后，把「已经解决的域名」从所有窗口的诊断行里撤掉
+      this.proxy.on('tls-remove', ({ hosts }) =>
+        this._broadcast({ type: 'tls-remove', hosts })
+      );
     }
   }
 
@@ -360,6 +364,12 @@ class ConsoleServer {
     }
 
     if (parts[1] === 'diagnostics' && method === 'DELETE') {
+      // 带 ?host= 时只忽略这一个域名（及其子域），不清掉别的失败记录
+      const host = url.searchParams.get('host');
+      if (host && this.proxy && typeof this.proxy.clearTlsFailures === 'function') {
+        const removed = this.proxy.clearTlsFailures(host);
+        return this._json(res, 200, { ok: true, removed });
+      }
       if (this.proxy && this.proxy.tlsFailures) this.proxy.tlsFailures.clear();
       this._broadcast({ type: 'tls-clear' });
       return this._json(res, 200, { ok: true });
@@ -562,6 +572,12 @@ class ConsoleServer {
           this.config.passthrough = body.passthrough
             .map((s) => String(s).trim())
             .filter(Boolean);
+          // 用户把域名加进「跳过解密的域名」＝这个握手失败已经被处理：
+          // 立刻清掉它（含子域）的诊断记录并广播，别让它继续顶在列表最上面。
+          // 无论从诊断行详情、右键菜单还是设置页手填保存，都会走这里。
+          if (this.proxy && typeof this.proxy.clearTlsFailures === 'function') {
+            for (const rule of this.config.passthrough) this.proxy.clearTlsFailures(rule);
+          }
         }
         if (Array.isArray(body.mitmPorts)) {
           const ports = body.mitmPorts

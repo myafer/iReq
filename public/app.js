@@ -592,7 +592,7 @@ function tlsRowHtml(f) {
     <span class="m tls">TLS</span>
     <span class="cellurl">
       <div class="p">${esc(f.host)}</div>
-      <div class="h"><span class="hl">${Number(f.count) || 1} 次握手失败</span><span class="hint">客户端不认证书，或端口不是 HTTP</span></div>
+      <div class="h"><span class="hl">${Number(f.count) || 1} 次握手失败</span><span class="hint">客户端不认证书，或端口不是 HTTP</span><button class="tls-dismiss" data-tls-dismiss="${esc(f.host)}" title="${esc(netTr('忽略这条提醒'))}" aria-label="${esc(netTr('忽略这条提醒'))}">✕</button></div>
     </span>
     <span class="st fail">FAIL</span>
     <span class="tm">${fmtClock(f.lastAt)}</span>
@@ -607,6 +607,42 @@ function upsertTlsFailure(rec) {
   syncTlsBadge();
   // 诊断行数很少、变化也不频繁，整表重绘比再维护一套增量逻辑可靠
   scheduleRender();
+}
+
+/**
+ * 撤掉「已解决」的握手失败诊断行：加入跳过解密 / 握手恢复 / 手动忽略都走这里。
+ * rules 可以是具体域名，也可以是 *.example.com 这样的规则（一并清掉子域）。
+ */
+function removeTlsFailures(rules) {
+  const list = (Array.isArray(rules) ? rules : [rules])
+    .map((s) => String(s || '').trim().toLowerCase().replace(/^\*?\./, ''))
+    .filter(Boolean);
+  if (!list.length) return 0;
+  const hit = (host) => {
+    const h = String(host || '').toLowerCase();
+    return list.some((r) => h === r || h.endsWith('.' + r));
+  };
+  const gone = S.tlsFailures.filter((f) => hit(f.host));
+  if (!gone.length) return 0;
+  S.tlsFailures = S.tlsFailures.filter((f) => !hit(f.host));
+  syncTlsBadge();
+  if (gone.some((f) => S.selectedId === TLS_ROW_PREFIX + f.host)) {
+    S.selectedId = null;
+    S.selected = null;
+    $('#detail').innerHTML = detailEmptyHtml;
+  }
+  scheduleRender();
+  return gone.length;
+}
+
+/** 诊断行右侧 ✕：忽略这一条（服务端一并删除，刷新页面也不会回来） */
+async function dismissTlsFailure(host) {
+  removeTlsFailures(host);
+  try {
+    await api('/api/diagnostics?host=' + encodeURIComponent(host), { method: 'DELETE' });
+  } catch (_) {
+    /* 本地已撤掉即可，服务端清不掉不影响本次会话 */
+  }
 }
 
 async function loadTlsFailures() {
@@ -628,7 +664,9 @@ async function addPassthroughHost(host) {
     await api('/api/config', { method: 'PUT', body: { passthrough: lines } });
     const field = $('#stPassthrough');
     if (field) field.value = lines.join('\n');
-    toast(`已让 ${host} 走透传，重新打开 App 试试`);
+    // 不等 SSE：同帧把这条已处理的诊断行从列表顶部撤掉，服务端 PUT 里也会清一次
+    removeTlsFailures(host);
+    toast(`已让 ${host} 走透传，握手失败记录已清除`);
   } catch (err) {
     toast('加入白名单失败: ' + err.message);
   }
@@ -3867,6 +3905,11 @@ function bind() {
   });
 
   $('#list').addEventListener('click', (e) => {
+    const dismiss = e.target.closest('[data-tls-dismiss]');
+    if (dismiss) {
+      dismissTlsFailure(dismiss.dataset.tlsDismiss);
+      return; // 别顺手选中这条马上要消失的诊断行
+    }
     const row = e.target.closest('.row');
     if (row) selectFlow(row.dataset.id);
   });
@@ -4527,9 +4570,17 @@ function bind() {
       scheduleFacets();
     } else if (msg.type === 'tls-failure') {
       upsertTlsFailure(msg.failure);
+    } else if (msg.type === 'tls-remove') {
+      // 加入跳过解密 / 握手成功后，服务端把已解决的域名撤掉；所有窗口同步
+      removeTlsFailures(msg.hosts || []);
     } else if (msg.type === 'tls-clear') {
       S.tlsFailures = [];
       syncTlsBadge();
+      if (String(S.selectedId || '').startsWith(TLS_ROW_PREFIX)) {
+        S.selectedId = null;
+        S.selected = null;
+        $('#detail').innerHTML = detailEmptyHtml;
+      }
       scheduleRender();
     } else if (msg.type === 'network-sim') {
       // 别的窗口改了规则：同步角标和侧栏开关；正在输入时不重绘面板，避免打断编辑

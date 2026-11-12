@@ -39,6 +39,7 @@ const SUITES = [
   ['精简交互', 'check-simple-ui.js'],
   // 会清空流量 / 诊断数据，必须排最后
   ['握手失败列表', 'check-tls-list.js'],
+  ['握手失败处理后清除', 'check-tls-clear.js'],
   // 会改 networkSim 配置并清空流量，放最末；脚本结束会自己恢复现场
   ['网络模拟', 'check-network-sim.js'],
   // 会清空流量 / 诊断数据 + 自己起慢上游，必须最后跑
