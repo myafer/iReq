@@ -419,6 +419,7 @@ curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json'
 ```bash
 npm run check                   # 一键汇总（不含会改动 macOS 系统代理的脚本）
 node tools/check-repo-meta.js    # 仓库元数据：issue 模板结构 / 空白 issue 关闭 / 分流 workflow 只拿 issues 权限（22 项，无需服务）
+node tools/check-onboard.js       # 首启引导：只弹一次 / 三步内容 / 反馈入口 / 关闭后落盘（16 项，自起临时实例）
 node tools/check-i18n.js        # 英文字典：孤儿键 / 未覆盖中文文案（无需服务）
 node tools/check-store.js        # 落盘 / 重启恢复 / 清空不复活（纯单元，用临时目录）
 node tools/check-proxy.js        # 明文转发、非 443 透传、8MB 流式上传、保活复用、MITM、证书固定诊断、抓包开关

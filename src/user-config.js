@@ -1,6 +1,6 @@
 'use strict';
 
-/** 用户偏好持久化（data/config.json）：更新开关 + 跳过解密白名单（含来源、加入时间） */
+/** 用户偏好持久化（data/config.json）：更新开关 + 跳过解密白名单（含来源、加入时间）+ 首启引导标记 */
 
 const fs = require('fs');
 const path = require('path');
@@ -21,6 +21,9 @@ function savePersistedConfig(dataDir, cfg) {
   if (cfg.passthroughMeta && typeof cfg.passthroughMeta === 'object') {
     out.passthroughMeta = cfg.passthroughMeta;
   }
+  // 首启引导只值得看一次：存服务端而不是 localStorage，
+  // 否则换个浏览器 / 清一次缓存就又弹一遍。
+  if (cfg.onboarded === true) out.onboarded = true;
   try {
     fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(out, null, 2) + '\n');
   } catch {

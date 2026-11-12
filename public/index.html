@@ -943,6 +943,51 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       </div>
     </div>
 
+    <!-- 首启引导：只弹一次。重点是「你的反馈会真的进版本」，不是功能罗列 -->
+    <div class="modal" id="modalWelcome" hidden>
+      <div class="modal-card welcome-dialog">
+        <div class="modal-head">
+          <h2>欢迎使用 iReq</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="welcome-lead">
+            一个带反馈闭环的抓包工具 —— 你提的问题和想法会被跟进、进版本，然后在下一个版本里回来找你。
+          </p>
+          <ol class="welcome-steps">
+            <li>
+              <span class="welcome-num">1</span>
+              <div class="welcome-step-text">
+                <b>直接开抓</b>
+                <span>HTTPS 解密、Mock、弱网断网都在一个界面里，不用再装一堆插件。</span>
+              </div>
+            </li>
+            <li>
+              <span class="welcome-num">2</span>
+              <div class="welcome-step-text">
+                <b>遇到不顺就提</b>
+                <span>应用内一键直达 GitHub：抓不到的包、想加的功能，都算有效反馈。</span>
+              </div>
+            </li>
+            <li>
+              <span class="welcome-num">3</span>
+              <div class="welcome-step-text">
+                <b>AI 自动分流</b>
+                <span>自动分类、追问缺的信息；确认要做的会排进版本，发版时通知你。</span>
+              </div>
+            </li>
+          </ol>
+          <p class="hint welcome-foot-hint">以后在右上角「更多 ⋯ → 帮助 → 反馈与建议」随时能找到。</p>
+        </div>
+        <div class="modal-foot">
+          <a class="btn ghost" id="wlFeedback" href="https://github.com/myafer/iReq/issues/new/choose" target="_blank" rel="noreferrer">反馈与建议 ↗</a>
+          <div>
+            <button class="btn primary" id="wlStart" data-close>开始使用</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ⌘K 命令面板 -->
     <div class="cmd-backdrop" id="cmdBackdrop" hidden>
       <div class="cmd-panel" role="dialog" aria-label="命令面板">

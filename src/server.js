@@ -334,6 +334,8 @@ class ConsoleServer {
         capture: this.config.capture,
         mockEnabled: this.config.mockEnabled !== false,
         h2Enabled: this.config.h2Enabled !== false,
+        // 首启引导：没看过才弹（存服务端，换浏览器不重复打扰）
+        onboarded: this.config.onboarded === true,
         passthrough: this.config.passthrough,
         mitmPorts: this.config.mitmPorts,
         rules: this.rules.list().length,
@@ -696,6 +698,8 @@ class ConsoleServer {
         }
         if (Number(body.maxFlows) > 0) this.store.maxFlows = Number(body.maxFlows);
         if (typeof body.autoUpdate === 'boolean') this.config.autoUpdate = body.autoUpdate;
+        // 首启引导「看过了」：只允许置 true，不给前端把它翻回去的口子
+        if (body.onboarded === true) this.config.onboarded = true;
         // 网络模拟是会话级的（不落盘，重启自动恢复），改动实时同步到所有已开窗口。
         // 关键：规则只在新连接进来时判定，必须顺手断掉受影响的存量长连接，
         // 否则用户中途打开断网，App 复用已有隧道照样能刷出数据。

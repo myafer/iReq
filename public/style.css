@@ -4027,6 +4027,72 @@ html[data-electron-titlebar='hidden'] .more-wrap {
   justify-content: space-between;
 }
 
+/* 首启引导（只弹一次）：三步闭环 + 反馈入口，别做成功能清单 */
+.welcome-dialog {
+  width: min(520px, 100%);
+}
+/* 首次见面的标题给足分量，别和正文一个字号 */
+.welcome-dialog .modal-head h2 {
+  font-size: calc(16px * var(--ui-scale));
+}
+.welcome-lead {
+  margin: 0 0 14px;
+  color: var(--text-2);
+  font-size: calc(12.5px * var(--ui-scale));
+  line-height: 1.65;
+}
+.welcome-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.welcome-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.welcome-num {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.welcome-step-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.welcome-step-text b {
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--text);
+}
+.welcome-step-text span {
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.55;
+  color: var(--muted);
+}
+.welcome-foot-hint {
+  margin: 12px 0 0;
+}
+
 .cmd-backdrop {
   position: fixed;
   inset: 0;

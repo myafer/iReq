@@ -2000,6 +2000,8 @@ function openModal(id) {
 }
 
 function closeModals() {
+  // 引导弹窗不管从哪条路关掉（✕ / 遮罩 / Esc / 开始使用）都算看过，只弹一次
+  if (!$('#modalWelcome').hidden) markOnboarded();
   // 设置是自动保存的：关窗前把还没到 debounce 时间的改动落下去，避免「点了 ✕ 就等于没改」
   if (!$('#modalSettings').hidden && settingsDirty) flushSettingsSave();
   // 网络面板同理；只在真的编辑过时 flush，避免从没打开过的空面板把规则清空
@@ -2017,6 +2019,28 @@ function closeModals() {
     }
   }
   lastModalFocus = null;
+}
+
+/* ------------------------------------------------------------ 首启引导 */
+
+let onboardedSent = false;
+
+/**
+ * 标记「引导看过了」。
+ * 只往 true 写、且只发一次：多点几下 ✕ 不会打一串请求。
+ * 存服务端（data/config.json）而不是 localStorage —— 换个浏览器不该再弹一遍。
+ */
+function markOnboarded() {
+  if (onboardedSent) return;
+  onboardedSent = true;
+  if (S.status) S.status.onboarded = true;
+  api('/api/config', { method: 'PUT', body: { onboarded: true } }).catch(() => {});
+}
+
+/** 首启才弹；等首屏数据渲染完再弹，避免先闪一下空列表再被盖住 */
+function maybeShowWelcome() {
+  if (!S.status || S.status.onboarded === true) return;
+  openModal('#modalWelcome');
 }
 
 /* ------------------------------------------------------------ 网络模拟 */
@@ -4432,6 +4456,9 @@ function bind() {
   });
   $('#btnSettings').addEventListener('click', () => openConnect(0));
   $('#btnExport').addEventListener('click', () => exportFlows('har'));
+  // 引导弹窗里的反馈入口是外链（系统浏览器打开），页面还留着 → 顺手收掉弹窗
+  const wlFeedback = $('#wlFeedback');
+  if (wlFeedback) wlFeedback.addEventListener('click', () => closeModals());
   bindNetwork();
   $('#updAuto').addEventListener('change', async (e) => {
     const on = e.target.checked;
@@ -5586,6 +5613,7 @@ async function init() {
   window.addEventListener('resize', () => toggleMoreMenu('filter', false));
   $('#filters').addEventListener('scroll', () => toggleMoreMenu('filter', false), { passive: true });
   setInterval(loadStatus, 5000);
+  maybeShowWelcome();
 }
 
 init();

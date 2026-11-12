@@ -421,6 +421,7 @@ so they don't depend on the console happening to have data; each script prints a
 ```bash
 npm run check                   # one-shot summary (excludes suites that change the macOS system proxy)
 node tools/check-repo-meta.js    # Repo metadata: issue form structure / blank issues off / triage holds issues-only permission (22 items, no service)
+node tools/check-onboard.js       # First-run guide: shows once / three steps / feedback link / dismissed state persisted (16 items, spins its own throwaway instance)
 node tools/check-i18n.js        # English dictionary: orphan keys / uncovered Chinese UI text (no service needed)
 node tools/check-store.js        # persistence / restart recovery / clear doesn't resurrect (pure unit, temp dir)
 node tools/check-proxy.js        # plaintext forwarding, non-443 passthrough, 8MB streaming upload, keep-alive reuse, MITM, pinning diagnostics, capture toggle

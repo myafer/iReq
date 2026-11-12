@@ -18,6 +18,8 @@ const { UI } = require('./_env');
 const SUITES = [
   ['仓库元数据', 'check-repo-meta.js'],
   ['i18n 字典', 'check-i18n.js'],
+  // 自己起独立实例（独立数据目录）测首启引导，不碰外部环境的 onboarded 标记
+  ['首启引导', 'check-onboard.js'],
   ['流量存储', 'check-store.js'],
   ['DOM 结构', 'check-dom.js'],
   ['代理转发', 'check-proxy.js'],
@@ -68,6 +70,17 @@ function probe() {
     process.exit(1);
   }
   console.log(`控制台 ${UI}\n`);
+  // 首启引导会盖住整页、挡住后面所有 UI 套件的点击 —— 回归实例不是真实首启，
+  // 先把它标记成「看过了」。首启路径本身由 check-onboard.js 自起干净实例来测。
+  try {
+    await fetch(UI + '/api/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ onboarded: true }),
+    });
+  } catch (_) {
+    /* 标不上就让对应套件自己报错，不在这里掩盖 */
+  }
   const results = [];
   for (const [label, file] of SUITES) {
     const r = spawnSync(process.execPath, [path.join(__dirname, file)], {
