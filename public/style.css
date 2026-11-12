@@ -4029,17 +4029,93 @@ html[data-electron-titlebar='hidden'] .more-wrap {
 
 /* 首启引导（只弹一次）：三步闭环 + 反馈入口，别做成功能清单 */
 .welcome-dialog {
-  width: min(520px, 100%);
+  position: relative;
+  width: min(560px, 100%);
 }
-/* 首次见面的标题给足分量，别和正文一个字号 */
-.welcome-dialog .modal-head h2 {
-  font-size: calc(16px * var(--ui-scale));
+
+/* 顶部横幅：淡蓝渐隐 + 飞轮插图，给首次见面一点仪式感，但不抢三步的注意力 */
+.welcome-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 40px 18px 22px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(158deg, var(--accent-soft) 0%, transparent 78%);
 }
-.welcome-lead {
-  margin: 0 0 14px;
+.welcome-hero-copy {
+  flex: 1;
+  min-width: 0;
+}
+.welcome-hero-copy h2 {
+  margin: 0 0 7px;
+  font-size: calc(17px * var(--ui-scale));
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.welcome-hero-copy p {
+  margin: 0;
   color: var(--text-2);
-  font-size: calc(12.5px * var(--ui-scale));
-  line-height: 1.65;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.62;
+}
+.welcome-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+}
+
+/* 飞轮：报文在环里转一圈。只做装饰，prefers-reduced-motion 下停 */
+.welcome-art {
+  flex: none;
+  width: 86px;
+  height: 86px;
+}
+.welcome-art .wl-halo {
+  fill: var(--accent);
+  opacity: 0.08;
+}
+.welcome-art .wl-track {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  opacity: 0.2;
+}
+.welcome-art .wl-flow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-dasharray: 48 216; /* 一段光弧在环上跑，不是均匀虚线 */
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wl-flow 7s linear infinite;
+}
+.welcome-art .wl-packet rect {
+  fill: var(--accent);
+  opacity: 0.55;
+}
+.welcome-art .wl-node circle {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2.4;
+}
+@keyframes wl-flow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-art .wl-flow {
+    animation: none;
+  }
+}
+
+.welcome-body {
+  padding: 14px 18px 16px;
 }
 .welcome-steps {
   margin: 0;
@@ -4047,31 +4123,35 @@ html[data-electron-titlebar='hidden'] .more-wrap {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .welcome-steps li {
   display: flex;
-  gap: 10px;
+  gap: 11px;
   align-items: flex-start;
   padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--panel-2);
 }
-.welcome-num {
+.welcome-ico {
   flex: none;
-  width: 20px;
-  height: 20px;
-  margin-top: 1px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: calc(11px * var(--ui-scale));
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+}
+.welcome-ico svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .welcome-step-text {
   display: flex;
@@ -4091,6 +4171,12 @@ html[data-electron-titlebar='hidden'] .more-wrap {
 }
 .welcome-foot-hint {
   margin: 12px 0 0;
+}
+/* 窗口窄到放不下插图时先丢掉插图，别让文字挤成两行 */
+@media (max-width: 520px) {
+  .welcome-art {
+    display: none;
+  }
 }
 
 .cmd-backdrop {

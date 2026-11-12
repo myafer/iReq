@@ -82,23 +82,46 @@ async function main() {
 
     /* ---------- 首启弹窗 ---------- */
     ok('首次打开弹出引导', await page.isVisible('#modalWelcome'));
-    ok('标题正确', (await page.locator('#modalWelcome .modal-head h2').innerText()).includes('欢迎使用 iReq'));
+    ok('标题正确', (await page.locator('#modalWelcome .welcome-hero h2').innerText()).includes('欢迎使用 iReq'));
+    // 自动 focus 会带出浏览器默认焦点环（深色下是一圈白框），比弹窗本身还扎眼
+    ok('打开引导不抢焦点', await page.evaluate(() => {
+      const m = document.querySelector('#modalWelcome');
+      return !!m && !m.contains(document.activeElement);
+    }));
 
     const steps = await page.evaluate(() =>
       [...document.querySelectorAll('#modalWelcome .welcome-steps li')].map((li) => ({
-        num: (li.querySelector('.welcome-num') || {}).textContent || '',
+        icon: !!li.querySelector('.welcome-ico svg'),
         title: (li.querySelector('b') || {}).textContent || '',
         body: (li.querySelector('.welcome-step-text span') || {}).textContent || '',
       }))
     );
-    ok('三步闭环齐全（序号 1/2/3）', steps.length === 3 && steps.map((s) => s.num.trim()).join() === '1,2,3',
-      JSON.stringify(steps.map((s) => s.num)));
+    ok('三步齐全且各带一个线条图标', steps.length === 3 && steps.every((s) => s.icon),
+      JSON.stringify(steps.map((s) => s.icon)));
     ok('三步都有标题与说明', steps.every((s) => s.title.trim() && s.body.trim().length > 10),
       JSON.stringify(steps.map((s) => s.title)));
     // 飞轮的三环必须是「能提 → 会分流 → 会进版本」，缺一环承诺就不成立
     const joined = steps.map((s) => s.title + s.body).join(' ');
     ok('讲清了「反馈 → 分流 → 进版本」这条链',
       /提/.test(joined) && /分流|分类/.test(joined) && /版本/.test(joined), joined.slice(0, 80));
+
+    // 插图：一个环 + 三个节点，且环在转（窄窗口按 media query 隐藏，1440 下必须可见）
+    const art = await page.evaluate(() => {
+      const svg = document.querySelector('#modalWelcome .welcome-art');
+      if (!svg) return null;
+      const flow = svg.querySelector('.wl-flow');
+      const box = svg.getBoundingClientRect();
+      return {
+        visible: box.width > 0 && box.height > 0,
+        nodes: svg.querySelectorAll('.wl-node circle').length,
+        animated: flow ? getComputedStyle(flow).animationName : 'none',
+        rect: [Math.round(box.width), Math.round(box.height)].join('x'),
+      };
+    });
+    ok('飞轮插图渲染（一个环 + 三个节点）',
+      art && art.visible && art.nodes === 3, art && JSON.stringify(art));
+    ok('环有循环动画（尊重 reduced-motion）',
+      art && art.animated === 'wl-flow', art && art.animated);
 
     const fb = await page.evaluate(() => {
       const a = document.querySelector('#wlFeedback');
@@ -112,7 +135,7 @@ async function main() {
     await page.evaluate(() => window.ReqLiteI18N && window.ReqLiteI18N.setLang('en'));
     await page.waitForTimeout(400);
     const en = await page.evaluate(() => ({
-      title: (document.querySelector('#modalWelcome .modal-head h2') || {}).textContent || '',
+      title: (document.querySelector('#modalWelcome .welcome-hero h2') || {}).textContent || '',
       hint: (document.querySelector('#modalWelcome .welcome-foot-hint') || {}).textContent || '',
       start: (document.querySelector('#wlStart') || {}).textContent || '',
       hasHan: /[\u4e00-\u9fff]/.test(document.querySelector('#modalWelcome').innerText),

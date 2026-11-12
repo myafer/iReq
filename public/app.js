@@ -1995,6 +1995,9 @@ function openModal(id) {
   lastModalFocus = document.activeElement;
   modal.hidden = false;
   if (window.ReqLiteJSON) setTimeout(() => window.ReqLiteJSON.relayout(), 30);
+  // 纯展示型弹窗（如首启引导）不抢焦点：自动 focus 会带出浏览器默认的焦点环，
+  // 在深色下是一圈白框，比弹窗本身还扎眼。Tab 仍然能进，键盘可达性不受影响。
+  if (modal.hasAttribute('data-no-autofocus')) return;
   const first = modal.querySelector('[data-autofocus]') || focusableIn(modal)[0];
   if (first) setTimeout(() => first.focus({ preventScroll: true }), 0);
 }
