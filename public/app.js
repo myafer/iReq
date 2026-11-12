@@ -9,7 +9,7 @@ const S = {
   selectedId: null,
   selected: null,
   detailTab: 'overview',
-  filter: { q: '', status: '', mocked: false, host: '', ip: '', app: '', route: '' },
+  filter: { q: '', status: '', mocked: false, host: '', ip: '', app: [], route: '' },
   rules: [],
   rulesDir: localStorage.getItem('reqlite-rule-dir') || '', /* 文件树当前选中的目录（'' = 根），跨开关保留 */
   rulesTreeOpen: new Set(JSON.parse(localStorage.getItem('reqlite-rule-dirs') || '[]')),
@@ -347,9 +347,11 @@ async function loadFlows() {
   if (S.filter.q) params.set('q', S.filter.q);
   if (S.filter.status) params.set('status', S.filter.status);
   if (S.filter.mocked) params.set('mocked', '1');
-  for (const key of ['host', 'ip', 'app', 'route']) {
+  for (const key of ['host', 'ip', 'route']) {
     if (S.filter[key]) params.set(key, S.filter[key]);
   }
+  // 应用是多选（侧栏勾选），逗号分隔传给服务端
+  if (S.filter.app.length) params.set('app', S.filter.app.join(','));
   const list = await api('/api/flows?' + params.toString());
   S.flows = list;
   renderList();
@@ -645,7 +647,9 @@ const LOCAL_DEVICE_KEY = 'local';
 
 /** 设备这一组里，'local' 是后端把回环 + 本机网卡 IP 合并后的内部 key，展示成「本机」 */
 function facetDisplay(key, value) {
-  return key === 'ip' && value === LOCAL_DEVICE_KEY ? '本机' : String(value);
+  if (key === 'ip' && value === LOCAL_DEVICE_KEY) return '本机';
+  if (Array.isArray(value)) return value.join('、');
+  return String(value);
 }
 
 /** 前端兜底判断本机 IP：SSE 推来的老格式流量可能没有 deviceKey */
@@ -663,7 +667,15 @@ function isLocalClientIpUi(ip) {
 
 async function loadFacets() {
   try {
-    S.facets = await api('/api/facets');
+    // 勾选应用后域名 / 接口结构级联：把当前筛选传给服务端，
+    // hosts 按「应用(+设备+搜索)」聚合，routes 再叠加已选域名。
+    const p = new URLSearchParams();
+    if (S.filter.app.length) p.set('app', S.filter.app.join(','));
+    if (S.filter.ip) p.set('ip', S.filter.ip);
+    if (S.filter.host) p.set('host', S.filter.host);
+    if (S.filter.q) p.set('q', S.filter.q);
+    const qs = p.toString();
+    S.facets = await api('/api/facets' + (qs ? '?' + qs : ''));
   } catch (_) {
     /* 忽略，保留上一次结果 */
   }
@@ -686,14 +698,24 @@ function scheduleFacets() {
 }
 
 function activeFilterKeys() {
-  return ['ip', 'app', 'host', 'route', 'q'].filter((k) => S.filter[k]);
+  return ['ip', 'app', 'host', 'route', 'q'].filter((k) =>
+    k === 'app' ? S.filter.app.length > 0 : !!S.filter[k]
+  );
 }
 
 function renderSide() {
   const body = $('#sideBody');
   if (!body) return;
 
-  const groups = [bookmarkGroupHtml(), ...FACET_SECTIONS.map(facetGroupHtml)];
+  // 勾选应用后只保留「应用 × 域名 × 接口」组合筛选：
+  // 上面的收藏 / 设备分组不再展示，应用分组本身始终显示全部应用
+  const appChecked = S.filter.app.length > 0;
+  const groups = [];
+  if (!appChecked) groups.push(bookmarkGroupHtml());
+  for (const section of FACET_SECTIONS) {
+    if (appChecked && section.key === 'devices') continue;
+    groups.push(facetGroupHtml(section));
+  }
   body.innerHTML = groups.join('');
 }
 
@@ -727,9 +749,16 @@ function facetGroupHtml(section) {
             section.key === 'apps'
               ? `<span class="net-dot ${netHit ? 'on' : ''}" data-net-app="${esc(it.key)}" title="${esc(netTr('断网开关'))}" role="button" tabindex="-1"></span>`
               : '';
-          return `<button class="sitem ${S.filter[section.filterKey] === it.key ? 'on' : ''}"
+          // 应用是勾选式多选：勾中的行右侧显示绿色对钩（替代原来的高亮）
+          const checked = section.key === 'apps' && S.filter.app.includes(it.key);
+          const on =
+            section.key === 'apps' ? '' : S.filter[section.filterKey] === it.key ? 'on' : '';
+          const mark =
+            section.key === 'apps' ? `<span class="ck" aria-hidden="true">✓</span>` : '';
+          const cnt = checked ? '' : `<span class="cnt">${it.count}</span>`;
+          return `<button class="sitem ${on} ${checked ? 'checked' : ''}"
           data-facet="${section.filterKey}" data-value="${esc(it.key)}" title="${esc(it.label + tip)}">
-        <span class="lbl">${wrap}${esc(it.label)}</span>${netDot}<span class="cnt">${it.count}</span>
+        <span class="lbl">${wrap}${esc(it.label)}</span>${netDot}${cnt}${mark}
       </button>`;
         })
         .join('')
@@ -871,18 +900,26 @@ function bookmarkGroupHtml() {  const closed = S.closedGroups.has('bookmarks');
 function sameFilter(filter) {
   const keys = Object.keys(filter || {});
   if (!keys.length) return false;
-  return keys.every((k) => String(S.filter[k] || '') === String(filter[k]));
+  // 应用维度是数组（书签里老数据是字符串），统一成逗号串再比
+  const norm = (v) => (Array.isArray(v) ? v.join(',') : String(v || ''));
+  return keys.every((k) => norm(S.filter[k]) === norm(filter[k]));
 }
 
 function setFacet(key, value) {
   if (!value) return;
-  if (S.filter[key] === value) delete S.filter[key];
+  if (key === 'app') {
+    // 应用是勾选式多选：点已勾的取消勾，点未勾的追加
+    const i = S.filter.app.indexOf(value);
+    if (i >= 0) S.filter.app.splice(i, 1);
+    else S.filter.app.push(value);
+  } else if (S.filter[key] === value) delete S.filter[key];
   else S.filter[key] = value;
   syncFilters();
 }
 
 function clearFacet(key) {
-  delete S.filter[key];
+  if (key === 'app') S.filter.app = [];
+  else delete S.filter[key];
   if (key === 'q') {
     S.filter.q = '';
     const input = $('#search');
@@ -896,6 +933,8 @@ function syncFilters() {
   renderChips();
   renderSide();
   loadFlows();
+  // 勾选应用后域名 / 接口结构是级联聚合，不等 SSE 的 1.2s 定时器，立即刷新
+  loadFacets();
 }
 
 function renderChips() {
@@ -903,7 +942,8 @@ function renderChips() {
   if (!el) return;
   const parts = [];
   for (const key of ['ip', 'app', 'host', 'route']) {
-    if (!S.filter[key]) continue;
+    // 应用是多选数组：空数组不算激活
+    if (key === 'app' ? !S.filter.app.length : !S.filter[key]) continue;
     parts.push(
       `<span class="chip"><span class="t">${FILTER_LABELS[key]}：${esc(facetDisplay(key, S.filter[key]))}</span><button data-clear="${key}" title="取消">✕</button></span>`
     );
@@ -1830,9 +1870,10 @@ async function exportFlows(format = 'har') {
   if (S.filter.q) params.set('q', S.filter.q);
   if (S.filter.status) params.set('status', S.filter.status);
   if (S.filter.mocked) params.set('mocked', '1');
-  for (const key of ['host', 'ip', 'app', 'route']) {
+  for (const key of ['host', 'ip', 'route']) {
     if (S.filter[key]) params.set(key, S.filter[key]);
   }
+  if (S.filter.app.length) params.set('app', S.filter.app.join(','));
   try {
     const r = await fetch(`/api/export/${format}?${params.toString()}`);
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -3845,6 +3886,9 @@ function bind() {
       if (!item) return;
       for (const key of ['ip', 'app', 'host', 'route', 'q']) delete S.filter[key];
       Object.assign(S.filter, item.filter);
+      // 应用维度现在是数组；老书签存的是单个字符串，归一一下
+      if (typeof S.filter.app === 'string') S.filter.app = S.filter.app ? [S.filter.app] : [];
+      if (!Array.isArray(S.filter.app)) S.filter.app = [];
       if (S.filter.q) {
         const input = $('#search');
         if (input) input.value = S.filter.q;
@@ -4399,8 +4443,8 @@ function bind() {
       const match =
         matchStatusUi(m, S.filter.status) &&
         (!S.filter.mocked || m.mocked) &&
+        (!S.filter.app.length || S.filter.app.includes(m.app)) &&
         (!S.filter.host || m.host === S.filter.host) &&
-        (!S.filter.app || m.app === S.filter.app) &&
         (!S.filter.route || m.route === S.filter.route) &&
         devMatch &&
         (!S.filter.q || hay.includes(S.filter.q.toLowerCase()));

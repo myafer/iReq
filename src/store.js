@@ -145,12 +145,20 @@ class FlowStore extends EventEmitter {
     const q = String(query || '').toLowerCase();
     const h = String(host || '').toLowerCase();
     const ipq = String(ip || '').trim();
+    // 应用支持多选：数组或逗号分隔字符串（侧栏勾选多个应用）
+    const appArr = Array.isArray(app)
+      ? app.map((s) => String(s)).filter(Boolean)
+      : String(app || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
     const out = [];
     for (const f0 of this.flows) {
       const f = ensureDerived(f0);
       if (onlyMocked && !f.mocked) continue;
       if (method && f.method !== method.toUpperCase()) continue;
       if (!matchStatus(f, status)) continue;
+      if (appArr.length && !appArr.includes(f.app)) continue;
       if (h && String(f.host || '').toLowerCase() !== h) continue;
       if (ipq) {
         // 'local' 是侧栏「本机」那一组：回环 + 本机所有网卡 IP 都要命中。
@@ -159,7 +167,6 @@ class FlowStore extends EventEmitter {
           if (!isLocalClientIp(f.clientIp)) continue;
         } else if (normalizeIp(f.clientIp) !== normalizeIp(ipq)) continue;
       }
-      if (app && f.app !== app) continue;
       if (route && f.route !== route) continue;
       if (q) {
         const hay = `${f.method} ${f.url} ${f.status} ${f.app || ''} ${f.clientIp || ''} ${
@@ -182,8 +189,13 @@ class FlowStore extends EventEmitter {
     return this.filter({ limit: 2000, ...options });
   }
 
-  /** 侧边栏用的聚合：设备 / 应用 / 域名 / 接口结构 */
-  facets(limit = 40) {
+  /**
+   * 侧边栏用的聚合：设备 / 应用 / 域名 / 接口结构。
+   * scope（可选）：{ hosts: filterOpts, routes: filterOpts } —— 域名 / 接口结构
+   * 改在按条件筛出的子集上聚合（应用勾选 → 只显示该应用下的域名 / 接口），
+   * 设备与应用始终聚合全量（应用列表「一直显示全部」）。
+   */
+  facets(limit = 40, scope = null) {
     const bump = (map, key, label) => {
       if (!key) return;
       const cur = map.get(key) || { key, label: label || key, count: 0 };
@@ -198,7 +210,6 @@ class FlowStore extends EventEmitter {
 
     for (const f0 of this.flows) {
       const f = ensureDerived(f0);
-      bump(hosts, f.host);
       bump(apps, f.app || '未知来源');
       // 应用名来源：'process' 是本机查到的真实进程，'alias' 是用户配的，
       // 'ua' 只是猜的 —— 侧栏据此给出不同标记
@@ -218,6 +229,18 @@ class FlowStore extends EventEmitter {
       const plat = String(f.platform || '').trim();
       if (plat && plat !== '未知') d.platforms.set(plat, (d.platforms.get(plat) || 0) + 1);
       devices.set(dk, d);
+    }
+
+    // 域名 / 接口结构：按作用域子集聚合；无作用域时与旧行为一致（全量）
+    // 注意 limit 传 Infinity：聚合要吃满子集，不能被默认 500 截断。
+    const hostSub = scope && scope.hosts ? this.filter({ limit: Infinity, ...scope.hosts }) : this.flows;
+    for (const f0 of hostSub) {
+      bump(hosts, ensureDerived(f0).host);
+    }
+    const routeSub =
+      scope && scope.routes ? this.filter({ limit: Infinity, ...scope.routes }) : this.flows;
+    for (const f0 of routeSub) {
+      const f = ensureDerived(f0);
       bump(routes, f.route || `${f.method} ${f.path}`);
     }
 

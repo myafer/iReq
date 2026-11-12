@@ -258,7 +258,11 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 - **Grouped sidebar** (left): device, app (real process name locally, UA / alias remotely, see above), domain, API structure
   (a normalized path like `GET /api/v1/lesson/:id/card`, multi-segment ids collapsed to `*`). Click an item to filter, groups are collapsible;
   app / device both have icons (real app icon → built-in SVG → default color block, see "Where app icons come from");
-  **bookmarks store "filter conditions", not a specific request** — a bookmark still works after the request is pushed out of memory
+  **bookmarks store "filter conditions", not a specific request** — a bookmark still works after the request is pushed out of memory;
+  **apps are checkbox-style multi-select** (a green check replaces highlight and count). Once any app is checked, the
+  bookmark / device groups above collapse, leaving only "app × domain × API structure" combined filtering: the app list always
+  shows all apps, domains show only those under the checked apps, and API structures likewise show only what is still in the list
+  (cascaded aggregation, refreshed immediately on change)
 - **Device grouping**: loopback `127.0.0.1` / `::1` and all local interface IPs (including VPN virtual interfaces) are merged into one **"Local"**,
   no longer split into two devices; the label is determined by IP, independent of UA, so it won't flicker between
   `iOS 127.0.0.1` / `Unknown 127.0.0.1` as new requests arrive. Remote devices are grouped by IP individually,
@@ -409,6 +413,7 @@ node tools/check-dom.js          # statically check that every #id referenced by
 node tools/check-empty-state.js  # empty state show/hide, list/detail font size, header alignment
 node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, clipping and overflow
 node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
+node tools/check-app-cascade.js  # checkbox-style multi-select apps (green check): domain / API cascade, upper groups collapse, legacy bookmarks (27 items)
 node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
 node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
 node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)

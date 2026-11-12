@@ -827,6 +827,28 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 
+/* 应用勾选式多选：勾中的行右侧显示绿色对钩（替代计数与高亮） */
+.sitem .ck {
+  display: none;
+  margin-left: auto;
+  color: var(--ok);
+  font-weight: 700;
+  font-size: calc(13px * var(--ui-scale));
+}
+
+.sitem.checked .ck {
+  display: inline;
+}
+
+.sitem.checked .cnt {
+  display: none;
+}
+
+.sitem.checked .lbl {
+  color: var(--text);
+  font-weight: 500;
+}
+
 .sitem.on .cnt {
   color: var(--accent);
 }

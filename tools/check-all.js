@@ -23,6 +23,7 @@ const SUITES = [
   ['设备识别', 'check-device.js'],
   ['应用名识别', 'check-app-name.js'],
   ['分组侧栏', 'check-sidebar.js'],
+  ['应用勾选级联', 'check-app-cascade.js'],
   ['空状态', 'check-empty-state.js'],
   ['滚动条', 'check-scrollbar.js'],
   ['分栏拖动', 'check-splitters.js'],

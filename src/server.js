@@ -466,7 +466,22 @@ class ConsoleServer {
 
     if (parts[1] === 'facets' && method === 'GET') {
       const flows = this.store.flows.length;
-      return this._json(res, 200, { flows, ...this.store.facets() });
+      // 应用勾选（可多选，逗号分隔）后域名 / 接口结构级联：
+      // hosts 不含 host / route 维度（选了域名不影响域名列表），
+      // routes 含 host、只排除自身（只显示还在列表中的接口结构）。
+      const base = {
+        query: url.searchParams.get('q') || '',
+        app: url.searchParams.get('app') || '',
+        ip: url.searchParams.get('ip') || '',
+      };
+      const host = url.searchParams.get('host') || '';
+      return this._json(res, 200, {
+        flows,
+        ...this.store.facets(40, {
+          hosts: base,
+          routes: { ...base, host },
+        }),
+      });
     }
 
     if (parts[1] === 'bookmarks' && this.bookmarks) {
