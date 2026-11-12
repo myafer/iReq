@@ -3321,7 +3321,7 @@ function renderTreeNode(nodes, depth, q, parentPath) {
       const renaming = S.treeRenaming && S.treeRenaming.path === n.path;
       const nameHTML = renaming
         ? treeNameInputHTML(S.treeRenaming.value, '', 'rt-rename-input')
-        : `<span class="rt-name">${esc(n.name)}</span>`;
+        : `<span class="rt-name"><span class="rt-label">${esc(n.name)}</span></span>`;
       if (n.type === 'dir') {
         const open = q ? true : S.rulesTreeOpen.has(n.path);
         return `<div class="rt-node">
@@ -3357,7 +3357,7 @@ function renderTreeNode(nodes, depth, q, parentPath) {
           ${
             renaming
               ? nameHTML
-              : `<span class="rt-name">${esc(n.name)}${
+              : `<span class="rt-name"><span class="rt-label">${esc(n.name)}</span>${
                   n.rule.enabled ? '' : ' <i class="rt-offtag">停用</i>'
                 }</span>`
           }
@@ -3376,6 +3376,10 @@ function renderTreeNode(nodes, depth, q, parentPath) {
     })
     .join('');
 }
+
+/* 单击文件名要等一个双击间隔再「打开」，否则双击改名时第一次单击已经把规则标签打开了 */
+let treeClickTimer = null;
+const TREE_DBLCLICK_MS = 220;
 
 function bindTreeEvents(box) {
   let dragFrom = null;
@@ -3443,18 +3447,28 @@ function bindTreeEvents(box) {
       return;
     }
     if (!row) return;
+    /* 双击文件名 = 改名，所以单击文件名先挂起一个双击间隔；点图标/缩进/空白仍然即时打开 */
+    if (e.target.closest('.rt-label') && isTreeFileRow(row)) {
+      clearTimeout(treeClickTimer);
+      treeClickTimer = setTimeout(() => {
+        treeClickTimer = null;
+        activateTreeRow(row);
+      }, TREE_DBLCLICK_MS);
+      return;
+    }
     activateTreeRow(row);
   };
 
-  /* 双击文件名就地改名（文件管理器里最基本的动作） */
+  /* 双击文件名就地改名（文件管理器里最基本的动作）；双击图标/缩进/空白则是打开 */
   box.ondblclick = (e) => {
-    if (e.target.closest('[data-tree-input]')) return;
+    if (e.target.closest('[data-tree-input]') || e.target.closest('[data-caret]')) return;
     const row = e.target.closest('.rt-row');
-    if (!row) return;
-    const type = row.dataset.type;
-    if (type !== 'dir' && type !== 'rule') return;
+    if (!row || !isTreeFileRow(row)) return;
     e.preventDefault();
-    startTreeRename(row.dataset.path, row.dataset.name);
+    clearTimeout(treeClickTimer);
+    treeClickTimer = null;
+    if (e.target.closest('.rt-label')) startTreeRename(row.dataset.path, row.dataset.name);
+    else activateTreeRow(row);
   };
 
   /* 行内输入：边打字边同步状态，回车提交 / Esc 取消 / 失焦提交 */
@@ -3762,6 +3776,12 @@ function revealDoneText() {
   if (plat === 'win32') return '已在资源管理器中定位';
   if (plat === 'linux') return '已在文件管理器中打开所在位置';
   return '已打开所在位置';
+}
+
+/** 可改名的树行（文件夹与规则文件）；响应体行和草稿行不参与双击改名 */
+function isTreeFileRow(row) {
+  const t = row.dataset.type;
+  return t === 'dir' || t === 'rule';
 }
 
 function activateTreeRow(row) {

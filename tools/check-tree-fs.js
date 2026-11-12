@@ -4,7 +4,7 @@
  * 自检：规则文件树的基础文件编辑能力
  * ---------------------------------------------------------------------------
  * ① 行内新建文件夹 / 文件（桌面端没有 window.prompt，必须走树内输入框）
- * ② 双击就地改名（不能顺手把文件挪到根目录）
+ * ② 双击就地改名（只认文件名文字：双击图标仍是「打开」，单击文件名要等双击间隔才打开）
  * ③ 右键菜单：复制 / 剪切 / 粘贴到此处 / 创建副本 / 重命名 / 复制路径 / 定位 / 删除
  * ④ 复制粘贴 = 换新 id 的新文件，重复粘贴不覆盖原件；粘贴到哪就落在哪
  * ⑤ 复制路径给绝对路径；/api/rules/reveal 正常返回且拒绝越权路径
@@ -121,17 +121,51 @@ const expandDir = (page, p) =>
     ok('新建文件落盘为 *.rule.json', fs.existsSync(path.join(rulesRoot, ROOTFILE + '.rule.json')));
     ok('新建文件后自动打开编辑标签', await page.evaluate(() => document.querySelectorAll('#ruleTabs .ws-tab').length >= 1));
 
+    // ------------------------------------------------------ 双击改名只认文件名
+    /* 双击图标区 = 打开（不该顺手改名） */
+    await page.evaluate((p) => {
+      const row = [...document.querySelectorAll('#rulesTree .rt-rule')].find((n) => n.dataset.path === p);
+      const icon = row && row.querySelector('.rt-icon');
+      if (icon) icon.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    }, ROOTFILE + '.rule.json');
+    await wait(320);
+    ok(
+      '双击图标不是改名（图标区双击 = 打开）',
+      await page.evaluate(() => !document.querySelector('#rulesTree .rt-rename-input'))
+    );
+
+    /* 单击文件名不抢着打开：先等一个双击间隔，双击才改名 */
+    await expandDir(page, BASE);
+    await wait(260);
+    const tabsBefore = await page.evaluate(() => document.querySelectorAll('#ruleTabs .ws-tab').length);
+    await page.evaluate((p) => {
+      const row = [...document.querySelectorAll('#rulesTree .rt-rule')].find((n) => n.dataset.path === p);
+      const name = row && row.querySelector('.rt-label');
+      if (name) name.click();
+    }, BASE + '/原规则.rule.json');
+    await wait(120);
+    ok(
+      '单击文件名后没立刻打开标签（留给双击改名）',
+      (await page.evaluate(() => document.querySelectorAll('#ruleTabs .ws-tab').length)) === tabsBefore
+    );
+    await wait(420);
+    ok(
+      '单击文件名稍后仍然打开规则（不是点了没反应）',
+      (await page.evaluate(() => document.querySelectorAll('#ruleTabs .ws-tab').length)) === tabsBefore + 1
+    );
+
     // ------------------------------------------------------ 双击就地改名
     await page.evaluate(
       (p) => {
         const row = [...document.querySelectorAll('#rulesTree .rt-rule')].find((n) => n.dataset.path === p);
-        if (row) row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        const name = row && row.querySelector('.rt-label');
+        if (name) name.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       },
       ROOTFILE + '.rule.json'
     );
     await wait(320);
     ok(
-      '双击规则弹出改名输入框',
+      '双击文件名弹出改名输入框',
       await page.evaluate(() => !!document.querySelector('#rulesTree .rt-rename-input'))
     );
     await page.evaluate(() => {
