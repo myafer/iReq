@@ -14,6 +14,7 @@ const { summary } = require('./store');
 const { parseAppAliases } = require('./derive');
 const { savePersistedConfig } = require('./user-config');
 const { normalize: normalizeNetworkSim } = require('./network-sim');
+const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
 
 /**
  * 列出非回环 IPv4 地址及其网卡。控制台顶栏要展示「局域网 IP」并允许在多网卡间切换，
@@ -147,6 +148,81 @@ class ConsoleServer {
     this.publicDir = publicDir || path.join(__dirname, '..', 'public');
     this.clients = new Set();
     this.server = null;
+    this._ensurePassthroughMeta();
+  }
+
+  /** 启动参数 / 老配置里的白名单没有来源元数据，补一个「原有配置」标签 */
+  _ensurePassthroughMeta() {
+    if (!this.config.passthroughMeta || typeof this.config.passthroughMeta !== 'object') {
+      this.config.passthroughMeta = {};
+    }
+    for (const raw of this.config.passthrough || []) {
+      const key = normalizePassthroughRule(raw);
+      if (key && !this.config.passthroughMeta[key]) {
+        this.config.passthroughMeta[key] = { source: 'startup', addedAt: 0 };
+      }
+    }
+  }
+
+  /**
+   * 管理列表数据：规则 + 来源/加入时间 + 实际透传次数（能一眼看出规则有没有生效）。
+   */
+  _passthroughList() {
+    const meta = this.config.passthroughMeta || {};
+    const hits =
+      this.proxy && typeof this.proxy.passthroughStats === 'function'
+        ? this.proxy.passthroughStats()
+        : [];
+    const rules = (this.config.passthrough || []).map((raw) => {
+      const rule = String(raw).trim();
+      const key = normalizePassthroughRule(rule);
+      const m = meta[key] || {};
+      const own = hits.filter((h) => passthroughMatches(h.host, [rule]));
+      return {
+        rule,
+        key,
+        source: m.source || 'startup',
+        addedAt: m.addedAt || 0,
+        hits: own.reduce((a, h) => a + h.count, 0),
+        lastHitAt: own.reduce((a, h) => Math.max(a, h.lastAt || 0), 0),
+        hosts: own.map((h) => h.host).slice(0, 8),
+      };
+    });
+    return {
+      rules,
+      totalHits: hits.reduce((a, h) => a + h.count, 0),
+      hitHosts: hits.length,
+    };
+  }
+
+  /**
+   * 写白名单的唯一入口：诊断一键加入、管理面板、设置页手填、启动参数最后都走这里。
+   * 归一化去重 → 记录来源 → 清掉已解决的诊断行 → 切断还在解密的存量连接 → 落盘 + SSE。
+   */
+  _setPassthrough(rules, source = 'settings') {
+    const prev = (this.config.passthrough || []).slice();
+    const meta = this.config.passthroughMeta || (this.config.passthroughMeta = {});
+    const seen = new Set();
+    const next = [];
+    for (const raw of Array.isArray(rules) ? rules : []) {
+      const key = normalizePassthroughRule(raw);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      next.push(key);
+      if (!meta[key]) meta[key] = { source, addedAt: Date.now() };
+    }
+    for (const key of Object.keys(meta)) if (!seen.has(key)) delete meta[key];
+    this.config.passthrough = next;
+    if (this.proxy && typeof this.proxy.clearTlsFailures === 'function') {
+      for (const rule of next) this.proxy.clearTlsFailures(rule);
+    }
+    const killed =
+      this.proxy && typeof this.proxy.applyPassthrough === 'function'
+        ? this.proxy.applyPassthrough(prev, next)
+        : 0;
+    if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+    this._broadcast({ type: 'passthrough', passthrough: next, killed });
+    return { passthrough: next, killed };
   }
 
   /** 刷新信任状态并同步给代理（决定本机 HTTPS 是否进入安全透传模式） */
@@ -384,6 +460,30 @@ class ConsoleServer {
       });
     }
 
+    /* 跳过解密白名单的管理接口：GET 列表 / POST 追加 / PUT 全量替换 / DELETE 单条或清空 */
+    if (parts[1] === 'passthrough') {
+      if (method === 'GET') return this._json(res, 200, this._passthroughList());
+      if (!['POST', 'PUT', 'DELETE'].includes(method)) {
+        return this._json(res, 405, { error: '不支持的方法' });
+      }
+      const body = method === 'DELETE' ? {} : (await this._body(req)) || {};
+      const asArray = (v) =>
+        Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/).filter(Boolean);
+      let rules;
+      if (method === 'DELETE') {
+        const key = normalizePassthroughRule(url.searchParams.get('rule') || '');
+        rules = key
+          ? (this.config.passthrough || []).filter((r) => normalizePassthroughRule(r) !== key)
+          : [];
+      } else if (method === 'POST') {
+        rules = [...(this.config.passthrough || []), ...asArray(body.rules)];
+      } else {
+        rules = asArray(body.rules);
+      }
+      const changed = this._setPassthrough(rules, String(body.source || 'manager'));
+      return this._json(res, 200, { ok: true, ...changed, ...this._passthroughList() });
+    }
+
     if (parts[1] === 'ca-trust' && (method === 'GET' || method === 'POST')) {
       if (!this.caTrust) return this._json(res, 404, { error: '证书信任检测模块未启用' });
       let installResult = null;
@@ -569,15 +669,10 @@ class ConsoleServer {
         // Mock 总开关：会话级，dock / 设置里一键旁路所有规则
         if (typeof body.mockEnabled === 'boolean') this.config.mockEnabled = body.mockEnabled;
         if (Array.isArray(body.passthrough)) {
-          this.config.passthrough = body.passthrough
-            .map((s) => String(s).trim())
-            .filter(Boolean);
-          // 用户把域名加进「跳过解密的域名」＝这个握手失败已经被处理：
-          // 立刻清掉它（含子域）的诊断记录并广播，别让它继续顶在列表最上面。
-          // 无论从诊断行详情、右键菜单还是设置页手填保存，都会走这里。
-          if (this.proxy && typeof this.proxy.clearTlsFailures === 'function') {
-            for (const rule of this.config.passthrough) this.proxy.clearTlsFailures(rule);
-          }
+          // 用户把域名加进「跳过解密的域名」＝这个握手失败已经被处理。
+          // 统一入口会清诊断、断掉还在解密的存量连接、落盘并广播给所有窗口。
+          // 无论从诊断行详情、右键菜单、管理列表还是设置页手填保存，都会走这里。
+          this._setPassthrough(body.passthrough, 'settings');
         }
         if (Array.isArray(body.mitmPorts)) {
           const ports = body.mitmPorts
@@ -609,7 +704,7 @@ class ConsoleServer {
               : 0;
           this._broadcast({ type: 'network-sim', sim: next, killed });
         }
-        // 用户偏好落盘（目前只有更新开关），重启后保留
+        // 用户偏好落盘（更新开关、跳过解密白名单），重启后保留
         if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
         return this._json(res, 200, this.config);
       }

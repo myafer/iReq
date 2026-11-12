@@ -6,6 +6,13 @@ const S = {
   flows: [],
   /* 握手失败的域名（按 host 聚合）：直接出现在主列表，不再藏在设置页 */
   tlsFailures: [],
+  /* 跳过解密白名单（服务端持久化）：规则 + 来源 + 透传命中数 */
+  passthrough: [],
+  ptTotalHits: 0,
+  ptSearch: '',
+  ptEditing: '',
+  ptHighlight: '',
+  ptLastKilled: 0,
   selectedId: null,
   selected: null,
   detailTab: 'overview',
@@ -572,6 +579,39 @@ function rowHtml(f) {
  * 证书固定的 App 疯狂重试时只更新次数，不会把列表刷屏。 */
 const TLS_ROW_PREFIX = 'tls:';
 
+/* 握手失败原因：后端按底层 TLS 报错分类，这里把「客户端不认证书」这种万能说法拆开。
+ * 实测 Apple 账号类域名经常是「只接受 h2、代理只给 http/1.1」，跟证书装没装无关。 */
+const TLS_REASONS = {
+  alpn: {
+    short: '客户端只接受 HTTP/2',
+    detail: '客户端（常见于系统服务）只接受 HTTP/2，而解密通道只提供 HTTP/1.1，ALPN 协商不上会被直接拒绝。这类域名无法解密，建议加入跳过解密。',
+  },
+  untrusted: {
+    short: '客户端不信任代理签发的证书',
+    detail: '客户端校验代理签发的证书失败：证书固定 / App 自带校验，或根证书没被信任。系统服务即使装了根证书也常不认，建议加入跳过解密。',
+  },
+  reset: {
+    short: '客户端在握手阶段直接断开',
+    detail: '连接在 TLS 握手完成前被客户端重置，通常是它收到代理证书后立即拒绝（证书固定），或要求双向 TLS 客户端证书。',
+  },
+  'non-http': {
+    short: '端口跑的不是 HTTP',
+    detail: '客户端发来的不是 HTTP/1.1 报文（私有协议 / HTTP/2 帧），代理无法解析。',
+  },
+  'no-request': {
+    short: '握手未完成，也没有 HTTP 请求',
+    detail: '客户端在 TLS 握手阶段就断开了，一个 HTTP 请求都没发出来。最常见是它不信任代理签发的证书（证书固定 / 系统服务自带校验）；加入跳过解密后改为原样透传。',
+  },
+  other: {
+    short: '客户端不认证书，或端口不是 HTTP',
+    detail: '连接层就失败了，没产生任何 HTTP 请求。加入「跳过解密」后改为原样透传，App 能连上，但看不到明文。',
+  },
+};
+
+function tlsReason(code) {
+  return TLS_REASONS[code] || TLS_REASONS.other;
+}
+
 function tlsVisible() {
   return S.tlsFailures.slice().sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
 }
@@ -592,7 +632,7 @@ function tlsRowHtml(f) {
     <span class="m tls">TLS</span>
     <span class="cellurl">
       <div class="p">${esc(f.host)}</div>
-      <div class="h"><span class="hl">${Number(f.count) || 1} 次握手失败</span><span class="hint">客户端不认证书，或端口不是 HTTP</span><button class="tls-dismiss" data-tls-dismiss="${esc(f.host)}" title="${esc(netTr('忽略这条提醒'))}" aria-label="${esc(netTr('忽略这条提醒'))}">✕</button></div>
+      <div class="h"><span class="hl">${Number(f.count) || 1} 次握手失败</span><span class="hint">${esc(netTr(tlsReason(f.reason).short))}</span><button class="tls-dismiss" data-tls-dismiss="${esc(f.host)}" title="${esc(netTr('忽略这条提醒'))}" aria-label="${esc(netTr('忽略这条提醒'))}">✕</button></div>
     </span>
     <span class="st fail">FAIL</span>
     <span class="tm">${fmtClock(f.lastAt)}</span>
@@ -655,18 +695,244 @@ async function loadTlsFailures() {
   }
 }
 
-/** 详情里的「加入跳过解密」：直接改配置，不再要求用户先打开设置页 */
-async function addPassthroughHost(host) {
+/* ------------------------------------------------ 跳过解密白名单 · 管理 */
+
+const PT_SOURCE_LABEL = {
+  diagnostic: '诊断一键加入',
+  manager: '手动添加',
+  settings: '设置页填写',
+  suggestion: '从建议添加',
+  startup: '原有配置',
+};
+
+/* 系统账号 / 推送类服务通常自带证书校验或要求 h2，MITM 解不开，只能透传。
+ * 只给少量常见项，避免过度透传把要抓的业务域名也一起屏蔽掉。 */
+const PT_SUGGESTIONS = [
+  { rule: 'gsa-gpk.apple.com', note: 'Apple 账号认证' },
+  { rule: 'gsa.apple.com', note: 'Apple 账号认证' },
+  { rule: 'idmsa.apple.com', note: 'Apple ID 认证' },
+  { rule: 'push.apple.com', note: 'APNs 推送' },
+];
+
+/** 与后端 passthroughMatches 同语义：规则命中自身与所有子域 */
+function ptMatches(host, rules) {
+  const h = String(host || '').toLowerCase();
+  return (rules || []).some((r) => {
+    const k = String(r || '').trim().toLowerCase().replace(/^\*?\./, '');
+    return !!k && (h === k || h.endsWith('.' + k));
+  });
+}
+
+/** 输入框可能一次粘一堆：空格 / 逗号 / 分号 / 换行都算分隔，顺手剥协议、端口、路径 */
+function normalizePtInput(text) {
+  return String(Array.isArray(text) ? text.join(' ') : text || '')
+    .split(/[\s,;，、]+/)
+    .map((s) =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/\/.*$/, '')
+        .replace(/:\d+$/, '')
+        .replace(/^\*?\./, '')
+        .replace(/[^\w.\-]/g, '')
+    )
+    .filter((s) => s && s.length <= 253 && (s.includes('.') || s === 'localhost'));
+}
+
+function ptRules() {
+  return (S.passthrough || []).map((x) => x.rule);
+}
+
+/** 设置页那个纯文本框与管理列表是同一份数据；正在手填时不覆盖光标下的内容 */
+function syncPtTextarea() {
+  const field = $('#stPassthrough');
+  if (!field || document.activeElement === field) return;
+  field.value = ptRules().join('\n');
+}
+
+function syncPtBadge() {
+  const n = (S.passthrough || []).length;
+  for (const id of ['#ptCount', '#ptHeadCount']) {
+    const b = $(id);
+    if (!b) continue;
+    b.hidden = n === 0;
+    b.textContent = String(n);
+  }
+}
+
+async function loadPassthrough() {
   try {
-    const cfg = await api('/api/config');
-    const lines = (cfg.passthrough || []).map((s) => String(s).trim()).filter(Boolean);
-    if (!lines.includes(host)) lines.push(host);
-    await api('/api/config', { method: 'PUT', body: { passthrough: lines } });
-    const field = $('#stPassthrough');
-    if (field) field.value = lines.join('\n');
-    // 不等 SSE：同帧把这条已处理的诊断行从列表顶部撤掉，服务端 PUT 里也会清一次
-    removeTlsFailures(host);
-    toast(`已让 ${host} 走透传，握手失败记录已清除`);
+    const d = await api('/api/passthrough');
+    S.passthrough = Array.isArray(d.rules) ? d.rules : [];
+    S.ptTotalHits = Number(d.totalHits) || 0;
+    syncPtBadge();
+    syncPtTextarea();
+    renderPassthrough();
+    renderPtChips();
+    return d;
+  } catch (_) {
+    return null;
+  }
+}
+
+function renderPassthrough() {
+  const box = $('#ptList');
+  if (!box) return;
+  syncPtBadge();
+  const q = String(S.ptSearch || '').trim().toLowerCase();
+  const all = S.passthrough || [];
+  const items = q ? all.filter((x) => x.rule.toLowerCase().includes(q)) : all;
+  $('#ptLiveText').textContent = netTr('已加入 ' + all.length + ' 条规则');
+  $('#ptHitText').textContent = S.ptTotalHits
+    ? netTr('已透传 ' + S.ptTotalHits + ' 次连接')
+    : netTr('尚未透传任何连接');
+  const kt = $('#ptKilledText');
+  kt.hidden = !S.ptLastKilled;
+  kt.textContent = S.ptLastKilled
+    ? netTr('最近变更已切断 ' + S.ptLastKilled + ' 条解密连接')
+    : '';
+  $('#ptShown').textContent = q ? netTr('匹配 ' + items.length + ' / ' + all.length + ' 条') : '';
+  box.innerHTML = items.length
+    ? items
+        .map((x) => {
+          const editing = S.ptEditing === x.rule;
+          const label = PT_SOURCE_LABEL[x.source] || PT_SOURCE_LABEL.startup;
+          const domain = editing
+            ? `<input class="input mono pt-edit-input" data-pt-value value="${esc(x.rule)}" spellcheck="false" />`
+            : `<span class="pt-domain">${esc(x.rule)}</span>`;
+          const ops = editing
+            ? `<button data-pt-save>${esc(netTr('保存'))}</button><button data-pt-cancel>${esc(netTr('取消'))}</button>`
+            : `<button data-pt-edit>${esc(netTr('编辑'))}</button><button data-pt-copy>${esc(netTr('复制'))}</button><button data-pt-del title="${esc(netTr('移除这条规则'))}">${esc(netTr('移除'))}</button>`;
+          const added = x.addedAt ? esc(fmtClock(x.addedAt)) : esc(netTr('原有配置'));
+          const hosts = x.hosts && x.hosts.length ? x.hosts.slice(0, 3).join(', ') : '';
+          return `<div class="pt-row${S.ptHighlight === x.rule ? ' hl' : ''}" data-pt-rule="${esc(x.rule)}">
+            <div class="pt-main">${domain}
+              <span class="pt-badge src-${esc(x.source)}">${esc(netTr(label))}</span>
+              <span class="pt-scope">${esc(netTr('匹配自身与所有子域'))}</span>
+            </div>
+            <div class="pt-ops">${ops}</div>
+            <div class="pt-meta">
+              <span>${esc(netTr('加入'))}</span><span>${added}</span>
+              <span class="pt-hit${x.hits ? ' on' : ''}">${esc(netTr('已透传 ' + x.hits + ' 次'))}</span>
+              ${hosts ? `<span>${esc(netTr('最近命中'))}</span><span>${esc(hosts)}</span>` : ''}
+            </div>
+          </div>`;
+        })
+        .join('')
+    : `<div class="pt-empty">${esc(
+        netTr(q ? '没有匹配的域名' : '还没有跳过解密的域名。可以从上面的待处理 / 常见系统服务里添加。')
+      )}</div>`;
+}
+
+function renderPtChips() {
+  const rules = ptRules();
+  const pending = $('#ptPending');
+  if (pending) {
+    const failed = (S.tlsFailures || []).filter((f) => !ptMatches(f.host, rules));
+    pending.innerHTML = failed.length
+      ? failed
+          .map(
+            (f) =>
+              `<button class="pt-chip" data-pt-add="${esc(f.host)}" data-pt-source="diagnostic" title="${esc(netTr('一键加入跳过解密'))}">+ ${esc(f.host)} <span class="pt-chip-note">${esc(netTr(tlsReason(f.reason).short))}</span></button>`
+          )
+          .join('')
+      : `<span class="pt-chip-note">${esc(netTr('当前没有待处理的握手失败域名'))}</span>`;
+  }
+  const suggest = $('#ptSuggest');
+  if (suggest) {
+    suggest.innerHTML = PT_SUGGESTIONS.map((x) => {
+      const added = ptMatches(x.rule, rules);
+      const attr = added
+        ? 'disabled'
+        : `data-pt-add="${esc(x.rule)}" data-pt-source="suggestion"`;
+      return `<button class="pt-chip${added ? ' added' : ''}" ${attr} title="${esc(netTr(added ? '已加入' : '一键加入跳过解密'))}">${added ? '✓' : '+'} ${esc(x.rule)} <span class="pt-chip-note">${esc(netTr(x.note))}</span></button>`;
+    }).join('');
+  }
+}
+
+function ptFail(err) {
+  toast(netTr('操作失败：' + ((err && err.message) || err)));
+}
+
+async function ptAdd(raw, source = 'manager') {
+  const list = normalizePtInput(raw);
+  if (!list.length) return toast(netTr('请输入有效的域名'));
+  const before = (S.passthrough || []).length;
+  try {
+    await api('/api/passthrough', { method: 'POST', body: { rules: list, source } });
+    await loadPassthrough();
+    const added = (S.passthrough || []).length - before;
+    toast(netTr('已加入 ' + added + ' 条，跳过 ' + (list.length - added) + ' 条重复'));
+  } catch (err) {
+    ptFail(err);
+  }
+}
+
+async function ptRemove(rule) {
+  try {
+    await api('/api/passthrough?rule=' + encodeURIComponent(rule), { method: 'DELETE' });
+    await loadPassthrough();
+    toast(netTr('已移除 ' + rule));
+  } catch (err) {
+    ptFail(err);
+  }
+}
+
+async function ptReplace(oldRule, newRule) {
+  const rules = ptRules().map((r) => (r === oldRule ? newRule : r));
+  try {
+    await api('/api/passthrough', { method: 'PUT', body: { rules, source: 'manager' } });
+    S.ptEditing = '';
+    await loadPassthrough();
+    toast(netTr('规则已更新'));
+  } catch (err) {
+    ptFail(err);
+  }
+}
+
+async function ptClearAll() {
+  const n = (S.passthrough || []).length;
+  if (!n) return;
+  if (!confirm(netTr('确定清空全部 ' + n + ' 条跳过解密规则？'))) return;
+  try {
+    await api('/api/passthrough', { method: 'DELETE' });
+    S.ptEditing = '';
+    await loadPassthrough();
+    toast(netTr('已清空跳过解密列表'));
+  } catch (err) {
+    ptFail(err);
+  }
+}
+
+async function ptCopy(text, n) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(netTr('已复制 ' + n + ' 条域名'));
+  } catch (_) {
+    toast(netTr('复制失败，请手动选中'));
+  }
+}
+
+async function openPassthrough({ highlight = '' } = {}) {
+  S.ptHighlight = highlight;
+  S.ptSearch = '';
+  const field = $('#ptSearch');
+  if (field) field.value = '';
+  await loadPassthrough();
+  openModal('#modalPassthrough');
+}
+
+/** 诊断行的「加入跳过解密」：加完直接进管理列表，不让域名加完就看不见 */
+async function addPassthroughHost(host, { open = true } = {}) {
+  try {
+    const clean = normalizePtInput(host)[0] || String(host || '').trim();
+    await api('/api/passthrough', { method: 'POST', body: { rules: [clean], source: 'diagnostic' } });
+    await loadPassthrough();
+    // 不等 SSE：同帧把这条已处理的诊断行从列表顶部撤掉
+    removeTlsFailures(clean);
+    toast(`已让 ${clean} 走透传，握手失败记录已清除`);
+    if (open) await openPassthrough({ highlight: clean });
   } catch (err) {
     toast('加入白名单失败: ' + err.message);
   }
@@ -1352,6 +1618,8 @@ function rawTextOf(f, side) {
 
 /** 握手失败行的详情：给出原因和一键透传，不用再绕到设置页 */
 function renderTlsDetail(pane, f) {
+  const why = tlsReason(f.reason);
+  const d = f.detail || {};
   pane.innerHTML = `
     <div class="dhead tls-dhead">
       <div class="dline">
@@ -1365,11 +1633,23 @@ function renderTlsDetail(pane, f) {
         <span>${fmtClock(f.lastAt)}</span>
         <span class="dactions">
           <button class="btn primary" data-block-host="${esc(f.host)}">加入跳过解密</button>
+          <button class="btn ghost" data-pt-open>查看管理列表</button>
         </span>
       </div>
     </div>
     <div class="dbody tls-dbody">
-      <div class="sec"><div class="sec-head">失败原因</div><p class="hint tls-error">${esc(f.error || '—')}</p></div>
+      <div class="sec"><div class="sec-head">失败原因 <span class="hint">判定</span></div>
+        <p class="hint tls-reason-title">${esc(netTr(why.short))}</p>
+        <p class="hint">${esc(netTr(why.detail))}</p>
+        <p class="hint tls-error">${esc(f.error || '—')}</p>
+      </div>
+      <div class="sec"><div class="sec-head">连接信息</div>
+        ${kv([
+          ['SNI', d.sni || '—'],
+          ['ALPN', d.alpn || 'not negotiated'],
+          ['Handshake', d.established ? 'completed' : 'failed'],
+        ])}
+      </div>
       <div class="sec"><div class="sec-head">说明</div>
         <p class="hint">客户端不认 iReq 的根证书（证书固定 / 自带校验），或这个端口跑的不是 HTTP。加入「跳过解密的域名」后改为原样透传，App 能连上，但看不到明文。</p>
       </div>
@@ -4193,6 +4473,86 @@ function bind() {
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
   $('#stProcessMap').addEventListener('change', queueSettingsSave);
+
+  /* -------------------------------- 跳过解密管理列表 */
+  $('#btnPassthrough').addEventListener('click', () => openPassthrough());
+  $('#stManagePassthrough').addEventListener('click', () => openPassthrough());
+  $('#ptRefresh').addEventListener('click', async () => {
+    await loadPassthrough();
+    toast(netTr('列表已刷新'));
+  });
+  const doPtAdd = async (input) => {
+    const value = input.value;
+    try {
+      await ptAdd(value);
+      input.value = '';
+    } catch (_) {
+      /* ptAdd 里已经提示过 */
+    }
+    input.focus();
+  };
+  $('#ptAddBtn').addEventListener('click', () => doPtAdd($('#ptAddInput')));
+  $('#ptAddInput').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    doPtAdd(e.target);
+  });
+  $('#ptSearch').addEventListener('input', (e) => {
+    S.ptSearch = e.target.value;
+    renderPassthrough();
+  });
+  $('#ptCopyAll').addEventListener('click', () => ptCopy(ptRules().join('\n'), ptRules().length));
+  $('#ptClearAll').addEventListener('click', ptClearAll);
+  $('#ptList').addEventListener('click', async (e) => {
+    const row = e.target.closest('[data-pt-rule]');
+    const btn = e.target.closest('button');
+    if (!row || !btn) return;
+    const rule = row.dataset.ptRule;
+    if (btn.hasAttribute('data-pt-del')) return ptRemove(rule);
+    if (btn.hasAttribute('data-pt-copy')) return ptCopy(rule, 1);
+    if (btn.hasAttribute('data-pt-edit')) {
+      S.ptEditing = rule;
+      renderPassthrough();
+      const next = $$('#ptList .pt-row').find((r) => r.dataset.ptRule === rule);
+      const input = next && next.querySelector('[data-pt-value]');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      return;
+    }
+    if (btn.hasAttribute('data-pt-cancel')) {
+      S.ptEditing = '';
+      return renderPassthrough();
+    }
+    if (btn.hasAttribute('data-pt-save')) {
+      const input = row.querySelector('[data-pt-value]');
+      const next = normalizePtInput(input ? input.value : '')[0];
+      if (!next) return toast(netTr('请输入有效的域名'));
+      return ptReplace(rule, next);
+    }
+  });
+  $('#ptList').addEventListener('keydown', (e) => {
+    if (!e.target.matches('[data-pt-value]')) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const row = e.target.closest('[data-pt-rule]');
+      const next = normalizePtInput(e.target.value)[0];
+      if (!next) return toast(netTr('请输入有效的域名'));
+      ptReplace(row.dataset.ptRule, next);
+    } else if (e.key === 'Escape') {
+      S.ptEditing = '';
+      renderPassthrough();
+    }
+  });
+  const ptChipClick = (e) => {
+    const chip = e.target.closest('[data-pt-add]');
+    if (!chip) return;
+    ptAdd(chip.dataset.ptAdd, chip.dataset.ptSource || 'manager');
+  };
+  $('#ptPending').addEventListener('click', ptChipClick);
+  $('#ptSuggest').addEventListener('click', ptChipClick);
+
   $('#stSave').addEventListener('click', async () => {
     const dirty = settingsDirty;
     if (dirty) {
@@ -4202,10 +4562,11 @@ function bind() {
     }
     closeModals();
   });
-  // 「加入跳过解密」在诊断行详情里，用全局委托，详情面板重建后也不用重绑
+  // 诊断行详情里的「加入跳过解密 / 查看管理列表」：详情面板会重建，用全局委托
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-block-host]');
-    if (btn) addPassthroughHost(btn.dataset.blockHost);
+    if (btn) return addPassthroughHost(btn.dataset.blockHost);
+    if (e.target.closest('[data-pt-open]')) openPassthrough();
   });
   $('#rpSend').addEventListener('click', sendReplay);
 
@@ -4659,6 +5020,10 @@ function bind() {
         $('#detail').innerHTML = detailEmptyHtml;
       }
       scheduleRender();
+    } else if (msg.type === 'passthrough') {
+      // 别的窗口 / 设置页改了白名单：角标、设置页文本框、管理列表同步
+      if (typeof msg.killed === 'number') S.ptLastKilled = msg.killed;
+      loadPassthrough();
     } else if (msg.type === 'network-sim') {
       // 别的窗口改了规则：同步角标和侧栏开关；正在输入时不重绘面板，避免打断编辑
       S.networkSim = normalizeNetSim(msg.sim);
@@ -4829,7 +5194,8 @@ function openRowMenu(x, y, id) {
   const rows = [];
   if (isTls) {
     rows.push(
-      `<button class="ctx-item" data-block-host="${esc(f.host)}">${netTr('加入跳过解密')}</button>`
+      `<button class="ctx-item" data-block-host="${esc(f.host)}">${netTr('加入跳过解密')}</button>`,
+      `<button class="ctx-item" data-cmd="passthrough">${netTr('管理跳过解密')}</button>`
     );
   } else {
     rows.push(
@@ -5112,6 +5478,7 @@ function bindSimpleUI() {
       };
       if (map[action]) $(map[action])?.click();
       else if (action === 'network') openNetwork();
+      else if (action === 'passthrough') openPassthrough();
       else if (action === 'export') exportFlows('har');
     }
   });
@@ -5175,6 +5542,7 @@ async function init() {
   loadLocalProxy(); // 只读探测，不阻塞首屏
   loadCaStatus(); // 预热证书状态卡：用户点开证书页时不用再等检测
   await loadTlsFailures();
+  await loadPassthrough(); // 白名单角标 + 管理列表（服务端持久化）
   await loadFlows(); // 内部 renderList 会一并渲染置顶的诊断行
   await loadRules();
   await Promise.all([loadFacets(), loadBookmarks()]);

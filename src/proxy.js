@@ -53,6 +53,33 @@ function passthroughMatches(host, rules) {
   });
 }
 
+/** 归一化一条规则：去掉协议 / 路径 / 端口 / *. 前缀，用作去重键和元数据键 */
+function normalizePassthroughRule(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '')
+    .replace(/^\*?\./, '')
+    .trim();
+}
+
+/**
+ * 把底层 TLS 报错翻译成人能看懂的原因码。
+ * 握手失败只有「证书不被信任」一种说法太糊，实测还有「客户端只接受 h2、
+ * 代理只提供 http/1.1」这种协议不匹配，以及端口跑的根本不是 HTTP。
+ */
+function classifyTlsFailure(err, info = {}) {
+  const msg = String((err && err.message) || err || '').toLowerCase();
+  if (/tls 握手失败/.test(msg)) return 'no-request'; // 握手没完成、一个请求都没发出来
+  if (/no application protocol|tls_handle_alpn|alert number 120|alpn/.test(msg)) return 'alpn';
+  if (/certificate|unknown ca|self.signed|cert verify|unable to verify/.test(msg)) return 'untrusted';
+  if (/econnreset|connection reset|socket hang up|client network socket disconnected|epipe|broken pipe/.test(msg)) return 'reset';
+  if (/wrong version number|unknown protocol|first record|http request|parse/.test(msg)) return 'non-http';
+  return 'other';
+}
+
 function decompress(buf, encoding) {
   const enc = String(encoding || '').toLowerCase();
   if (!enc || !buf || !buf.length) return buf;
@@ -122,6 +149,7 @@ class ProxyServer extends EventEmitter {
     if (cfg.capture === undefined) cfg.capture = true;
     if (cfg.mockEnabled === undefined) cfg.mockEnabled = true;
     if (!Array.isArray(cfg.passthrough)) cfg.passthrough = [];
+    if (!cfg.passthroughMeta || typeof cfg.passthroughMeta !== 'object') cfg.passthroughMeta = {};
     if (!Array.isArray(cfg.mitmPorts)) cfg.mitmPorts = [443];
     cfg.networkSim = normalizeNetworkSim(cfg.networkSim);
     this.config = cfg;
@@ -129,6 +157,8 @@ class ProxyServer extends EventEmitter {
     this.stats = { total: 0, mocked: 0, errors: 0, bytes: 0, tunneled: 0, tlsFailed: 0, safeTunneled: 0, simulated: 0 };
     // 握手失败的域名：客户端不认我们的证书（证书固定 / App 自带校验），提示用户加白名单
     this.tlsFailures = new Map();
+    // 每条跳过解密规则实际拦下多少 CONNECT，管理列表里用来证明「规则真的生效了」
+    this.passthroughHits = new Map();
     // CONNECT 阶段拿不到 UA，靠历史 flow 把 host / IP 关联到应用名，规则才能命中手机 / 模拟器
     this.appHints = { byHost: new Map(), byIp: new Map() };
   }
@@ -192,11 +222,12 @@ class ProxyServer extends EventEmitter {
    * 只限制「本机 + 系统代理接管」：手机流量不受影响，显式 --proxy 的自检/开发流量也不受影响。
    */
   _shouldDecrypt(host, port, clientIp) {
-    if (passthroughMatches(host, this.config.passthrough)) {
+    const matched = (this.config.passthrough || []).find((p) => passthroughMatches(host, [p]));
+    if (matched) {
       // 兜底：白名单也可能来自启动配置 / 落盘文件，没经过 /api/config PUT。
       // 这里顺手清掉该域名遗留的握手失败诊断，避免「已加白名单还挂在列表顶部」。
       this.clearTlsFailures(host);
-      return { decrypt: false, reason: 'passthrough' };
+      return { decrypt: false, reason: 'passthrough', rule: matched };
     }
 
     // 只有 443（或显式配置的端口）才尝试解密，其余端口原样透传。
@@ -378,6 +409,8 @@ class ProxyServer extends EventEmitter {
         }
       }
       this.stats.tunneled += 1;
+      // 只有「用户加了跳过解密规则」才算命中：安全模式 / 非 443 端口的自动透传不计
+      if (decision.reason === 'passthrough') this.notePassthroughHit(host, decision.rule);
       const establish = () => {
         const upstream = net.connect(port, host, () => {
           clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
@@ -436,6 +469,13 @@ class ProxyServer extends EventEmitter {
     });
     tlsSocket.__mitmHost = host;
     tlsSocket.__mitmPort = port;
+    // 底层 socket 也带上域名：规则变更时要按它找出「还在解密中的旧连接」
+    clientSocket.__mitmHost = host;
+    const failureInfo = () => ({
+      sni: tlsSocket.__sni || '',
+      alpn: tlsSocket.alpnProtocol || false,
+      established: secure,
+    });
     // 保留原始 TCP socket 的地址/端口：进程识别只认这一层，TLSSocket 上取不到
     tlsSocket.__reqliteClientSocket = clientSocket;
     tlsSocket.__reqliteClientPort = clientSocket.remotePort;
@@ -463,7 +503,12 @@ class ProxyServer extends EventEmitter {
           // close 和 error 可能都触发，同一条连接只算一次
           if (!tlsSocket.__tlsFailureNoted) {
             tlsSocket.__tlsFailureNoted = true;
-            this._noteTlsFailure(host, port, new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'));
+            this._noteTlsFailure(
+              host,
+              port,
+              new Error('TLS 握手失败（客户端可能不信任证书，或不是 HTTP 协议）'),
+              failureInfo()
+            );
           }
         }
       }
@@ -471,7 +516,7 @@ class ProxyServer extends EventEmitter {
     tlsSocket.on('error', (err) => {
       if (!secure && !tlsSocket.__tlsFailureNoted) {
         tlsSocket.__tlsFailureNoted = true;
-        this._noteTlsFailure(host, port, err);
+        this._noteTlsFailure(host, port, err, failureInfo());
       }
       try {
         clientSocket.destroy();
@@ -526,7 +571,7 @@ class ProxyServer extends EventEmitter {
     return hosts.length;
   }
 
-  _noteTlsFailure(host, port, err) {
+  _noteTlsFailure(host, port, err, info = {}) {
     // 已加入跳过解密的域名不再解密，理论上不会再失败；但加白名单之前建立的
     // 旧 MITM 连接可能晚一点才报错，别让它把刚清掉的记录又顶回列表顶部。
     if (passthroughMatches(host, this.config.passthrough)) return;
@@ -534,10 +579,57 @@ class ProxyServer extends EventEmitter {
     const rec = this.tlsFailures.get(host) || { host, port, count: 0, error: '', lastAt: 0 };
     rec.count += 1;
     rec.error = String((err && err.message) || err).slice(0, 160);
+    rec.reason = classifyTlsFailure(err, info);
+    rec.detail = {
+      sni: String(info.sni || ''),
+      alpn: info.alpn || false,
+      established: Boolean(info.established),
+    };
     rec.lastAt = Date.now();
     this.tlsFailures.set(host, rec);
     // 实时推给控制台：握手失败直接出现在主列表，不必去设置页翻诊断区
     this.emit('tls-failure', { ...rec });
+  }
+
+  /** 记一次「因为跳过解密规则而原样透传」的 CONNECT，管理列表里能看到规则是否真的生效 */
+  notePassthroughHit(host, rule) {
+    const key = String(host || '').toLowerCase();
+    if (!key) return;
+    if (this.passthroughHits.size > 500) this.passthroughHits.clear();
+    const rec = this.passthroughHits.get(key) || { host: key, rule: '', count: 0, lastAt: 0 };
+    rec.count += 1;
+    rec.rule = String(rule || rec.rule || '');
+    rec.lastAt = Date.now();
+    this.passthroughHits.set(key, rec);
+  }
+
+  passthroughStats() {
+    return [...this.passthroughHits.values()].sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * 新加了一条跳过解密规则后，把「还在解密中的存量连接」断掉，逼 App 重连走裸隧道。
+   * 只处理之前不在白名单、现在被覆盖的 MITM 连接；其它连接一律不碰。
+   */
+  applyPassthrough(prev, next) {
+    const was = (h) => passthroughMatches(h, prev || []);
+    const now = (h) => passthroughMatches(h, next || []);
+    let killed = 0;
+    const seen = new Set();
+    for (const socket of this.connections) {
+      const base = socket.__reqliteClientSocket || socket;
+      if (seen.has(base)) continue;
+      seen.add(base);
+      const host = socket.__mitmHost || base.__mitmHost;
+      if (!host || base.destroyed || was(host) || !now(host)) continue;
+      try {
+        base.destroy();
+        killed += 1;
+      } catch (_) {
+        /* 已经关了就算了 */
+      }
+    }
+    return killed;
   }
 
   /** 诊断信息：握手失败的域名，可直接拿来加进「跳过解密的域名」 */
@@ -1173,4 +1265,11 @@ function elapsed(startedAt) {
   return Number((process.hrtime.bigint() - startedAt) / 1000000n);
 }
 
-module.exports = { ProxyServer, decompress, isTextual, passthroughMatches };
+module.exports = {
+  ProxyServer,
+  decompress,
+  isTextual,
+  passthroughMatches,
+  normalizePassthroughRule,
+  classifyTlsFailure,
+};

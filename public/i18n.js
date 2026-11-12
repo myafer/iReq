@@ -25,6 +25,16 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 跳过解密管理列表：条数 / 命中数 / 域名是动态的，必须抢在通用「X 条」「匹配 X」之前
+    [/^已加入 (\d+) 条规则$/, function (m, a) { return a + (a === '1' ? ' rule' : ' rules') + ' added'; }],
+    [/^已透传 (\d+) 次连接$/, function (m, a) { return a + (a === '1' ? ' connection' : ' connections') + ' passed through'; }],
+    [/^已透传 (\d+) 次$/, function (m, a) { return a + (a === '1' ? ' hit' : ' hits'); }],
+    [/^最近变更已切断 (\d+) 条解密连接$/, function (m, a) { return 'Last change closed ' + a + ' decrypting connection(s)'; }],
+    [/^匹配 (\d+) \/ (\d+) 条$/, function (m, a, b) { return 'Showing ' + a + ' / ' + b; }],
+    [/^已加入 (\d+) 条，跳过 (\d+) 条重复$/, function (m, a, b) { return 'Added ' + a + ' rule(s), skipped ' + b + ' duplicate(s)'; }],
+    [/^确定清空全部 (\d+) 条跳过解密规则？$/, function (m, a) { return 'Remove all ' + a + ' skip-decryption rules?'; }],
+    [/^已移除 (.+)$/, function (m, a) { return 'Removed ' + a; }],
+    [/^已复制 (\d+) 条域名$/, function (m, a) { return 'Copied ' + a + ' host(s)'; }],
     // 控制坞：代理状态是动态文本（带 IP:端口），必须整句翻译
     [/^已接管 (.+) · HTTPS 透传$/, function (m, a) { return 'Taking over ' + a + ' · HTTPS passthrough'; }],
     [/^已接管 (.+)$/, function (m, a) { return 'Taking over ' + a; }],

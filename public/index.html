@@ -65,6 +65,7 @@
           <div class="more-menu" id="moreMenu" hidden>
             <div class="more-head">工具</div>
             <button class="more-item" id="btnNetwork">网络模拟 <b id="netCount" hidden>0</b></button>
+            <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
             <button class="more-item" id="btnCa">证书与连接</button>
             <button class="more-item" id="btnSettings">设置</button>
             <button class="more-item" id="btnExport">导出 HAR</button>
@@ -778,10 +779,13 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               </label>
               <p class="hint" id="appIdStat" style="margin: 4px 0 0">—</p>
             </div>
-            <label class="field">
-              <span>跳过解密的域名 <em>每行一个，匹配子域</em></span>
+            <div class="field pt-field">
+              <div class="pt-field-head">
+                <span>跳过解密的域名 <em>每行一个，匹配子域</em></span>
+                <button type="button" class="btn ghost" id="stManagePassthrough">管理列表</button>
+              </div>
               <textarea id="stPassthrough" class="input mono" rows="5" spellcheck="false" placeholder="pinned.example.com&#10;apple.com"></textarea>
-            </label>
+            </div>
             <label class="field">
               <span>需要解密的端口 <em>默认 443</em></span>
               <input id="stMitmPorts" class="input mono" placeholder="443, 8443" spellcheck="false" />
@@ -853,6 +857,54 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
         </div>
         <div class="modal-foot">
           <span class="hint">改动立即生效</span>
+          <div><button class="btn primary" data-close>完成</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 跳过解密白名单：加过的域名要看得见、改得动、删得掉 -->
+    <div class="modal" id="modalPassthrough" hidden>
+      <div class="modal-card wide pt-dialog">
+        <div class="modal-head">
+          <h2>跳过解密 · 管理 <b class="pt-head-count" id="ptHeadCount" hidden>0</b></h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="pt-live">
+            <span class="pt-live-dot"></span>
+            <span id="ptLiveText">已加入 0 条规则</span>
+            <span class="hint" id="ptHitText">尚未透传任何连接</span>
+            <span class="hint" id="ptKilledText" hidden></span>
+            <button class="btn ghost" id="ptRefresh">刷新</button>
+          </div>
+          <p class="hint pt-intro">命中的域名走原样透传：App 能连上，但看不到明文。规则匹配该域名及所有子域，改动立即生效并自动保存。</p>
+          <div class="pt-add">
+            <input id="ptAddInput" class="input mono" placeholder="输入域名后回车，支持空格 / 逗号批量" spellcheck="false" />
+            <button class="btn primary" id="ptAddBtn">添加</button>
+          </div>
+          <div class="pt-tools">
+            <input id="ptSearch" class="input" placeholder="搜索已加入的域名" spellcheck="false" />
+            <span class="hint" id="ptShown"></span>
+            <button class="btn ghost" id="ptCopyAll">复制全部</button>
+            <button class="btn ghost" id="ptClearAll">清空全部</button>
+          </div>
+          <div class="pt-list" id="ptList"></div>
+          <div class="pt-sub">待处理 <span class="hint">当前握手失败、还没加入的域名</span></div>
+          <div class="pt-chips" id="ptPending"></div>
+          <div class="pt-sub">常见系统服务 <span class="hint">按需添加，别把要抓的域名也一并透传</span></div>
+          <div class="pt-chips" id="ptSuggest"></div>
+          <details class="lp-details pt-details">
+            <summary>为什么这些域名会 TLS 握手失败？</summary>
+            <ul class="steps">
+              <li>客户端不信任 iReq 根证书：系统服务常自带证书校验 / 证书固定，装了根证书也不认。</li>
+              <li>客户端只接受 HTTP/2：解密通道只提供 HTTP/1.1，ALPN 协商不上会直接断开。</li>
+              <li>端口跑的不是 HTTP：私有二进制协议被当成 HTTP 解析，握手后没有请求也会记失败。</li>
+              <li>加入本列表后走裸隧道，能连上但看不到明文；想看明文只能让客户端信任根证书。</li>
+            </ul>
+          </details>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">设置 › 高级设置里的文本框与本列表双向同步</span>
           <div><button class="btn primary" data-close>完成</button></div>
         </div>
       </div>
