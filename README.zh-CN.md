@@ -9,6 +9,8 @@
 > 定位：不想为了调一个接口去开全家桶工具时用的东西。跨 macOS / Windows / Linux，
 > 内核纯 Node 实现、无原生依赖；可选桌面版用 Electron 把同一内核装进窗口。
 
+深入文档：[API 与 SSE 事件](docs/api.zh-CN.md) · [MCP 接入](docs/mcp.zh-CN.md) · [开发与实现细节](docs/development.zh-CN.md)
+
 **遇到问题或有想法？** [提个 issue](https://github.com/myafer/iReq/issues/new/choose) —— bug、想要的功能够用着别扭的地方都可以，不用写得很正式。应用内「更多 ⋯ → 反馈与建议」是同一个入口。
 
 ## 能做什么
@@ -23,8 +25,8 @@
 | 重放 | 改 method / URL / header / body 重新发送，结果作为新请求入列并与原请求关联 |
 | 排除指定域名 | 证书固定（pinning）的 App 加进「跳过解密」白名单，走裸隧道透传；白名单有独立管理列表（来源 / 加入时间 / 已透传次数），增删改查、批量导入、重启保留 |
 | 只解密 HTTP | **默认只解密 443**，其它端口原样透传（MQTT / IMAP / 私有二进制协议不会被破坏）；设置里可加端口 |
-| HTTP/2 | 解密隧道按 ALPN 协商 h2：**客户端只提 h2 的端点（Apple 账号认证、gRPC 网关、部分 CDN）也能解密**，流量记为 HTTP/2.0 且多路复用逐条入库，筛选条可单独过滤；设置里可关闭退回 HTTP/1.1 |
-| 连接诊断 | 反复 TLS 握手失败的域名会列出来，「更多 ▾」里可单独筛选，一键「加入跳过解密」后自动打开管理列表；详情给出原因判定（证书不被信任 / 只接受 HTTP/2 / 握手被重置 / 非 HTTP 协议）与底层报错、SNI、ALPN；加入白名单后诊断行立即撤掉，不会再顶在列表顶部 |
+| HTTP/2 | 按 ALPN 协商 h2，**只接受 h2 的端点也能解密**（Apple 账号认证、gRPC 网关、部分 CDN），多路复用逐条记录，筛选条可单独过滤 |
+| 连接诊断 | 反复握手失败的域名会单独列出，详情给出原因（证书不被信任 / 只接受 h2 / 被重置 / 非 HTTP），一键加入「跳过解密」后立刻撤掉 |
 | 落盘 | 当天流量写 `data/flows/flows-YYYY-MM-DD.jsonl`，重启可回看最近 300 条 |
 | 导出 | 「⋯ 更多 → 导出 HAR」或 ⌘K 输入「导出」，一键把当前筛选结果导出为 **HAR 1.2**（完整头 / body + iReq 应用、设备扩展字段）；原始 JSON 用 `/api/export/json` |
 | 设置自动保存 | 输入停顿即保存，关闭弹窗会兜底 flush，不用记着点「保存」 |
@@ -32,7 +34,7 @@
 | 融合标题栏（macOS） | 隐藏系统标题栏，红黄绿按钮浮在应用顶栏内，顶栏同时承担窗口拖拽；Windows / Linux 保留系统标题栏 |
 | 精简交互 | 顶栏常驻只有「抓包 / 规则 / 清空 / ⋯ 更多」；低频工具收进「⋯ 更多」，动作跟着选中请求走（右键 / 网络 ▾），⌘K 既能搜请求也能直接执行命令 |
 | VSCode 式规则工作区 | 活动栏 + 资源管理器 + 多标签编辑区 + 面包屑 + 状态栏；点规则在右侧开标签而不是弹窗，多条规则可同时编辑，未保存内容切标签不丢，⌘S / ⌘W / ⌘1..9 齐备 |
-| MCP 接入（AI 客户端） | iReq 可直接当 **MCP 服务**：AI 客户端读流量、按流量生成 Mock、改弱网都能做。**默认关闭 + 令牌认证**（只存 sha256 哈希、只显示一次、可撤销、分只读 / 读写），另有 Origin 校验、限流与逐条审计；HTTP 直连或 `ireq mcp` stdio 桥都行 |
+| MCP 接入（AI 客户端） | 可选：把 iReq 当 **MCP 服务**，让 AI 客户端读流量、造 Mock、改弱网。**默认关闭 + 令牌认证**（只存哈希、只显示一次、可撤销、分只读 / 读写）。[用法](docs/mcp.zh-CN.md) |
 
 ## 快速开始
 
@@ -184,60 +186,6 @@ security dump-trust-settings | grep -A2 'iReq'
 `lsof -nP -iTCP:9090 -sTCP:LISTEN` 无输出（服务没在跑，`node bin/ireq.js start`）、
 控制台有筛选条件没清、Chrome 走 QUIC 绕过代理。
 
-## 应用名是怎么来的
-
-早期「应用」一列只靠 User-Agent 猜：UA 是 `demo-app/2.0.0 (iPhone; iOS 17.0)` 还看得懂，
-换成 `okhttp/4.9`、`CFNetwork` 这类通用库就只剩「OkHttp 4」，看着像没识别到。现在按三种来源依次取：
-
-| 来源 | 适用范围 | 结果 | 标记 |
-| --- | --- | --- | --- |
-| **本机真实进程** | macOS 上从本机发起的连接 | `Google Chrome` / `DingTalk` / `汽水音乐` / `curl`，与 UA 无关 | 侧栏绿点，详情显示 PID + 可执行路径 |
-| **UA 别名** | 手机等远程设备、或关掉进程识别时 | 用户自己写的业务名，如 `我的App` | 侧栏黄点 |
-| **UA 推断** | 兜底 | `demo-app 2.0.0`、`OkHttp 4` | 无点 |
-
-本机那条是核心：连接的另一端就在同一台机器上，`lsof -nP -iTCP -F pcn` 能按客户端 **TCP 源端口**
-查到 PID 和进程名，再从可执行文件里取 `.app` 名（Chrome Helper / WebKit.WebContent 会归到主应用）。
-HTTPS 解密后 `req.socket` 变成 `TLSSocket`，所以 CONNECT 时把原始 socket 的端口记下来一路传递。
-只有 `clientIp` 是回环地址时才做关联，**手机流量绝不会被误标成本机的 App**。
-
-`lsof` 快照是异步的（约 40–60ms）：第一条请求可能先显示 UA 推断的名字，几十毫秒后通过 SSE
-`flow-update` 自动换成真实进程名；回填会追加一条轻量 JSONL patch，重启后不会退化成「OkHttp 4」。
-
-**手机为什么还是没有 App 名？** HTTP 代理只看得到设备 IP，拿不到对端的进程/包名，这是协议层面的限制
-（其他桌面代理在手机代理模式下同样只能靠 UA，或靠设备端 VPN 配合）。解决办法是在
-**设置 › 应用识别 › UA → 应用名** 里写映射，每行一条：
-
-```
-demo-app/2.0=我的App
-okhttp=示例 App
-CFNetwork=我的 iOS 客户端
-```
-
-关键词按子串匹配（不区分大小写），别名优先于内置推断，只对新抓到的请求生效。
-不想查本机进程也可以在同一面板取消勾选「识别本机真实进程」，等价于
-`PUT /api/config {"processMap": false}`。非 macOS 系统不提供进程关联，只走 UA 推断 + 别名。
-
-## 应用图标是怎么来的
-
-侧栏「应用」每一项、请求列表第二行、详情「应用 / 设备」行都会带图标，按三层依次兜底：
-
-| 层级 | 来源 | 例子 |
-| --- | --- | --- |
-| **真实 App 图标** | macOS 上按应用名找到 `.app`，读 `Info.plist` 的图标文件，用系统自带 `plutil` + `sips` 转成 128px PNG，缓存在 `data/app-icons/` | Chrome、微信、钉钉、Safari、VS Code、Playwright 的 Chrome for Testing |
-| **内置 SVG** | 前端自带常见应用 / 平台图标，纯本地、离线可用 | Chrome、Firefox、Safari、Edge、微信、企业微信、钉钉、Postman、Figma、Flutter、OkHttp、Alamofire、CFNetwork、curl、Node、iOS / Android / Windows… |
-| **默认图标** | 其它所有名字：主题中性色的首字母色块（浅灰底深灰字 / 深灰底浅灰字，深浅主题自适应，不再随机彩色） | `demo-app 2.0.0`、`reader 3.2.1`，以及手机 App 拿不到包名时 |
-
-- 图标走 `GET /api/app-icons?names=A,B` 批量解析，只转一次（缓存文件按 bundle 路径哈希，同一 App 的不同名字复用一张图），
-  生成的文件由 `/app-icon/<hash>.png` 提供，文件名有白名单校验，不接受路径穿越。
-- 不在 `/Applications` 标准目录里的 App（例如 Playwright 自带浏览器），会从流量里记录的**可执行文件路径**补登记；
-  异步识别晚于首屏时，前端每 12 秒自动重试最多 3 次，图标会从默认图自动换成真实图。
-- **选中 / 筛选时图标不闪动**：真实图标的 URL 一旦解析过，后续渲染（点击选中、侧栏筛选、SSE 重绘）
-  都在生成 DOM 时直接内联 `<img>`，不存在「先色块、再换真图」的两段式替换。
-- 设备分组也带图标：本机用电脑、手机用手机、其它 IP 用地球，底色统一走主题中性色（`--ic-device`），
-  形状区分设备类型；应用名来源（本机进程 / UA 别名 / UA 推断）悬停侧栏条目即可看到。
-- 非 macOS、命令行工具、手机 App 都拿不到本机图标，自动落到内置 / 默认图标，**不会显示破图**；
-  真实图片加载失败也会退回原图。鼠标悬停图标可看到它是「本机应用图标」还是「默认图标」。
-
 ## 控制台
 
 - **顶栏**：常驻只有「抓包 / 规则 / 清空 / ⋯ 更多」；证书、设置、导出、网络模拟、**跳过解密管理**、主题、语言、字号都收在「⋯ 更多」里（跳过解密带已加入条数角标）。地址胶囊默认局域网 IP，IP / 端口 / 整串分别可复制，▾ 切换多网卡与本机回环（见上节）
@@ -263,7 +211,7 @@ CFNetwork=我的 iOS 客户端
   格式化 / 压缩 / 全屏，深浅主题和界面字号同步；加载失败自动退回原生 textarea，功能不丢
 - **分组边栏**（左侧）：设备、应用（本机显示真实进程名，远程按 UA / 别名，见上节）、域名、接口结构
   （`GET /api/v1/lesson/:id/card` 这种归一化路径，多段 id 会压成 `*`）。点条目即筛选，可折叠分组；
-  应用 / 设备都带图标（真实 App 图标 → 内置 SVG → 默认色块，见「应用图标是怎么来的」）；
+  应用 / 设备都带图标（真实 App 图标 → 内置 SVG → 默认色块，见 [应用图标是怎么来的](docs/development.zh-CN.md#应用图标是怎么来的)）；
   **收藏**存的是"筛选条件"而不是某条请求，请求被挤出内存后书签照样能用；
   **应用是勾选式多选**（绿色对钩替代高亮与计数），勾选后边栏上面的收藏 / 设备分组收起，
   只留「应用 × 域名 × 接口结构」组合筛选：应用列表始终显示全部应用，域名只显示勾选应用下的域名，
@@ -312,263 +260,6 @@ CFNetwork=我的 iOS 客户端
 - 快捷键：响应体里 `⌘⇧F` 格式化、`⌘F` 查找；全屏时 `Esc` 先退出全屏。
 - 「另存为副本」「删除规则」只在编辑已有规则时出现；「Mock 此请求」（快速 Mock → 完整编辑器）进来的规则默认按路径包含匹配。
 
-## 一些设计取舍
-
-- **抓包开关与 Mock 解耦**：关掉「抓包」只是不记录，规则照样生效，方便只看行为不看日志。
-- **Body 上限 2MB**：超出截断并打标，避免一条大文件响应把内存吃穿。
-- **上游证书默认不校验**（`rejectUnauthorized: false`）：企业代理、自签名测试环境能直接抓，代价是工具本身不能当作安全边界。
-- **HTTP/2 按协商支持**：解密隧道走 `http2.createSecureServer`，客户端提 h2 就按 h2 解密（多路复用逐条记录、伪首部与连接级头剥除、Mock / 断网 / 弱网逐 stream 生效），只提 h2 的端点不再握手失败；上游始终按 HTTP/1.1 转发（明文边界清晰）。设置里可关闭退回纯 1.1。扩展 CONNECT（h2 上的 WebSocket）暂不支持，h2 客户端会自动退回 1.1 升级。
-- **只解密 443（可配）**：其它端口走裸隧道。把非 HTTP 协议（MQTT 8883、IMAP 993…）也解密会让 App 直接连不上，这是"别的工具能用、iReq 不能用"的典型原因。
-- **请求体流式转发**：边收边转，8MB chunked 上传也不会卡住；同时旁路记录（最多 2MB）。
-- **保活 65s**：Node 默认 5s，App 复用连接时容易撞上刚被关掉的 socket，表现为"偶发连不上"。
-- **自环保护**：目标地址若指向代理自己，`GET /`、`/ca.pem`、`/ca.cer` 会作为本机安装页应答；
-  其它请求返回 `508 Loop Detected`，防止无限自我转发。用 `https://` 打开代理端口会明确回 403 并提示改用 `http://`。
-- **WebSocket**：识别并记录建连，帧内容做裸隧道透传，不解密。
-- **默认只监听本机控制台**（127.0.0.1），代理监听 0.0.0.0 以便手机连。控制台无鉴权，公用网络下别改成 0.0.0.0。
-- **清空会归档当日抓包**：点「清空」不只清内存，还会把当天的 `flows-YYYY-MM-DD.jsonl` 改名为
-  `.cleared-<时间戳>`。否则重启时恢复历史会把刚清掉的记录全部「复活」。归档文件不会被自动加载，
-  要事后翻查可以手动打开；不想要的话直接删掉即可。
-- **接管本机系统代理，退出必须精确还原**：只把代理 state 置 off 是不够的，macOS 关闭态下仍会保留
-  `Server/Port`，以及我们加的绕过域名 —— 用户下次手动开代理就会连到已经停掉的 iReq。
-  所以开启前把完整快照存盘，释放时连 host/port、绕过域名一起写回；`localhost / 127.0.0.1 / ::1 / *.local`
-  必须绕过，否则控制台自己的请求会绕回代理形成自环。
-
-## 目录结构
-
-```
-bin/iReq.js      CLI 入口 / 参数解析 / 启动横幅
-src/ca.js           根证书档案（指纹校验 / 迁移 / .p12 导入导出）与按域名签发叶子证书（node-forge）
-src/ca-dirs.js      固定 CA 目录 ~/.ireq/ca 与旧版候选目录解析
-src/ca-trust.js     macOS 信任状态检测 / 结果落盘 / 一键安装（verify-cert / 钥匙串）
-src/proxy.js        MITM 核心：CONNECT、TLS 握手、转发、录制、Mock 响应
-src/derive.js       从 UA / 路径派生 设备、应用、接口结构；UA 别名与源端口提取
-src/process-map.js  macOS：TCP 源端口 → PID → 真实应用名（lsof 快照 + 缓存）
-src/app-icon.js     macOS：应用名 → .app → 真实图标 PNG（plutil + sips，缓存 + 路径白名单）
-src/local-address.js 本机地址归一（回环 / ::ffff: / 所有网卡 IP → local）
-src/bookmarks.js    收藏（书签）存储（data/bookmarks.json）
-src/rules.js        Mock 规则匹配引擎（data/rules/**/*.rule.json + *.body.*）
-src/network-sim.js  网络模拟：规则归一化 / 匹配 + 按字节率限速的 Transform 流
-src/store.js        流量存储（内存环形 + JSONL 落盘 + SSE 事件）
-src/replay.js       重放
-src/server.js       REST API + 静态页面
-src/system-proxy.js 本机系统代理接管（状态/开关/备份恢复，macOS networksetup）
-public/             控制台（原生 JS，无框架）；app-icons.js 内置 SVG 图标 + 真实图标回填
-tools/              开发自检脚本（_seed.js 负责造测试流量，见「开发自检」）
-```
-
-## API（脚本化时可用）
-
-```
-GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]、proxyPort、caTrust、caInfo、dataDir、safeMode
-GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
-GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
-GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
-GET    /api/facets              { flows, hosts, apps, devices, routes }
-GET    /api/app-icons?names=A,B   按应用名批量找真实图标 → { "A": {url, bundle}, "B": null }
-GET    /app-icon/<hash>.png      图标文件（仅 data/app-icons/ 里的 hash 文件名）
-GET    /api/diagnostics         { tlsFailures: [{host, count, error, reason, detail}], tunneled, stats, passthrough }
-DELETE /api/diagnostics         清空已记录的握手失败域名；带 ?host=xxx 只忽略这一个域名（含子域）
-GET    /api/passthrough         跳过解密管理列表：{ rules: [{rule, source, addedAt, hits, lastHitAt, hosts}], totalHits }
-POST   /api/passthrough         { rules: ["a.com", "*.b.com"], source } 追加（归一化去重、记来源、清诊断、切断存量解密连接）
-PUT    /api/passthrough         { rules, source } 全量替换（改名 / 导入用）
-DELETE /api/passthrough?rule=a.com  移除单条；不带参数 = 清空全部
-GET    /api/system-proxy        本机系统代理状态 + 可复制的 on/off 命令 + caTrust/safeMode
-POST   /api/system-proxy        { enabled: true|false, service? } 接管 / 释放
-GET    /api/ca-trust            本机根证书信任状态 + 可复制的信任命令（带 30s 缓存，结果按指纹落盘）
-POST   /api/ca-trust            { action: "check"|"install" } 重新检测 / 一键安装并信任（回读 verify-cert）
-GET    /api/ca/archive           证书档案元信息（指纹 / 路径 / 来源）+ 钥匙串里遗留的旧 CA
-GET    /api/ca/p12               导出 .p12 备份（含私钥，密码在 x-ireq-p12-password 响应头）
-POST   /api/ca/import             { p12: "<base64>", password? } 导入 .p12 并重新检测信任
-GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows/:id
-DELETE /api/flows
-POST   /api/flows/:id/replay      { method, url, headers, body }
-GET    /api/rules
-POST   /api/rules                 { name, method, urlMatch, matchMode, host, status, delayMs, headers, body }
-PUT    /api/rules/:id
-POST   /api/rules/reorder         { ids: [] }
-DELETE /api/rules/:id
-GET    /api/rules/tree            文件树（文件夹 / 规则 / 响应体三类节点，带 rootAbs）
-GET    /api/rules/file?path=a/b.rule.json      读单个文件
-PUT    /api/rules/file?path=a/b.body.json      { text } 或 { base64 } 写响应体
-POST   /api/rules/fs              { type: 'dir'|'rule', dir, name }
-POST   /api/rules/move            { from, toDir?, newName? }   只给 newName = 就地改名
-POST   /api/rules/copy            { from, toDir, newName? }    规则连带响应体，换新 id
-POST   /api/rules/reveal          { path, dryRun? }            在访达 / 资源管理器 / 文件管理器中显示
-DELETE /api/rules/file?path=...    删除文件或文件夹（递归）
-GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthrough: [], mitmPorts: [443], maxFlows,
-                                        processMap: true, uaAppMapText: "okhttp=我的App",
-                                        networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
-GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough / rules-changed
-                                  （flow = 请求发起时的进行中占位记录；flow-update = 响应完成就地补完，
-                                   以及本机进程名异步回填；clear = 列表与侧栏同步清空；
-                                   tls-remove = 加入跳过解密 / 握手成功后撤掉已解决的诊断行；
-                                   passthrough = 白名单变更，带最新规则与本次切断的连接数）
-GET    /api/mcp                   MCP 状态 + 工具清单 + 令牌列表（只给掩码）+ 最近审计
-PUT    /api/mcp                   { enabled } 开关（默认关）
-POST   /api/mcp/tokens            { name, scopes: 'read'|'readwrite' } 生成令牌（明文只返回这一次）
-DELETE /api/mcp/tokens/:id        撤销令牌（立即失效）
-DELETE /api/mcp/audit             清空调用审计
-POST   /mcp                       MCP 端点（JSON-RPC 2.0，需 Authorization: Bearer <令牌>）
-GET    /ca.pem                    根证书（控制台与代理端口都提供）
-GET    /ca.cer                    同一张根证书的 DER 版（iOS / Android 安装用）
-```
-
-例：从脚本里造一条 500 的 Mock
-
-```bash
-curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json' -d '{
-  "name": "服务端异常", "method": "GET", "urlMatch": "/api/v1/home", "status": 500,
-  "headers": {"content-type":"application/json"}, "body": "{\"code\":500}"
-}'
-```
-
-## MCP 接入（给 AI 客户端用）
-
-iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户端能读抓到的流量、按流量生成 Mock、改弱网参数，
-不用你手动点界面。**默认关闭，而且开了也必须带令牌**——本地端口不设防的话，任何本机进程（包括网页里的脚本）
-都能翻你的抓包内容。
-
-**第一步：开开关、拿令牌**
-
-控制台 →「设置 › MCP 接入」→ 打开「允许 AI 客户端接入」→ 填个名字（如「我的 AI 助手」）→ 选权限 → 生成令牌。
-令牌形如 `ireq_mcp_xxxxxxxx`，**只显示一次**，落盘只存 sha256 哈希，撤销后立即失效。
-
-**第二步：二选一接进去**
-
-支持 Streamable HTTP 的客户端直接配（地址就在面板里）：
-
-```json
-{
-  "mcpServers": {
-    "ireq": {
-      "type": "http",
-      "url": "http://127.0.0.1:9091/mcp",
-      "headers": { "Authorization": "Bearer ireq_mcp_xxxxxxxx" }
-    }
-  }
-}
-```
-
-只支持 stdio 的客户端用自带桥（它把 stdio 上的 JSON-RPC 原样转发到上面的端点，令牌照样要带）：
-
-```json
-{
-  "mcpServers": {
-    "ireq": { "command": "ireq", "args": ["mcp", "--url", "http://127.0.0.1:9091/mcp", "--token", "ireq_mcp_xxxxxxxx"] }
-  }
-}
-```
-
-令牌也可以放环境变量 `IREQ_MCP_TOKEN`，省得写在配置里。
-
-**权限分两档**
-
-| 令牌 | 能做什么 |
-| --- | --- |
-| 只读 `read` | 看状态、查流量、读详情、列规则、读配置 |
-| 读写 `readwrite` | 以上全部 + 建 / 改 / 删规则、由流量生成 Mock、重放、清空列表、改弱网、改跳过解密白名单 |
-
-只读令牌连 `tools/list` 都看不到写工具，调用会被 JSON-RPC 拒（`-32003`）。
-
-**工具清单**
-
-| 工具 | 作用 |
-| --- | --- |
-| `ireq_status` | 代理 / 控制台端口、局域网地址、流量与规则数量、证书信任、安全模式 |
-| `list_hosts` | 先看清全局：域名 / 应用 / 设备 / 接口各有多少条，按条数排序 |
-| `list_flows` / `get_flow` | 按域名、应用、设备 IP、接口、方法、状态码、关键词、时间窗筛流量；按 id 读完整请求响应与正文 |
-| `list_rules` / `get_rule` | 列规则（可按文件夹）、按 id 或路径读单条规则含响应体 |
-| `get_settings` | 抓包开关、解密端口、白名单、UA 别名、弱网参数 |
-| `create_rule` / `update_rule` / `delete_rule` | 增删改 Mock 规则（匹配方式 contains / wildcard / regex） |
-| `mock_flow` | 拿一条真实请求当模板直接生成 Mock（等于界面里的「Mock 此请求」） |
-| `replay_flow` | 改 URL / 方法 / 头 / 体重放，结果作为新流量入库 |
-| `set_network_sim` | 开弱网、断网、超时，按应用 / 域名 / IP 加规则 |
-| `set_passthrough` | 管理「跳过解密的域名」 |
-| `clear_flows` | 清空内存里的流量列表 |
-
-流量攒到几千条时，别让 AI 从第一页开始翻。推荐两步：
-
-1. `list_hosts`（可加 `app` / `ip` / `since_seconds` 收窄）拿到域名、应用、设备、接口各自的条数；
-2. 挑中之后再 `list_flows` 精确筛：`host`（域名）、`app`（应用，逗号分隔多个）、`ip`（客户端 IP，`local` 表示本机）、`route`（接口，如 `GET /api/user`）、`method`、`status`（`2xx` / `404` / `error` / `json` 等）、`query`（关键词）、`since_seconds`（最近 N 秒，`0` 不限）、`only_mocked`。
-
-`list_flows` 会同时返回 `total`（匹配总数）与 `returned`（本次返回条数）；`has_more: true` 说明还有更多，要么缩小条件、要么把 `limit` 调大（上限 200）。
-
-**安全上做了这些**
-
-- 令牌明文只出现一次；`config.json`、`/api/config`、`/api/mcp` 都拿不到哈希以外的凭据
-- 校验用常量时间比较；令牌无效 / 已撤销 / 过期一律同一个 401，不给出区分线索
-- 每个令牌 60 秒最多 240 次调用，超了 429
-- 带 `Origin` 且不是本机地址的请求直接 403（防 DNS rebinding 借浏览器打本地端口）
-- 每次调用（含失败的）都进审计，面板里能看到时间、令牌、工具名、耗时
-- 关闭 MCP 后 `/mcp` 立刻 403，所有令牌一起失效
-
-## 开发自检
-
-服务起来后（`node bin/ireq.js start`）可直接跑。UI 类脚本都通过 `tools/_seed.js` 自己经代理造测试流量，
-不依赖控制台里恰好有数据，脚本末尾会打印逐条 ✅/❌。
-
-`npm run check` 会顺序跑只读类自检并汇总。所有脚本统一从 `tools/_env.js` 取地址，
-用 `REQLITE_UI_PORT=9294 REQLITE_PROXY_PORT=9293 npm run check` 指向指定实例
-（默认 9091 / 9090），避免连到旧服务「假绿」。
-
-```bash
-npm run check                   # 一键汇总（不含会改动 macOS 系统代理的脚本）
-node tools/check-repo-meta.js    # 仓库元数据：issue 模板结构 / 空白 issue 关闭 / 分流 workflow 只拿 issues 权限（22 项，无需服务）
-node tools/check-onboard.js       # 首启引导：只弹一次 / 三步内容 / 反馈入口 / 关闭后落盘（16 项，自起临时实例）
-node tools/check-i18n.js        # 英文字典：孤儿键 / 未覆盖中文文案（无需服务）
-node tools/check-store.js        # 落盘 / 重启恢复 / 清空不复活（纯单元，用临时目录）
-node tools/check-proxy.js        # 明文转发、非 443 透传、8MB 流式上传、保活复用、MITM、证书固定诊断、抓包开关
-node tools/check-dom.js          # 静态检查 app.js 引用的 #id 是否都存在
-node tools/check-empty-state.js  # 空状态显隐、列表/详情字号、表头对齐
-node tools/check-scale.js        # 85%–160% 缩放、上下限、刷新保持、裁切与溢出
-node tools/check-sidebar.js      # 五组边栏、筛选、收藏书签、折叠、窄屏抽屉
-node tools/check-app-cascade.js  # 应用勾选式多选（绿色对钩）：域名 / 接口结构级联 / 上方分组收起 / 老书签归一（27 项）
-node tools/check-instant.js      # 请求发起即入库 / 侧栏同步、完成就地更新、清空同帧归零、在途不复活（36 项）
-node tools/check-http2.js        # h2 协商 / 多路复用逐条入库 / 伪首部剥离 / Mock·断网·弱网 / 筛选 / 详情协议版本 / 关闭回退（22 项）
-node tools/check-splitters.js    # 两根竖分割线：拖拽 / 命中区 / 夹紧 / 持久化 / 复位 / 键盘（30 项）
-node tools/check-device.js       # 127 + 本机网卡 IP 合并成「本机」/ 标签不闪跳 / 筛选与详情一致（40 项）
-node tools/check-mock-editor.js  # Monaco 加载 / JSON worker 校验 / 富版规则表单 / 真实 Mock 命中 / 导入导出 / 详情着色（83 项）
-node tools/check-rule-workspace.js # 活动栏 / 资源管理器 / 多标签 / 未保存快照 / 快捷键 / 面包屑 / 状态栏 / 英文界面（28 项）
-node tools/check-ca-persist.js   # CA 档案自愈 / 旧目录迁移 / .p12 往返 / 一键安装命令 / 状态落盘 / 盾牌 UI（57 项）
-node tools/check-dock.js         # 控制坞：Mock 总开关端到端旁路 / 徽章口径 / 暂停联动 / 右键直达 / 英文界面（28 项）
-node tools/check-filterbar.js    # 筛选条：matchStatus 语义 / 12 种内容类型真实流量过筛选 / UI 单选与行数一致 / 更多菜单不被裁剪 / 英文界面（62 项）
-node tools/check-scrollbar.js    # 深浅色滚动条（白条回归）
-node tools/verify-ui.js          # 顶栏按钮 / 弹窗 / 连接向导地址
-node tools/check-local-proxy.js  # 系统代理开启/恢复往返（scutil 验证真的生效）
-node tools/check-local-ui.js     # 控制台「本机抓包」按钮点击往返
-node tools/check-local-traffic.js# 端到端：本机浏览器请求真的进列表（clientIp=127.0.0.1）
-node tools/check-app-name.js     # 本机真实进程名 / HTTPS 解密 / UA 别名 / 远程不误标 / 异步回填
-node tools/check-app-icon.js     # 本机 .app 图标提取 / PNG 缓存 / API / 三层兜底 / 渲染 / 选中不闪动（56 项）
-node tools/check-ca-trust.js     # 信任检测 / 安全模式分支 / 透传留痕 / 引导 UI（42 项）
-node tools/check-address.js      # 顶栏默认局域网 IP / 三种复制 / 切换持久化 / 各处同步 / 深色与窄屏（35 项）
-node tools/check-tls-list.js     # 握手失败进主列表：SSE 实时 / 聚合 / 筛选 / 一键透传后消失 / 英文模式（19 项）
-node tools/check-tls-clear.js    # 处理后立即清除：子域规则级联 / 配置手填 / ✕ 忽略 / 不复活 / SSE 同步（30 项）
-node tools/check-passthrough-manager.js # 跳过解密管理列表：归一化 / 分类 / 持久化 / 命中统计 / 存量连接切断 / UI / 英文模式（49 项）
-node tools/check-network-sim.js  # HTTP/CONNECT 断网 / 弱网 / 超时、规则匹配、面板、侧栏模式切换、SSE、英文模式（33 项）
-node tools/check-net-live.js     # 一键断网/弱网真生效 + 规则变更切断存量隧道 + 不误伤 + 状态条（23 项）
-node tools/check-simple-ui.js    # 顶栏更多 / 筛选更多 / 连接向导 / 快速 Mock / ⌘K 命令面板 / 就近菜单（26 项）
-node tools/check-tree-fs.js     # 文件树当文件管理器：行内新建 / 双击改名 / 复制粘贴 / 绝对路径 / reveal（28 项）
-node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协议握手 / 15 个工具 / 筛选与聚合 / scope / 撤销 / Origin / stdio 桥（84 项）
-```
-
-`check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；
-`check-app-name.js` 会临时关掉进程识别并写入一条 UA 别名，finally 里还原。
-`check-ca-trust.js` 不改系统设置、不动真实 `data/`：临时目录里另起一个独立代理验证安全模式。
-`check-address.js` 只读服务端状态，空状态用页面内存里的 `S.flows` 临时触发，不改真实流量数据。
-`check-splitters.js` 只改浏览器 localStorage（独立 context，不污染你自己的控制台设置），不动代理状态。
-`check-device.js` 会用本机网卡 IP 作为 TCP 源地址打一条真实请求，另外单元部分用临时目录。
-`check-mock-editor.js` 会新建测试规则、复制 / 排序 / 启停它、造一组自检流量，并用真实代理请求验证
-Mock 命中；finally 里删除测试规则、恢复原有规则顺序、清空测试流量（归档保留）。
-`check-app-icon.js` 的单元部分在临时目录里生成图标、结束时删掉；API / UI 部分只造测试流量并清空，
-真实服务的 `data/app-icons/` 缓存会保留（首次解析某个 App 时生成，之后直接复用）。
-⚠️ `check-local-proxy.js` / `check-local-ui.js` **要求运行前系统代理是关闭态**（它们自己开启再精确还原）；
-如果控制台正在「接管本机」，先 `POST /api/system-proxy {"enabled":false}` 释放，跑完再
-`POST /api/system-proxy {"enabled":true}` 接管，否则会被判为前置状态不符。
-三个 `check-local-*.js` 会**短暂把系统代理切到 9090**（约 1–3 秒）并在 finally 里精确还原，
-跑之前确保 iReq 服务在监听，别中途强杀脚本。
-
 ## 安装说明（macOS 首次打开）
 
 iReq 目前没有苹果开发者证书签名 / 公证，从 GitHub Releases 下载的 macOS 包首次打开会提示
@@ -593,7 +284,7 @@ xattr -cr /Applications/iReq.app
 - 长连接流式响应（SSE / chunked）会实时转发；请求发起时就有一条「进行中」记录，连接结束前一直保持该状态（导出会跳过未完成的记录）。
 - HTTP/2 已按 ALPN 协商解密（h2 流量逐 stream 入库，详情标「协议版本 HTTP/2」）；上游一律按 HTTP/1.1 转发，扩展 CONNECT（h2 上的 WebSocket）暂不支持。
 - 不做 WebSocket 帧级解密。HAR 导出已支持（「更多 ⋯ → 导出 HAR」），未完成的记录会被跳过。
-- **手机等远程设备拿不到进程/包名**，只能按 UA 推断或用 UA 别名标注（见「应用名是怎么来的」）。
+- **手机等远程设备拿不到进程/包名**，只能按 UA 推断或用 UA 别名标注（见 [应用名是怎么来的](docs/development.zh-CN.md#应用名是怎么来的)）。
 - 本机进程识别只在 macOS 有；Linux / Windows 需要各自实现 `netstat + /proc` / `GetExtendedTcpTable`。
   建立后立刻关闭的极短连接可能赶不上 `lsof` 快照，会保持 UA 推断的应用名。
 
@@ -612,6 +303,14 @@ xattr -cr /Applications/iReq.app
 3. **提了就会有人看**。标签流转 `needs-triage → accepted → shipped`，发版说明里会写清哪条来自谁的反馈。
 
 代码贡献同样欢迎：先开 issue 对齐方案再提 PR，`node tools/check-all.js` 全套自检必须通过。仓库里每个功能都配了对应的 `tools/check-*.js`，改哪儿跑哪儿。
+
+## 文档
+
+README 只讲「怎么把它用起来」。想深入、想接自动化、想改代码，看这几篇：
+
+- [HTTP API 与 SSE 事件](docs/api.zh-CN.md) —— 脚本化、接自动化、接别的工具
+- [MCP 接入](docs/mcp.zh-CN.md) —— 让 AI 客户端直接读流量、造 Mock、改弱网
+- [开发与实现细节](docs/development.zh-CN.md) —— 目录结构、应用名与图标是怎么来的、设计取舍、自检脚本
 
 ## License
 

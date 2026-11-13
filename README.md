@@ -9,6 +9,8 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 > Positioning: the thing to reach for when you want to debug one API and don't want to fire up a full-featured suite. Cross macOS / Windows / Linux,
 > pure Node core with no native dependencies; the optional desktop app wraps the same core in an Electron window.
 
+Going deeper: [API and SSE events](docs/api.md) · [MCP access](docs/mcp.md) · [Development and internals](docs/development.md)
+
 **Hit a problem or have an idea?** [Open an issue](https://github.com/myafer/iReq/issues/new/choose) — bugs, feature wishes, and "this feels awkward" feedback are all welcome, no formal write-up needed. The in-app path is **More ⋯ → Feedback & ideas**.
 
 ## What it can do
@@ -23,8 +25,8 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
 | Exclude specific domains | Add certificate-pinned apps to the "skip decryption" allowlist and pass them through as a raw tunnel. The allowlist has its own manager (source / added time / pass-through hit count), supports add / search / rename / remove / clear / bulk import, and persists across restarts |
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
-| HTTP/2 | The decryption tunnel negotiates h2 via ALPN: **endpoints that only offer h2 (Apple ID auth, gRPC gateways, some CDNs) can now be decrypted**. Traffic is recorded as HTTP/2.0 with multiplexed streams captured individually and filterable; disable in Settings to fall back to HTTP/1.1 |
-| Connection diagnostics | Domains with repeated TLS handshake failures are listed (filter under "More ▾"); one-click "add to skip decryption" opens the manager. Details show the classified cause (untrusted cert / HTTP/2-only / reset during handshake / non-HTTP port) plus the raw TLS error, SNI and ALPN. Once a host is allowlisted, its diagnostic row disappears immediately instead of sticking to the top of the list |
+| HTTP/2 | Negotiates h2 via ALPN, so **endpoints that only offer h2 can be decrypted too** (Apple ID auth, gRPC gateways, some CDNs); multiplexed streams are captured individually and filterable |
+| Connection diagnostics | Domains that keep failing the handshake are listed with a cause (untrusted cert / HTTP/2-only / reset / non-HTTP); one click sends them to "skip decryption" and the row disappears |
 | Persistence | Today's traffic is written to `data/flows/flows-YYYY-MM-DD.jsonl`; the most recent 300 entries can be reviewed after restart |
 | Export | One-click **HAR 1.2** export of the current filter ("⋯ More → Export HAR", or ⌘K → "export"); full headers / bodies + iReq app / device metadata; raw JSON at `/api/export/json` |
 | Instant settings | Settings save automatically as you type (short debounce); closing the dialog flushes pending edits — no Save button to remember |
@@ -32,7 +34,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Merged title bar (macOS) | The native title bar is hidden: the red/yellow/green buttons sit inside the app top bar, which also acts as the window drag handle. Windows and Linux keep the system title bar |
 | Streamlined interaction | Only Capture / Rules / Clear / ⋯ More stay in the top bar; low-frequency tools live in "⋯ More", actions appear next to the selected request (right-click / Network ▾), and ⌘K finds both requests and commands |
 | VSCode-style rule workspace | Activity bar + explorer + multi-tab editor + breadcrumb + status bar; clicking a rule opens a tab instead of a modal, several rules can stay open, unsaved edits survive tab switches, with ⌘S / ⌘W / ⌘1..9 |
-| MCP access (AI clients) | iReq doubles as an **MCP server**: an AI client can read traffic, mock from a real response, and tune network simulation. **Off by default, token-authenticated** (sha256 hashes only, shown once, revocable, read vs read+write), plus Origin checks, rate limiting and a per-call audit. Connect over HTTP or via the `ireq mcp` stdio bridge |
+| MCP access (AI clients) | Optional: use iReq as an **MCP server** so an AI client can read traffic, mock responses and tune network simulation. **Off by default, token-authenticated** (hashes only, shown once, revocable, read vs read+write). [How to connect](docs/mcp.md) |
 
 ## Quick start
 
@@ -185,60 +187,6 @@ Other common "nothing shows up" cases: `HTTPEnable/HTTPSEnable` is 0 in `scutil 
 no output from `lsof -nP -iTCP:9090 -sTCP:LISTEN` (service not running, `node bin/ireq.js start`),
 a filter left active in the console, or Chrome bypassing the proxy via QUIC.
 
-## Where app names come from
-
-Originally the "App" column was guessed only from the User-Agent: a UA like `demo-app/2.0.0 (iPhone; iOS 17.0)` is readable,
-but generic libraries such as `okhttp/4.9` or `CFNetwork` leave only "OkHttp 4", which looks like it wasn't recognized. Now three sources are tried in order:
-
-| Source | Applies to | Result | Marker |
-| --- | --- | --- | --- |
-| **Real local process** | Connections originating from this machine on macOS | `Google Chrome` / `DingTalk` / `Music App` / `curl`, independent of UA | Green dot in sidebar, details show PID + executable path |
-| **UA alias** | Remote devices such as phones, or when process detection is off | A business name you write yourself, e.g. `MyApp` | Yellow dot in sidebar |
-| **UA inference** | Fallback | `demo-app 2.0.0`, `OkHttp 4` | No dot |
-
-The local one is the core: the other end of the connection is on the same machine, so `lsof -nP -iTCP -F pcn` can look up the PID and process name from the client **TCP source port**,
-then read the `.app` name from the executable (Chrome Helper / WebKit.WebContent are folded into the main app).
-After HTTPS decryption `req.socket` becomes a `TLSSocket`, so the original socket's port is recorded at CONNECT time and carried all the way through.
-Association happens only when `clientIp` is a loopback address, so **phone traffic is never mislabeled as a local app**.
-
-The `lsof` snapshot is async (~40–60ms): the first request may briefly show the UA-inferred name, then automatically switch to the real process name via an SSE
-`flow-update` a few dozen milliseconds later; the backfill appends a lightweight JSONL patch, so it won't degrade back to "OkHttp 4" after a restart.
-
-**Why do phones still have no app name?** An HTTP proxy only sees the device IP, not the peer's process / package name — a protocol-level limitation
-(Other desktop proxies likewise can only rely on UA, or on a device-side VPN). The fix is to write a mapping in
-**Settings › App identification › UA → App name**, one per line:
-
-```
-demo-app/2.0=MyApp
-okhttp=Sample App
-CFNetwork=My iOS Client
-```
-
-Keywords are matched as substrings (case-insensitive); aliases take priority over built-in inference and apply only to newly captured requests.
-If you don't want local process lookup, uncheck "Identify real local processes" in the same panel — equivalent to
-`PUT /api/config {"processMap": false}`. Non-macOS systems have no process association and use only UA inference + aliases.
-
-## Where app icons come from
-
-Every item in the sidebar's "App" group, the second line of the request list, and the "App / Device" row in details carry an icon, with three fallback layers:
-
-| Layer | Source | Examples |
-| --- | --- | --- |
-| **Real app icon** | On macOS, find the `.app` by app name, read the icon file from `Info.plist`, convert it to a 128px PNG using the built-in `plutil` + `sips`, cached in `data/app-icons/` | Chrome, WeChat, DingTalk, Safari, VS Code, Playwright's Chrome for Testing |
-| **Built-in SVG** | The frontend ships common app / platform icons, purely local, works offline | Chrome, Firefox, Safari, Edge, WeChat, WeCom, DingTalk, Postman, Figma, Flutter, OkHttp, Alamofire, CFNetwork, curl, Node, iOS / Android / Windows… |
-| **Default icon** | All other names: a theme-neutral initial-letter color block (light gray on dark / dark gray on light, adapts to light/dark theme, no more random colors) | `demo-app 2.0.0`, `reader 3.2.1`, and phone apps when no package name is available |
-
-- Icons are batch-resolved via `GET /api/app-icons?names=A,B`, converted only once (cache files hashed by bundle path, different names of the same app reuse one image),
-  served by `/app-icon/<hash>.png`; the filename is validated against a whitelist and path traversal is rejected.
-- Apps not under the standard `/Applications` directory (e.g. Playwright's bundled browser) are registered from the **executable path** recorded in the traffic;
-  when async detection lands after first paint, the frontend auto-retries up to 3 times every 12 seconds, and the icon switches from the default to the real one automatically.
-- **Icons don't flicker when selecting / filtering**: once a real icon's URL is resolved, subsequent renders (selection, sidebar filter, SSE redraw)
-  inline the `<img>` directly when building the DOM — there's no two-stage "color block first, then swap in the real image".
-- Device groups also have icons: a computer for local, a phone for phones, a globe for other IPs, with a unified theme-neutral base color (`--ic-device`),
-  the shape distinguishing device type; hover a sidebar item to see the app-name source (local process / UA alias / UA inference).
-- Non-macOS systems, command-line tools, and phone apps can't get local icons and fall back to built-in / default icons, **no broken images**;
-  if a real image fails to load it falls back to the original. Hover an icon to see whether it's a "local app icon" or a "default icon".
-
 ## Console
 
 - **Top bar**: only "Capture / Rules / Clear / ⋯ More" stay visible; certificates, settings, export, network simulation, **skip-decryption manager**, theme, language and font size live in "⋯ More" (the manager shows a badge with the number of rules). The address pill shows the LAN IP by default, with IP / port / full-string copy and ▾ to switch interfaces (see above)
@@ -264,7 +212,7 @@ Every item in the sidebar's "App" group, the second line of the request list, an
   format / minify / fullscreen, light/dark theme and UI font size in sync; falls back to a native textarea on load failure with no feature loss
 - **Grouped sidebar** (left): device, app (real process name locally, UA / alias remotely, see above), domain, API structure
   (a normalized path like `GET /api/v1/lesson/:id/card`, multi-segment ids collapsed to `*`). Click an item to filter, groups are collapsible;
-  app / device both have icons (real app icon → built-in SVG → default color block, see "Where app icons come from");
+  app / device both have icons (real app icon → built-in SVG → default color block, see [Where app icons come from](docs/development.md#where-app-icons-come-from));
   **bookmarks store "filter conditions", not a specific request** — a bookmark still works after the request is pushed out of memory;
   **apps are checkbox-style multi-select** (a green check replaces highlight and count). Once any app is checked, the
   bookmark / device groups above collapse, leaving only "app × domain × API structure" combined filtering: the app list always
@@ -314,257 +262,6 @@ Click "+ New rule" or the `＋` on the tab bar for the full editor; "Mock this r
 - Shortcuts: `⌘⇧F` format in the response body, `⌘F` find; in fullscreen `Esc` exits fullscreen first.
 - "Save as copy" and "Delete rule" appear only when editing an existing rule; rules opened via "Mock this request" (Quick Mock → Full editor) default to path-contains matching.
 
-## Some design trade-offs
-
-- **Capture toggle decoupled from Mock**: turning off "capture" only stops recording, rules still apply — handy when you care about behavior, not logs.
-- **2MB body cap**: larger bodies are truncated and flagged, so one big file response can't eat all the memory.
-- **Upstream certificates not verified by default** (`rejectUnauthorized: false`): corporate proxies and self-signed test environments just work, at the cost of the tool not being a security boundary.
-- **HTTP/2 via negotiation**: the decryption tunnel uses `http2.createSecureServer`; h2 clients get h2 decryption (streams recorded individually, pseudo/ connection headers stripped, mock / offline / slow applied per stream), and h2-only endpoints no longer fail the handshake. Upstreams are always forwarded over HTTP/1.1 (a clear plaintext boundary). Disable in Settings for pure 1.1. Extended CONNECT (WebSocket over h2) is not supported yet; h2 clients fall back to a 1.1 upgrade automatically.
-- **Decrypt 443 only (configurable)**: other ports use a raw tunnel. Decrypting non-HTTP protocols too (MQTT 8883, IMAP 993…) would make apps fail to connect — the classic "other proxies work, iReq doesn't" cause.
-- **Streaming request bodies**: forwarded as they arrive, so an 8MB chunked upload won't stall; recorded on the side at the same time (up to 2MB).
-- **Keep-alive 65s**: Node's default is 5s; apps reusing connections tend to hit a just-closed socket, showing up as "occasionally can't connect".
-- **Self-loop protection**: if the target points at the proxy itself, `GET /`, `/ca.pem`, `/ca.cer` are served as the local install page;
-  other requests return `508 Loop Detected` to prevent infinite self-forwarding. Opening the proxy port with `https://` returns a clear 403 telling you to use `http://`.
-- **WebSocket**: the handshake is detected and recorded, frames pass through as a raw tunnel, no decryption.
-- **Console listens on localhost only by default** (127.0.0.1), while the proxy listens on 0.0.0.0 so phones can connect. The console has no auth — don't change it to 0.0.0.0 on a public network.
-- **Clear also archives today's capture**: clicking "Clear" doesn't just clear memory, it also renames the day's `flows-YYYY-MM-DD.jsonl` to
-  `.cleared-<timestamp>`. Otherwise restoring history on restart would "resurrect" everything you just cleared. Archived files aren't auto-loaded,
-  open them manually to look back later; if you don't want them, just delete them.
-- **Taking over the local system proxy means the exit must restore it exactly**: just setting the proxy state to off isn't enough — macOS keeps
-  `Server/Port` even when off, plus the bypass domains we added — so the next time the user manually enables the proxy it connects to an already-stopped iReq.
-  So a full snapshot is saved to disk before enabling, and on release the host/port and bypass domains are written back together; `localhost / 127.0.0.1 / ::1 / *.local`
-  must be bypassed, otherwise the console's own requests loop back into the proxy.
-
-## Directory structure
-
-```
-bin/iReq.js      CLI entry / arg parsing / startup banner
-src/ca.js            Root CA archive (fingerprint check / migration / .p12 import-export) and per-domain leaf issuance (node-forge)
-src/ca-dirs.js       Pinned CA dir ~/.ireq/ca + legacy candidate directories
-src/ca-trust.js     macOS trust detection / persisted verdict / one-click install (verify-cert / Keychain)
-src/proxy.js        MITM core: CONNECT, TLS handshake, forwarding, recording, Mock responses
-src/derive.js       Derives device, app, API structure from UA / path; UA aliases and source-port extraction
-src/process-map.js  macOS: TCP source port → PID → real app name (lsof snapshot + cache)
-src/app-icon.js     macOS: app name → .app → real icon PNG (plutil + sips, cache + path whitelist)
-src/local-address.js Local address normalization (loopback / ::ffff: / all interface IPs → local)
-src/bookmarks.js    Bookmark storage (data/bookmarks.json)
-src/rules.js        Mock rule matching engine (data/rules/**/*.rule.json + *.body.*)
-src/network-sim.js  Network simulation: rule normalize/match + byte-rate throttling Transform
-src/store.js        Traffic storage (in-memory ring + JSONL persistence + SSE events)
-src/replay.js       Replay
-src/server.js       REST API + static pages
-src/system-proxy.js Local system proxy takeover (status/on-off/backup-restore, macOS networksetup)
-public/             Console (vanilla JS, no framework); app-icons.js built-in SVG icons + real icon backfill
-tools/              Dev self-check scripts (_seed.js generates test traffic, see "Development self-checks")
-```
-
-## API (for scripting)
-
-```
-GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, iface}], proxyPort, caTrust, caInfo, dataDir, safeMode
-GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
-GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
-GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
-GET    /api/facets              { flows, hosts, apps, devices, routes }
-GET    /api/app-icons?names=A,B   Batch-find real icons by app name → { "A": {url, bundle}, "B": null }
-GET    /app-icon/<hash>.png      Icon file (only hash filenames inside data/app-icons/)
-GET    /api/diagnostics         { tlsFailures: [{host, count, error, reason, detail}], tunneled, stats, passthrough }
-DELETE /api/diagnostics         Clear recorded handshake failures; with ?host=xxx dismiss only that host (and its subdomains)
-GET    /api/passthrough         Allowlist manager: { rules: [{rule, source, addedAt, hits, lastHitAt, hosts}], totalHits }
-POST   /api/passthrough         { rules: ["a.com", "*.b.com"], source } append (normalize / dedupe / clear diagnostics / drop live MITM connections)
-PUT    /api/passthrough         { rules, source } replace all (rename / import)
-DELETE /api/passthrough?rule=a.com  remove one; without the parameter, remove all
-GET    /api/system-proxy        Local system proxy status + copiable on/off commands + caTrust/safeMode
-POST   /api/system-proxy        { enabled: true|false, service? } take over / release
-GET    /api/ca-trust            Local root CA trust status + copiable trust command (30s cache; verdict persisted by fingerprint)
-POST   /api/ca-trust            { action: "check"|"install" } re-check / one-click install (verifies with verify-cert)
-GET    /api/ca/archive           CA archive metadata (fingerprint / path / source) + stale CAs left in the Keychain
-GET    /api/ca/p12               Export .p12 backup (with private key; password in x-ireq-p12-password header)
-POST   /api/ca/import            { p12: "<base64>", password? } import .p12 and re-check trust
-GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows/:id
-DELETE /api/flows
-POST   /api/flows/:id/replay      { method, url, headers, body }
-GET    /api/rules
-POST   /api/rules                 { name, method, urlMatch, matchMode, host, status, delayMs, headers, body }
-PUT    /api/rules/:id
-POST   /api/rules/reorder         { ids: [] }
-DELETE /api/rules/:id
-GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthrough: [], mitmPorts: [443], maxFlows,
-                                        processMap: true, uaAppMapText: "okhttp=MyApp",
-                                        networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
-GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough / rules-changed
-                                  (flow = in-flight placeholder emitted when the request starts; flow-update = response
-                                   completion in place, plus async local process name backfill; clear = list + sidebar reset;
-                                   tls-remove = resolved handshake failures after allowlisting / a successful handshake;
-                                   passthrough = allowlist change, with rules and the number of dropped connections)
-GET    /api/mcp                   MCP state + tool list + tokens (masked) + recent audit
-PUT    /api/mcp                   { enabled } toggle (off by default)
-POST   /api/mcp/tokens            { name, scopes: 'read'|'readwrite' } create a token (plaintext returned once)
-DELETE /api/mcp/tokens/:id        revoke a token (effective immediately)
-DELETE /api/mcp/audit             clear the call audit
-POST   /mcp                       MCP endpoint (JSON-RPC 2.0, requires Authorization: Bearer <token>)
-GET    /ca.pem                    Root CA (served by both the console and the proxy port)
-GET    /ca.cer                    DER form of the same root CA (for iOS / Android installs)
-```
-
-Example: create a 500 Mock from a script
-
-```bash
-curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json' -d '{
-  "name": "Server error", "method": "GET", "urlMatch": "/api/v1/home", "status": 500,
-  "headers": {"content-type":"application/json"}, "body": "{\"code\":500}"
-}'
-```
-
-## MCP access (for AI clients)
-
-iReq can act as an **MCP (Model Context Protocol) server**: an AI client can read captured traffic, turn a real
-response into a mock, and adjust network simulation without you clicking through the UI. **It is off by default, and
-even when on it requires a token** — an unauthenticated local port would let any local process (including scripts in a
-web page) read your captured traffic.
-
-**Step 1: enable it and create a token**
-
-Console → "Settings › MCP access" → turn on "Allow AI clients" → name the token → pick a scope → create.
-The token looks like `ireq_mcp_xxxxxxxx`, is **shown only once**, and only its sha256 hash is stored; revoking kills it
-immediately.
-
-**Step 2: connect the client (either way)**
-
-Clients that support Streamable HTTP point straight at the endpoint shown in the panel:
-
-```json
-{
-  "mcpServers": {
-    "ireq": {
-      "type": "http",
-      "url": "http://127.0.0.1:9091/mcp",
-      "headers": { "Authorization": "Bearer ireq_mcp_xxxxxxxx" }
-    }
-  }
-}
-```
-
-stdio-only clients use the bundled bridge (it forwards JSON-RPC verbatim and still authenticates with the token):
-
-```json
-{
-  "mcpServers": {
-    "ireq": { "command": "ireq", "args": ["mcp", "--url", "http://127.0.0.1:9091/mcp", "--token", "ireq_mcp_xxxxxxxx"] }
-  }
-}
-```
-
-You can also put the token in `IREQ_MCP_TOKEN` to keep it out of the config file.
-
-**Two scopes**
-
-| Token | What it can do |
-| --- | --- |
-| `read` | State, traffic list, flow detail, rule list, settings |
-| `readwrite` | All of the above plus create / update / delete rules, mock from a flow, replay, clear flows, network simulation, passthrough allowlist |
-
-A read-only token does not even see write tools in `tools/list`, and calls are rejected by JSON-RPC (`-32003`).
-
-**Tools**
-
-| Tool | Purpose |
-| --- | --- |
-| `ireq_status` | Proxy / console ports, LAN addresses, flow and rule counts, CA trust, safe mode |
-| `list_hosts` | See the big picture first: host / app / device / route counts, largest first |
-| `list_flows` / `get_flow` | Filter traffic by host, app, client IP, route, method, status, keyword or time window; read one flow with bodies |
-| `list_rules` / `get_rule` | List rules (optionally per folder) and read a single rule with its body |
-| `get_settings` | Capture, decryption ports, allowlist, UA aliases, network-sim parameters |
-| `create_rule` / `update_rule` / `delete_rule` | Manage mock rules (contains / wildcard / regex matching) |
-| `mock_flow` | Turn a captured request into a mock rule — the "Mock this request" action, scripted |
-| `replay_flow` | Replay with a different URL / method / headers / body; the result lands as a new flow |
-| `set_network_sim` | Weak network, offline, timeout, with per-app / host / IP rules |
-| `set_passthrough` | Manage the "skip decryption" allowlist |
-| `clear_flows` | Clear the in-memory flow list |
-
-When the capture has thousands of flows, don't make the model page through them. Two steps:
-
-1. `list_hosts` (optionally narrowed by `app` / `ip` / `since_seconds`) returns counts for hosts, apps, devices and routes.
-2. Then filter precisely with `list_flows`: `host`, `app` (comma-separated), `ip` (client IP, `local` for this machine), `route` (e.g. `GET /api/user`), `method`, `status` (`2xx` / `404` / `error` / `json` …), `query`, `since_seconds` (last N seconds, `0` for no limit), `only_mocked`.
-
-`list_flows` returns both `total` (all matches) and `returned` (this page); `has_more: true` means there are more — narrow the filters or raise `limit` (max 200).
-
-**Security notes**
-
-- Plaintext exists only in the create response; `config.json`, `/api/config` and `/api/mcp` never expose hashes or salts
-- Constant-time comparison; invalid, revoked and expired tokens all return the same 401
-- 240 calls per token per minute, then 429
-- Requests carrying a non-local `Origin` are rejected with 403 (DNS-rebinding protection)
-- Every call, including failures, is audited with time, token, tool and duration
-- Turning MCP off makes `/mcp` return 403 immediately and invalidates all tokens
-
-## Development self-checks
-
-With the service running (`node bin/ireq.js start`) you can run these directly. UI scripts all generate test traffic through the proxy themselves via `tools/_seed.js`,
-so they don't depend on the console happening to have data; each script prints a per-item ✅/❌ at the end.
-
-`npm run check` runs the read-only suites in sequence and prints a summary. All scripts take their addresses from
-`tools/_env.js`, so point them at a specific instance with `REQLITE_UI_PORT=9294 REQLITE_PROXY_PORT=9293 npm run check`
-(defaults: 9091 / 9090) — this avoids a stale service producing a false green.
-
-```bash
-npm run check                   # one-shot summary (excludes suites that change the macOS system proxy)
-node tools/check-repo-meta.js    # Repo metadata: issue form structure / blank issues off / triage holds issues-only permission (22 items, no service)
-node tools/check-onboard.js       # First-run guide: shows once / three steps / feedback link / dismissed state persisted (16 items, spins its own throwaway instance)
-node tools/check-i18n.js        # English dictionary: orphan keys / uncovered Chinese UI text (no service needed)
-node tools/check-store.js        # persistence / restart recovery / clear doesn't resurrect (pure unit, temp dir)
-node tools/check-proxy.js        # plaintext forwarding, non-443 passthrough, 8MB streaming upload, keep-alive reuse, MITM, pinning diagnostics, capture toggle
-node tools/check-dom.js          # statically check that every #id referenced by app.js exists
-node tools/check-empty-state.js  # empty state show/hide, list/detail font size, header alignment
-node tools/check-scale.js        # 85%–160% zoom, bounds, persists on reload, clipping and overflow
-node tools/check-sidebar.js      # five sidebar groups, filtering, bookmarks, collapse, narrow-screen drawer
-node tools/check-app-cascade.js  # checkbox-style multi-select apps (green check): domain / API cascade, upper groups collapse, legacy bookmarks (27 items)
-node tools/check-instant.js      # in-flight records + sidebar sync, in-place completion, same-frame clear, no revive (36 items)
-node tools/check-http2.js        # h2 negotiation / multiplexed per-stream records / pseudo-header stripping / mock·offline·slow / filters / protocol version in details / fallback off switch (22 items)
-node tools/check-splitters.js    # two vertical splitters: drag / hit area / clamping / persistence / reset / keyboard (30 items)
-node tools/check-device.js       # 127 + local interface IPs merged into "Local" / label doesn't flicker / filter matches details (40 items)
-node tools/check-mock-editor.js  # Monaco loading / JSON worker validation / rich rule form / real Mock hit / import-export / detail coloring (83 items)
-node tools/check-rule-workspace.js # activity bar / explorer / multi-tab / unsaved snapshots / shortcuts / breadcrumb / status bar / English UI (28 items)
-node tools/check-ca-persist.js   # CA archive self-heal / legacy migration / .p12 round-trip / install command / verdict persistence / shield UI (57 items)
-node tools/check-dock.js         # Dock: mock master switch end-to-end bypass / badge counts / pause sync / right-click shortcuts / English UI (28 items)
-node tools/check-filterbar.js    # Filter bar: matchStatus semantics / 12 content types through real traffic / UI single-select row counts / flyout not clipped / English UI (62 items)
-node tools/check-scrollbar.js    # light/dark scrollbars (white-bar regression)
-node tools/verify-ui.js          # top-bar buttons / dialogs / connection guide address
-node tools/check-local-proxy.js  # system proxy on/restore round-trip (scutil verifies it really takes effect)
-node tools/check-local-ui.js     # console "Local capture" button click round-trip
-node tools/check-local-traffic.js# end-to-end: local browser requests really enter the list (clientIp=127.0.0.1)
-node tools/check-app-name.js     # real local process name / HTTPS decryption / UA alias / remote not mislabeled / async backfill
-node tools/check-app-icon.js     # local .app icon extraction / PNG cache / API / three-layer fallback / rendering / no flicker on select (56 items)
-node tools/check-ca-trust.js     # trust detection / safe mode branch / passthrough trace / guidance UI (42 items)
-node tools/check-address.js      # top-bar default LAN IP / three copy ways / switch persistence / sync everywhere / dark and narrow screens (35 items)
-node tools/check-tls-list.js     # handshake failures in the main list: SSE / aggregation / filter / cleared after passthrough / EN mode (19 items)
-node tools/check-tls-clear.js    # clearing resolved rows: subdomain cascade / Settings save / dismiss / no resurrection / SSE (30 items)
-node tools/check-passthrough-manager.js # allowlist manager: normalization / reason classification / persistence / hit counting / live connection drops / UI / EN mode (49 items)
-node tools/check-network-sim.js  # offline / slow / timeout on HTTP + CONNECT, rule matching, panel, sidebar mode switch, SSE, EN mode (33 items)
-node tools/check-net-live.js     # one-click offline/slow really works + rule change drops live tunnels + no false positives + status strip (23 items)
-node tools/check-simple-ui.js    # top-bar More / filter More / connection guide / Quick Mock / ⌘K palette / context menus (26 items)
-node tools/check-tree-fs.js     # file tree as a file manager: inline create / double-click rename / copy-paste / absolute path / reveal (28 items)
-node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake / 15 tools / filters / scopes / revoke / Origin / stdio bridge (84 items)
-```
-
-`check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;
-`check-app-name.js` temporarily disables process detection and writes a UA alias, restoring them in a finally block.
-`check-ca-trust.js` doesn't change system settings or touch the real `data/`: it spins up a separate proxy in a temp dir to verify safe mode.
-`check-address.js` only reads server state; the empty state is triggered via the page's in-memory `S.flows`, without touching real traffic data.
-`check-splitters.js` only changes browser localStorage (an isolated context, so it won't pollute your own console settings) and leaves the proxy state alone.
-`check-device.js` sends one real request using a local interface IP as the TCP source address; the unit part uses a temp dir.
-`check-mock-editor.js` creates a test rule, copies / reorders / toggles it, generates a set of self-check traffic, and verifies
-Mock hits with a real proxy request; in a finally block it deletes the test rule, restores the original rule order, and clears test traffic (archive kept).
-The unit part of `check-app-icon.js` generates icons in a temp dir and deletes them at the end; the API / UI parts only generate and clear test traffic,
-and the real service's `data/app-icons/` cache is kept (generated on first resolution of an app, reused afterwards).
-⚠️ `check-local-proxy.js` / `check-local-ui.js` **require the system proxy to be off before running** (they turn it on and restore it exactly themselves);
-if the console is currently "Taking over local", first release with `POST /api/system-proxy {"enabled":false}`, then re-take over with
-`POST /api/system-proxy {"enabled":true}` after the run, otherwise it'll be judged as a wrong precondition.
-The three `check-local-*.js` will **briefly switch the system proxy to 9090** (about 1–3 seconds) and restore it exactly in a finally block;
-make sure the iReq service is listening before running, and don't kill the script midway.
-
 ## Installation notes (first launch on macOS)
 
 iReq is currently not signed / notarized with an Apple Developer certificate, so the macOS package downloaded from GitHub Releases will show
@@ -590,7 +287,7 @@ It will then open normally. Windows (SmartScreen) and Linux AppImage may show si
 - Long-lived streaming responses (SSE / chunked) are forwarded in real time; an in-flight record exists from the moment the request starts and stays "in progress" until the connection ends (exports skip unfinished records).
 - HTTP/2 is decrypted via ALPN negotiation (h2 streams are recorded individually and details show "Protocol version: HTTP/2"); upstreams are always forwarded over HTTP/1.1, and extended CONNECT (WebSocket over h2) is not supported yet.
 - No WebSocket frame-level decryption. HAR export is supported (**More ⋯ → Export HAR**); unfinished records are skipped.
-- **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see "Where app names come from").
+- **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see [Where app names come from](docs/development.md#where-app-names-come-from)).
 - Local process detection is macOS-only; Linux / Windows would each need `netstat + /proc` / `GetExtendedTcpTable`.
   Very short connections that close immediately may miss the `lsof` snapshot and keep the UA-inferred app name.
 
@@ -609,6 +306,14 @@ Three ground rules, all to save each other time:
 3. **Every issue gets read.** Labels flow `needs-triage → accepted → shipped`, and release notes say which change came from whose report.
 
 Code contributions are welcome too: open an issue to agree on the approach first, then send a PR. `node tools/check-all.js` must pass — every feature has a matching `tools/check-*.js`.
+
+## Docs
+
+The README only covers "how do I get this running". For deeper material:
+
+- [HTTP API and SSE events](docs/api.md) — scripting, automation, wiring into other tools
+- [MCP access](docs/mcp.md) — let an AI client read traffic, mock responses, shape the network
+- [Development and internals](docs/development.md) — repo layout, where app names and icons come from, design trade-offs, self-check scripts
 
 ## License
 
