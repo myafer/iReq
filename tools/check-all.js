@@ -35,6 +35,8 @@ const SUITES = [
   ['规则工作区', 'check-rule-workspace.js'],
   // 自己造 TF* 目录做新建/改名/复制粘贴，结束时删干净
   ['文件树编辑', 'check-tree-fs.js'],
+  // 自带上游 + 临时令牌，跑完把 MCP 关掉、令牌撤销
+  ['MCP 接入', 'check-mcp.js'],
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
   ['控制坞', 'check-dock.js'],

@@ -32,6 +32,7 @@
 | 融合标题栏（macOS） | 隐藏系统标题栏，红黄绿按钮浮在应用顶栏内，顶栏同时承担窗口拖拽；Windows / Linux 保留系统标题栏 |
 | 精简交互 | 顶栏常驻只有「抓包 / 规则 / 清空 / ⋯ 更多」；低频工具收进「⋯ 更多」，动作跟着选中请求走（右键 / 网络 ▾），⌘K 既能搜请求也能直接执行命令 |
 | VSCode 式规则工作区 | 活动栏 + 资源管理器 + 多标签编辑区 + 面包屑 + 状态栏；点规则在右侧开标签而不是弹窗，多条规则可同时编辑，未保存内容切标签不丢，⌘S / ⌘W / ⌘1..9 齐备 |
+| MCP 接入（AI 客户端） | iReq 可直接当 **MCP 服务**：AI 客户端读流量、按流量生成 Mock、改弱网都能做。**默认关闭 + 令牌认证**（只存 sha256 哈希、只显示一次、可撤销、分只读 / 读写），另有 Origin 校验、限流与逐条审计；HTTP 直连或 `ireq mcp` stdio 桥都行 |
 
 ## 快速开始
 
@@ -399,11 +400,17 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthr
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough
+                                  network-sim / passthrough / rules-changed
                                   （flow = 请求发起时的进行中占位记录；flow-update = 响应完成就地补完，
                                    以及本机进程名异步回填；clear = 列表与侧栏同步清空；
                                    tls-remove = 加入跳过解密 / 握手成功后撤掉已解决的诊断行；
                                    passthrough = 白名单变更，带最新规则与本次切断的连接数）
+GET    /api/mcp                   MCP 状态 + 工具清单 + 令牌列表（只给掩码）+ 最近审计
+PUT    /api/mcp                   { enabled } 开关（默认关）
+POST   /api/mcp/tokens            { name, scopes: 'read'|'readwrite' } 生成令牌（明文只返回这一次）
+DELETE /api/mcp/tokens/:id        撤销令牌（立即失效）
+DELETE /api/mcp/audit             清空调用审计
+POST   /mcp                       MCP 端点（JSON-RPC 2.0，需 Authorization: Bearer <令牌>）
 GET    /ca.pem                    根证书（控制台与代理端口都提供）
 GET    /ca.cer                    同一张根证书的 DER 版（iOS / Android 安装用）
 ```
@@ -416,6 +423,78 @@ curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json'
   "headers": {"content-type":"application/json"}, "body": "{\"code\":500}"
 }'
 ```
+
+## MCP 接入（给 AI 客户端用）
+
+iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户端能读抓到的流量、按流量生成 Mock、改弱网参数，
+不用你手动点界面。**默认关闭，而且开了也必须带令牌**——本地端口不设防的话，任何本机进程（包括网页里的脚本）
+都能翻你的抓包内容。
+
+**第一步：开开关、拿令牌**
+
+控制台 →「设置 › MCP 接入」→ 打开「允许 AI 客户端接入」→ 填个名字（如「我的 AI 助手」）→ 选权限 → 生成令牌。
+令牌形如 `ireq_mcp_xxxxxxxx`，**只显示一次**，落盘只存 sha256 哈希，撤销后立即失效。
+
+**第二步：二选一接进去**
+
+支持 Streamable HTTP 的客户端直接配（地址就在面板里）：
+
+```json
+{
+  "mcpServers": {
+    "ireq": {
+      "type": "http",
+      "url": "http://127.0.0.1:9091/mcp",
+      "headers": { "Authorization": "Bearer ireq_mcp_xxxxxxxx" }
+    }
+  }
+}
+```
+
+只支持 stdio 的客户端用自带桥（它把 stdio 上的 JSON-RPC 原样转发到上面的端点，令牌照样要带）：
+
+```json
+{
+  "mcpServers": {
+    "ireq": { "command": "ireq", "args": ["mcp", "--url", "http://127.0.0.1:9091/mcp", "--token", "ireq_mcp_xxxxxxxx"] }
+  }
+}
+```
+
+令牌也可以放环境变量 `IREQ_MCP_TOKEN`，省得写在配置里。
+
+**权限分两档**
+
+| 令牌 | 能做什么 |
+| --- | --- |
+| 只读 `read` | 看状态、查流量、读详情、列规则、读配置 |
+| 读写 `readwrite` | 以上全部 + 建 / 改 / 删规则、由流量生成 Mock、重放、清空列表、改弱网、改跳过解密白名单 |
+
+只读令牌连 `tools/list` 都看不到写工具，调用会被 JSON-RPC 拒（`-32003`）。
+
+**工具清单**
+
+| 工具 | 作用 |
+| --- | --- |
+| `ireq_status` | 代理 / 控制台端口、局域网地址、流量与规则数量、证书信任、安全模式 |
+| `list_flows` / `get_flow` | 按关键词、方法、状态码、域名、应用筛流量；按 id 读完整请求响应与正文 |
+| `list_rules` / `get_rule` | 列规则（可按文件夹）、按 id 或路径读单条规则含响应体 |
+| `get_settings` | 抓包开关、解密端口、白名单、UA 别名、弱网参数 |
+| `create_rule` / `update_rule` / `delete_rule` | 增删改 Mock 规则（匹配方式 contains / wildcard / regex） |
+| `mock_flow` | 拿一条真实请求当模板直接生成 Mock（等于界面里的「Mock 此请求」） |
+| `replay_flow` | 改 URL / 方法 / 头 / 体重放，结果作为新流量入库 |
+| `set_network_sim` | 开弱网、断网、超时，按应用 / 域名 / IP 加规则 |
+| `set_passthrough` | 管理「跳过解密的域名」 |
+| `clear_flows` | 清空内存里的流量列表 |
+
+**安全上做了这些**
+
+- 令牌明文只出现一次；`config.json`、`/api/config`、`/api/mcp` 都拿不到哈希以外的凭据
+- 校验用常量时间比较；令牌无效 / 已撤销 / 过期一律同一个 401，不给出区分线索
+- 每个令牌 60 秒最多 240 次调用，超了 429
+- 带 `Origin` 且不是本机地址的请求直接 403（防 DNS rebinding 借浏览器打本地端口）
+- 每次调用（含失败的）都进审计，面板里能看到时间、令牌、工具名、耗时
+- 关闭 MCP 后 `/mcp` 立刻 403，所有令牌一起失效
 
 ## 开发自检
 
@@ -462,6 +541,8 @@ node tools/check-passthrough-manager.js # 跳过解密管理列表：归一化 /
 node tools/check-network-sim.js  # HTTP/CONNECT 断网 / 弱网 / 超时、规则匹配、面板、侧栏模式切换、SSE、英文模式（33 项）
 node tools/check-net-live.js     # 一键断网/弱网真生效 + 规则变更切断存量隧道 + 不误伤 + 状态条（23 项）
 node tools/check-simple-ui.js    # 顶栏更多 / 筛选更多 / 连接向导 / 快速 Mock / ⌘K 命令面板 / 就近菜单（26 项）
+node tools/check-tree-fs.js     # 文件树当文件管理器：行内新建 / 双击改名 / 复制粘贴 / 绝对路径 / reveal（28 项）
+node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协议握手 / 14 个工具 / scope / 撤销 / Origin / stdio 桥（73 项）
 ```
 
 `check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；

@@ -805,6 +805,70 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <pre class="code" id="stInfo">—</pre>
             </details>
           </details>
+
+          <!-- MCP 接入：给 AI 客户端用的带令牌认证的接口 -->
+          <details class="lp-details st-mcp" id="stMcp">
+            <summary>MCP 接入 <span class="lp-badge" id="mcpBadge">未开启</span></summary>
+            <div class="mcp-panel">
+              <div class="mcp-head">
+                <label class="switch" title="默认关闭；开启后仍然必须带令牌才能调用">
+                  <input type="checkbox" id="mcpEnabled" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                  <span class="switch-label">允许 AI 客户端接入</span>
+                </label>
+                <span class="hint">关闭后 /mcp 直接拒绝，现有令牌一并失效</span>
+              </div>
+              <p class="hint">
+                iReq 以 MCP（Model Context Protocol）服务的形式暴露抓包 / Mock / 弱网能力：AI 客户端可以读流量、建规则、改弱网。所有请求都要带访问令牌，令牌只在这里生成、只显示一次，落盘只存哈希。
+              </p>
+
+              <div class="addr-card">
+                <div class="addr-card-top"><h3>连接地址</h3><span class="lp-badge" id="mcpTransport">Streamable HTTP</span></div>
+                <div class="addr-card-row">
+                  <code id="mcpEndpoint" data-no-i18n>—</code>
+                  <button type="button" class="btn ghost" id="mcpCopyEndpoint">复制地址</button>
+                </div>
+                <div class="addr-card-row">
+                  <code id="mcpStdioCmd" data-no-i18n>—</code>
+                  <button type="button" class="btn ghost" id="mcpCopyStdio">复制命令</button>
+                </div>
+                <p class="hint">支持 HTTP 的客户端直接连上面的地址；只支持 stdio 的客户端用下面的命令桥接（令牌用 --token 传，或放进环境变量 IREQ_MCP_TOKEN）。</p>
+              </div>
+
+              <div class="addr-card">
+                <div class="addr-card-top"><h3>访问令牌</h3><span class="lp-badge" id="mcpTokenCount">0 个令牌</span></div>
+                <div class="addr-card-row mcp-new">
+                  <input id="mcpTokenName" class="input" placeholder="令牌名称：如 我的 AI 助手" maxlength="40" />
+                  <select id="mcpTokenScope" class="input">
+                    <option value="readwrite">读写：可改规则 / 弱网</option>
+                    <option value="read">只读：只能看流量与规则</option>
+                  </select>
+                  <button type="button" class="btn primary" id="mcpNewToken">生成令牌</button>
+                </div>
+                <div class="mcp-secret" id="mcpSecret" hidden>
+                  <div class="mcp-secret-head">令牌只显示这一次，关掉就找不回来 —— 请立刻复制保存</div>
+                  <div class="addr-card-row">
+                    <code id="mcpSecretValue" data-no-i18n>—</code>
+                    <button type="button" class="btn ghost" id="mcpCopySecret">复制令牌</button>
+                    <button type="button" class="btn ghost" id="mcpCopySnippet">复制客户端配置</button>
+                  </div>
+                  <pre class="code mcp-snippet" id="mcpSnippet" data-no-i18n></pre>
+                </div>
+                <div class="mcp-tokens" id="mcpTokens"></div>
+                <p class="hint">令牌只存 sha256 哈希；撤销后立即失效，丢了就重新生成。</p>
+              </div>
+
+              <div class="addr-card">
+                <div class="addr-card-top"><h3>最近调用</h3><button type="button" class="btn ghost" id="mcpClearAudit">清空</button></div>
+                <div class="mcp-audit" id="mcpAudit"></div>
+              </div>
+
+              <details class="lp-details mcp-tools-details">
+                <summary>可用工具 <span class="hint" id="mcpToolCount">—</span></summary>
+                <div class="mcp-tools" id="mcpTools"></div>
+              </details>
+            </div>
+          </details>
         </div>
         <div class="modal-foot">
           <span class="hint">改动自动保存</span>

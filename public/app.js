@@ -29,6 +29,9 @@ const S = {
   /* 文件树剪贴板：{ mode:'copy'|'cut', path }，粘贴时按 mode 走复制或移动 */
   rulesClip: null,
   ruleFromTree: false, /* 编辑器是否从规则工作区打开（关闭时回到工作区） */
+  /* MCP 接入面板：/api/mcp 的视图（含令牌列表与最近审计，绝不含凭据） */
+  mcp: null,
+  mcpSnippet: '',
   /* VSCode 式多标签编辑区：{ key, id, name, dir, data, pane, dirty, fromWorkspace } */
   ruleTabs: [],
   activeRuleTab: null,
@@ -4517,6 +4520,195 @@ function flushSettingsSave() {
   return saveSettings({ silent: true, close: false });
 }
 
+/* ---------------------------------------------------------------- MCP 接入 */
+
+/** 拉服务端 MCP 状态：开关 / 端点 / 工具 / 令牌 / 审计（不含任何凭据） */
+async function loadMcp() {
+  try {
+    S.mcp = await api('/api/mcp');
+  } catch (err) {
+    S.mcp = { enabled: false, tokens: [], tools: [], audit: [], error: err.message };
+  }
+  renderMcp();
+}
+
+function mcpEndpoint() {
+  if (S.mcp && S.mcp.endpoint) return S.mcp.endpoint;
+  const port = (S.status && S.status.uiPort) || 9091;
+  return `http://127.0.0.1:${port}/mcp`;
+}
+
+function renderMcp() {
+  const badge = $('#mcpBadge');
+  if (!badge) return;
+  const m = S.mcp || {};
+  const tokens = m.tokens || [];
+  badge.textContent = m.enabled ? `已开启 · ${tokens.length} 个令牌` : '未开启';
+  badge.className = 'lp-badge ' + (m.enabled ? 'on' : '');
+  $('#mcpEnabled').checked = m.enabled === true;
+  $('#mcpEndpoint').textContent = mcpEndpoint();
+  $('#mcpStdioCmd').textContent = `ireq mcp --url ${mcpEndpoint()} --token <TOKEN>`;
+  $('#mcpTransport').textContent = m.transport === 'streamable-http' ? 'Streamable HTTP' : m.transport || '';
+  $('#mcpTokenCount').textContent = `${tokens.length} 个令牌`;
+  $('#mcpTokenCount').className = 'lp-badge ' + (tokens.length ? 'on' : '');
+  renderMcpTokens(tokens);
+  renderMcpAudit(m.audit || []);
+  renderMcpTools(m.tools || []);
+}
+
+function renderMcpTokens(tokens) {
+  const box = $('#mcpTokens');
+  if (!box) return;
+  if (!tokens.length) {
+    box.innerHTML = '<div class="mcp-empty">还没有令牌。生成一个之后，AI 客户端才能调用</div>';
+    return;
+  }
+  box.innerHTML = tokens
+    .map((t) => {
+      const scope = t.scopes.includes('write') ? '读写' : '只读';
+      const used = t.lastUsedAt ? timeAgo(t.lastUsedAt) : '从未使用';
+      return `<div class="mcp-token-row" data-id="${esc(t.id)}">
+        <span class="mcp-token-name">${esc(t.name)}</span>
+        <code class="mcp-token-key" data-no-i18n>${esc(t.masked)}</code>
+        <span class="lp-badge ${t.scopes.includes('write') ? 'on' : ''}">${scope}</span>
+        <span class="mcp-token-meta">${used} · 调用 ${t.calls || 0} 次</span>
+        <button type="button" class="btn ghost mcp-revoke" data-revoke="${esc(t.id)}" title="让这个令牌立刻失效">撤销</button>
+      </div>`;
+    })
+    .join('');
+}
+
+function renderMcpAudit(rows) {
+  const box = $('#mcpAudit');
+  if (!box) return;
+  if (!rows.length) {
+    box.innerHTML = '<div class="mcp-empty">还没有调用记录。AI 客户端第一次调工具后会出现在这里</div>';
+    return;
+  }
+  box.innerHTML = rows
+    .map(
+      (r) => `<div class="mcp-audit-row ${r.ok ? '' : 'bad'}">
+        <span class="mcp-audit-time">${esc(timeClock(r.at))}</span>
+        <span class="mcp-audit-tool">${esc(r.tool || r.method || '—')}</span>
+        <span class="mcp-audit-token">${esc(r.token || '（无效令牌）')}</span>
+        <span class="mcp-audit-ms">${r.ok ? r.ms + 'ms' : '失败'}</span>
+      </div>`
+    )
+    .join('');
+}
+
+function renderMcpTools(tools) {
+  const box = $('#mcpTools');
+  if (!box) return;
+  const count = $('#mcpToolCount');
+  if (count) count.textContent = `${tools.length} 个`;
+  box.innerHTML = tools
+    .map(
+      (t) => `<div class="mcp-tool-row">
+        <code data-no-i18n>${esc(t.name)}</code>
+        <span class="mcp-tool-title">${esc(t.title || '')}</span>
+        <span class="lp-badge ${t.scope === 'write' ? 'on' : ''}">${t.scope === 'write' ? '读写' : '只读'}</span>
+      </div>`
+    )
+    .join('');
+}
+
+function timeClock(ts) {
+  const d = new Date(ts || Date.now());
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function timeAgo(ts) {
+  const diff = Math.max(0, Date.now() - Number(ts || 0));
+  if (diff < 60e3) return '刚刚';
+  if (diff < 3600e3) return `${Math.floor(diff / 60e3)} 分钟前`;
+  if (diff < 86400e3) return `${Math.floor(diff / 3600e3)} 小时前`;
+  return `${Math.floor(diff / 86400e3)} 天前`;
+}
+
+async function createMcpToken() {
+  const name = ($('#mcpTokenName').value || '').trim();
+  const scopes = $('#mcpTokenScope').value === 'read' ? 'read' : 'readwrite';
+  try {
+    const out = await api('/api/mcp/tokens', { method: 'POST', body: { name, scopes } });
+    S.mcp = out;
+    S.mcpSnippet = JSON.stringify(out.snippet ? out.snippet.http : {}, null, 2);
+    $('#mcpTokenName').value = '';
+    renderMcp();
+    /* 明文只在这个响应里出现一次，界面上必须立刻展示并提醒复制 */
+    $('#mcpSecret').hidden = false;
+    $('#mcpSecretValue').textContent = out.token || '—';
+    $('#mcpSnippet').textContent = S.mcpSnippet;
+    toast('令牌已生成，只显示这一次');
+  } catch (err) {
+    toast('生成失败：' + err.message);
+  }
+}
+
+async function revokeMcpToken(id) {
+  if (!id) return;
+  try {
+    const out = await api('/api/mcp/tokens/' + encodeURIComponent(id), { method: 'DELETE' });
+    S.mcp = out;
+    renderMcp();
+    toast('令牌已撤销');
+  } catch (err) {
+    toast('撤销失败：' + err.message);
+  }
+}
+
+function bindMcp() {
+  const on = (sel, ev, fn) => {
+    const el = $(sel);
+    if (el) el.addEventListener(ev, fn);
+  };
+  on('#mcpEnabled', 'change', async (e) => {
+    try {
+      S.mcp = await api('/api/mcp', { method: 'PUT', body: { enabled: e.target.checked } });
+      renderMcp();
+      toast(e.target.checked ? 'MCP 已开启' : 'MCP 已关闭');
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      toast('切换失败：' + err.message);
+    }
+  });
+  on('#mcpNewToken', 'click', createMcpToken);
+  on('#mcpTokenName', 'keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      createMcpToken();
+    }
+  });
+  on('#mcpCopyEndpoint', 'click', () => copyText(mcpEndpoint(), '已复制 MCP 地址'));
+  on('#mcpCopyStdio', 'click', () =>
+    copyText(`ireq mcp --url ${mcpEndpoint()} --token <TOKEN>`, '已复制 stdio 启动命令')
+  );
+  on('#mcpCopySecret', 'click', () => {
+    const v = $('#mcpSecretValue').textContent;
+    if (v && v !== '—') copyText(v, '已复制令牌（只此一次）');
+  });
+  on('#mcpCopySnippet', 'click', () => {
+    if (S.mcpSnippet) copyText(S.mcpSnippet, '已复制客户端配置');
+  });
+  on('#mcpClearAudit', 'click', async () => {
+    try {
+      await api('/api/mcp/audit', { method: 'DELETE' });
+      await loadMcp();
+      toast('审计记录已清空');
+    } catch (err) {
+      toast('清空失败：' + err.message);
+    }
+  });
+  const list = $('#mcpTokens');
+  if (list) {
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-revoke]');
+      if (btn) revokeMcpToken(btn.getAttribute('data-revoke'));
+    });
+  }
+}
+
 async function openSettings() {
   // 打开时用服务端值覆盖输入框；直接赋值不触发 input，不会误判成用户改动
   clearTimeout(settingsSaveTimer);
@@ -4540,6 +4732,7 @@ async function openSettings() {
     ? `lsof 快照 ${ps.refreshes || 0} 次 · 解析到 ${ps.resolved || 0} 个连接 · 未命中 ${ps.missed || 0}`
     : '当前系统不提供本机进程关联（仅 macOS 支持），远程设备请用上方 UA 别名标注。';
   loadLocalProxy();
+  loadMcp();
   $('#stMax').value = st.store ? st.store.maxFlows : 2000;
   $('#stH2').checked = st.h2Enabled !== false;
   const infoAddr = currentAddr();
@@ -5285,6 +5478,7 @@ function bind() {
 
   bindSimpleUI();
   bindRuleWorkspace();
+  bindMcp();
 
   // 实时流
   const es = new EventSource('/api/events');
@@ -5406,6 +5600,10 @@ function bind() {
         syncNetBadge();
         renderSide();
       }
+    } else if (msg.type === 'rules-changed') {
+      // 外部改动（AI 客户端走 MCP、或手改了 rules 目录）：文件树与列表同步一次。
+      // 不动编辑器里的草稿，避免把用户正在写的内容冲掉。
+      if (S.rulesTreeData) loadRules().catch(() => {});
     } else if (msg.type === 'clear') {
       // 别的窗口点了清空：列表和侧栏同步消失，不走 80ms 定时器
       clearFlowsUi();

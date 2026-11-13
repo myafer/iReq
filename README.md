@@ -32,6 +32,7 @@ A lightweight, cross-platform HTTP(S) **capture / Mock / replay** tool. One `npm
 | Merged title bar (macOS) | The native title bar is hidden: the red/yellow/green buttons sit inside the app top bar, which also acts as the window drag handle. Windows and Linux keep the system title bar |
 | Streamlined interaction | Only Capture / Rules / Clear / ⋯ More stay in the top bar; low-frequency tools live in "⋯ More", actions appear next to the selected request (right-click / Network ▾), and ⌘K finds both requests and commands |
 | VSCode-style rule workspace | Activity bar + explorer + multi-tab editor + breadcrumb + status bar; clicking a rule opens a tab instead of a modal, several rules can stay open, unsaved edits survive tab switches, with ⌘S / ⌘W / ⌘1..9 |
+| MCP access (AI clients) | iReq doubles as an **MCP server**: an AI client can read traffic, mock from a real response, and tune network simulation. **Off by default, token-authenticated** (sha256 hashes only, shown once, revocable, read vs read+write), plus Origin checks, rate limiting and a per-call audit. Connect over HTTP or via the `ireq mcp` stdio bridge |
 
 ## Quick start
 
@@ -393,11 +394,17 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthr
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough
+                                  network-sim / passthrough / rules-changed
                                   (flow = in-flight placeholder emitted when the request starts; flow-update = response
                                    completion in place, plus async local process name backfill; clear = list + sidebar reset;
                                    tls-remove = resolved handshake failures after allowlisting / a successful handshake;
                                    passthrough = allowlist change, with rules and the number of dropped connections)
+GET    /api/mcp                   MCP state + tool list + tokens (masked) + recent audit
+PUT    /api/mcp                   { enabled } toggle (off by default)
+POST   /api/mcp/tokens            { name, scopes: 'read'|'readwrite' } create a token (plaintext returned once)
+DELETE /api/mcp/tokens/:id        revoke a token (effective immediately)
+DELETE /api/mcp/audit             clear the call audit
+POST   /mcp                       MCP endpoint (JSON-RPC 2.0, requires Authorization: Bearer <token>)
 GET    /ca.pem                    Root CA (served by both the console and the proxy port)
 GET    /ca.cer                    DER form of the same root CA (for iOS / Android installs)
 ```
@@ -410,6 +417,80 @@ curl -X POST http://127.0.0.1:9091/api/rules -H 'content-type: application/json'
   "headers": {"content-type":"application/json"}, "body": "{\"code\":500}"
 }'
 ```
+
+## MCP access (for AI clients)
+
+iReq can act as an **MCP (Model Context Protocol) server**: an AI client can read captured traffic, turn a real
+response into a mock, and adjust network simulation without you clicking through the UI. **It is off by default, and
+even when on it requires a token** — an unauthenticated local port would let any local process (including scripts in a
+web page) read your captured traffic.
+
+**Step 1: enable it and create a token**
+
+Console → "Settings › MCP access" → turn on "Allow AI clients" → name the token → pick a scope → create.
+The token looks like `ireq_mcp_xxxxxxxx`, is **shown only once**, and only its sha256 hash is stored; revoking kills it
+immediately.
+
+**Step 2: connect the client (either way)**
+
+Clients that support Streamable HTTP point straight at the endpoint shown in the panel:
+
+```json
+{
+  "mcpServers": {
+    "ireq": {
+      "type": "http",
+      "url": "http://127.0.0.1:9091/mcp",
+      "headers": { "Authorization": "Bearer ireq_mcp_xxxxxxxx" }
+    }
+  }
+}
+```
+
+stdio-only clients use the bundled bridge (it forwards JSON-RPC verbatim and still authenticates with the token):
+
+```json
+{
+  "mcpServers": {
+    "ireq": { "command": "ireq", "args": ["mcp", "--url", "http://127.0.0.1:9091/mcp", "--token", "ireq_mcp_xxxxxxxx"] }
+  }
+}
+```
+
+You can also put the token in `IREQ_MCP_TOKEN` to keep it out of the config file.
+
+**Two scopes**
+
+| Token | What it can do |
+| --- | --- |
+| `read` | State, traffic list, flow detail, rule list, settings |
+| `readwrite` | All of the above plus create / update / delete rules, mock from a flow, replay, clear flows, network simulation, passthrough allowlist |
+
+A read-only token does not even see write tools in `tools/list`, and calls are rejected by JSON-RPC (`-32003`).
+
+**Tools**
+
+| Tool | Purpose |
+| --- | --- |
+| `ireq_status` | Proxy / console ports, LAN addresses, flow and rule counts, CA trust, safe mode |
+| `list_flows` / `get_flow` | Filter traffic by keyword, method, status, host, app; read one flow with bodies |
+| `list_rules` / `get_rule` | List rules (optionally per folder) and read a single rule with its body |
+| `get_settings` | Capture, decryption ports, allowlist, UA aliases, network-sim parameters |
+| `create_rule` / `update_rule` / `delete_rule` | Manage mock rules (contains / wildcard / regex matching) |
+| `mock_flow` | Turn a captured request into a mock rule — the "Mock this request" action, scripted |
+| `replay_flow` | Replay with a different URL / method / headers / body; the result lands as a new flow |
+| `set_network_sim` | Weak network, offline, timeout, with per-app / host / IP rules |
+| `set_passthrough` | Manage the "skip decryption" allowlist |
+| `clear_flows` | Clear the in-memory flow list |
+
+**Security notes**
+
+- Plaintext exists only in the create response; `config.json`, `/api/config` and `/api/mcp` never expose hashes or salts
+- Constant-time comparison; invalid, revoked and expired tokens all return the same 401
+- 240 calls per token per minute, then 429
+- Requests carrying a non-local `Origin` are rejected with 403 (DNS-rebinding protection)
+- Every call, including failures, is audited with time, token, tool and duration
+- Turning MCP off makes `/mcp` return 403 immediately and invalidates all tokens
 
 ## Development self-checks
 
@@ -456,6 +537,8 @@ node tools/check-passthrough-manager.js # allowlist manager: normalization / rea
 node tools/check-network-sim.js  # offline / slow / timeout on HTTP + CONNECT, rule matching, panel, sidebar mode switch, SSE, EN mode (33 items)
 node tools/check-net-live.js     # one-click offline/slow really works + rule change drops live tunnels + no false positives + status strip (23 items)
 node tools/check-simple-ui.js    # top-bar More / filter More / connection guide / Quick Mock / ⌘K palette / context menus (26 items)
+node tools/check-tree-fs.js     # file tree as a file manager: inline create / double-click rename / copy-paste / absolute path / reveal (28 items)
+node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake / 14 tools / scopes / revoke / Origin / stdio bridge (73 items)
 ```
 
 `check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;
