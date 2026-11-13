@@ -18,12 +18,11 @@ const {
 } = require('./local-address');
 
 /**
- * 落盘封顶：清空产生的 .cleared-* 归档、以及每天一个的 flows-*.jsonl，
- * 都不会自己消失。不清的话用一两周就是几百 MB（实测 31 个文件 682MB）。
- * 归档留最近几个（够「刚清错了想捞回来」），日文件留最近几份（只读今天那份）。
+ * 落盘封顶：每天一个的 flows-*.jsonl 不会自己消失（实测两周攒到几百 MB），
+ * 保留最近几份即可，启动时只读今天那份。
+ * 清空产生的 .cleared-* 归档不在这里处理 —— 它们已经是界面上的「历史记录」，
+ * 删不删由用户决定，自动删就等于把用户看得到的东西悄悄抹掉。
  */
-const ARCHIVE_KEEP = 3;
-const ARCHIVE_MAX_BYTES = 50 * 1024 * 1024;
 const DAILY_KEEP = 7;
 /** 单日流量能到几百 MB，7 份叠起来就上 GB，份数之外再加一道总量线 */
 const DAILY_MAX_BYTES = 200 * 1024 * 1024;
@@ -172,53 +171,19 @@ class FlowStore extends EventEmitter {
    * 协议（http/https/ws/sse/http1/http2）、内容类型（json/xml/text/html/js/image/media/binary）、
    * 状态码（1xx..5xx）、error / ok / json（历史值，保持兼容）。
    */
-  filter({
-    query = '',
-    method = '',
-    status = '',
-    onlyMocked = false,
-    host = '',
-    ip = '',
-    app = '',
-    route = '',
-    since = 0,
-    limit = 500,
-  } = {}) {
-    const q = String(query || '').toLowerCase();
-    const h = String(host || '').toLowerCase();
-    const ipq = String(ip || '').trim();
-    // 应用支持多选：数组或逗号分隔字符串（侧栏勾选多个应用）
-    const appArr = Array.isArray(app)
-      ? app.map((s) => String(s)).filter(Boolean)
-      : String(app || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
+  filter({ limit = 500, before = '', ...opts } = {}) {
+    const ok = prepareFilter(opts);
     const out = [];
-    const sinceMs = Number(since) || 0;
+    // 游标：从某条 id 之后（更早）继续取。实时列表「往下滑加载更多」用，
+    // 翻页时新流量还在往队头插，用下标分页会错位，所以按 id 定位。
+    let armed = !before;
     for (const f0 of this.flows) {
       const f = ensureDerived(f0);
-      // 时间窗：MCP 里「只看最近 N 秒」用，前端列表不传就是全量
-      if (sinceMs && Number(f.ts || 0) < sinceMs) continue;
-      if (onlyMocked && !f.mocked) continue;
-      if (method && f.method !== method.toUpperCase()) continue;
-      if (!matchStatus(f, status)) continue;
-      if (appArr.length && !appArr.includes(f.app)) continue;
-      if (h && String(f.host || '').toLowerCase() !== h) continue;
-      if (ipq) {
-        // 'local' 是侧栏「本机」那一组：回环 + 本机所有网卡 IP 都要命中。
-        // 老书签里存的是具体 IP，仍按精确匹配（顺手统一 ::ffff: / ::1 写法）。
-        if (ipq === LOCAL_KEY) {
-          if (!isLocalClientIp(f.clientIp)) continue;
-        } else if (normalizeIp(f.clientIp) !== normalizeIp(ipq)) continue;
+      if (!armed) {
+        if (f.id === before) armed = true;
+        continue;
       }
-      if (route && f.route !== route) continue;
-      if (q) {
-        const hay = `${f.method} ${f.url} ${f.status} ${f.app || ''} ${f.clientIp || ''} ${
-          f.deviceLabel || ''
-        } ${(f.process && `${f.process.name} ${f.process.command} ${f.process.pid}`) || ''}`.toLowerCase();
-        if (!hay.includes(q)) continue;
-      }
+      if (!ok(f)) continue;
       out.push(f);
       if (out.length >= limit) break;
     }
@@ -322,9 +287,10 @@ class FlowStore extends EventEmitter {
     };
   }
 
-  /**
-   * 磁盘封顶：归档按「数量 + 总量」双封顶，日文件按份数封顶，超出的从最旧的删起。
-   * 今天的落盘文件永远不动（正被追加写），删失败也不影响主流程，下次启动再试。
+/**
+   * 磁盘封顶：日文件按「份数 + 总量」双封顶，超出的从最旧的删起。
+   * 今天的落盘文件永远不动（正被追加写）；.cleared-* 归档是用户可见的历史记录，
+   * 不在这里处理，删不删由 FlowHistory 那边按用户的显式操作来。
    */
   _pruneDisk() {
     const out = { removed: 0, freed: 0 };
@@ -336,35 +302,20 @@ class FlowStore extends EventEmitter {
       return out;
     }
     const todayName = path.basename(this._todayFile());
-    const archives = [];
     const dailies = [];
     for (const name of names) {
       if (name === todayName) continue;
+      if (!/^flows-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)) continue;
       const abs = path.join(this.dir, name);
-      let st;
       try {
-        st = fs.statSync(abs);
+        const st = fs.statSync(abs);
+        if (st.isFile()) dailies.push({ abs, name, size: st.size });
       } catch (_) {
         continue;
-      }
-      if (!st.isFile()) continue;
-      const arch = /^flows-\d{4}-\d{2}-\d{2}\.jsonl\.cleared-(\d+)$/.exec(name);
-      if (arch) {
-        // 用文件名里的时间戳排序：rename 会保留原文件的 mtime，按它排会错序
-        archives.push({ abs, size: st.size, ts: Number(arch[1]) });
-      } else if (/^flows-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)) {
-        dailies.push({ abs, name, size: st.size });
       }
     }
 
     const doomed = [];
-    // 新的在前：前 ARCHIVE_KEEP 个保留，累计超过上限的（即使在前几个里）也删
-    archives.sort((a, b) => b.ts - a.ts);
-    let bytes = 0;
-    archives.forEach((a, i) => {
-      bytes += a.size;
-      if (i >= ARCHIVE_KEEP || bytes > ARCHIVE_MAX_BYTES) doomed.push(a);
-    });
     // 日文件名即日期，字典序等于时间序；新的在后
     dailies.sort((a, b) => (a.name < b.name ? -1 : 1));
     // 数量封顶
@@ -390,32 +341,108 @@ class FlowStore extends EventEmitter {
   }
 
   clear() {
+    const count = this.flows.length;
     this.flows = [];
     this.index.clear();
+    let archived = null;
     if (this.persist) {
       // 「清空」必须连落盘一起处理：只清内存的话，重启时 _loadRecent
       // 会把刚删掉的当日记录全部恢复回来，用户会以为清空按钮坏了。
-      // 这里不直接删文件，而是归档成 .cleared-<ts>（不会被 _todayFile 匹配），
-      // 既不会复活，又保留了事后翻查原始抓包的可能。归档本身由 _pruneDisk 封顶，
-      // 否则每点一次清空就多一份几百 MB 的拷贝。
+      // 归档成 .cleared-<ts>（不会被 _todayFile 匹配），同时成为界面上的一条
+      // 「历史记录」—— 可以改名、回看、删除，删不删由用户决定。
       try {
         const file = this._todayFile();
-        if (fs.existsSync(file)) {
+        if (fs.existsSync(file) && fs.statSync(file).size > 0) {
           // 同一毫秒内连续清空两次会重名，rename 会静默覆盖前一份归档
-          const stamp = Date.now() + (this._clearSeq = (this._clearSeq || 0) + 1);
-          fs.renameSync(file, `${file}.cleared-${stamp}`);
+          const ts = Date.now() + (this._clearSeq = (this._clearSeq || 0) + 1);
+          const dest = `${file}.cleared-${ts}`;
+          fs.renameSync(file, dest);
+          archived = {
+            id: String(ts),
+            file: path.basename(dest),
+            bytes: fs.statSync(dest).size,
+            count,
+            createdAt: ts,
+          };
         }
       } catch (_) {
         /* 归档失败不影响内存清空 */
       }
       this._pruneDisk();
     }
+    if (archived) this.emit('archived', archived);
     this.emit('clear');
+    return archived;
+  }
+
+  /** 今天正在写的落盘文件；内存取完后从这里接着往前翻 */
+  todayFile() {
+    return this._todayFile();
   }
 
   stats() {
     return { total: this.flows.length, maxFlows: this.maxFlows };
   }
+}
+
+/**
+ * 把筛选条件编译成判定函数。
+ * 条件解析（小写化、多选拆分）放在循环外，否则每行都要重算一遍；
+ * 历史记录从磁盘分页读时复用同一套语义，避免「内存里筛得出来、归档里筛不出来」。
+ * beforeTs 是「只看比这个时间更早的」，用于内存已取完后接着读今天的落盘文件。
+ */
+function prepareFilter({
+  query = '',
+  method = '',
+  status = '',
+  onlyMocked = false,
+  host = '',
+  ip = '',
+  app = '',
+  route = '',
+  since = 0,
+  beforeTs = 0,
+} = {}) {
+  const q = String(query || '').toLowerCase();
+  const h = String(host || '').toLowerCase();
+  const ipq = String(ip || '').trim();
+  const wantIp = ipq && ipq !== LOCAL_KEY ? normalizeIp(ipq) : '';
+  const isLocalWanted = ipq === LOCAL_KEY;
+  // 应用支持多选：数组或逗号分隔字符串（侧栏勾选多个应用）
+  const appArr = Array.isArray(app)
+    ? app.map((s) => String(s)).filter(Boolean)
+    : String(app || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+  const appSet = appArr.length ? new Set(appArr) : null;
+  const m = method ? method.toUpperCase() : '';
+  const sinceMs = Number(since) || 0;
+  const beforeMs = Number(beforeTs) || 0;
+
+  return (f) => {
+    // 时间窗：MCP 里「只看最近 N 秒」用，前端列表不传就是全量
+    if (sinceMs && Number(f.ts || 0) < sinceMs) return false;
+    if (beforeMs && Number(f.ts || 0) >= beforeMs) return false;
+    if (onlyMocked && !f.mocked) return false;
+    if (m && f.method !== m) return false;
+    if (!matchStatus(f, status)) return false;
+    if (appSet && !appSet.has(f.app)) return false;
+    if (h && String(f.host || '').toLowerCase() !== h) return false;
+    if (isLocalWanted) {
+      if (!isLocalClientIp(f.clientIp)) return false;
+    } else if (wantIp && normalizeIp(f.clientIp) !== wantIp) return false;
+    if (route && f.route !== route) return false;
+    if (q) {
+      const hay = `${f.method} ${f.url} ${f.status} ${f.app || ''} ${f.clientIp || ''} ${
+        f.deviceLabel || ''
+      } ${
+        (f.process && `${f.process.name} ${f.process.command} ${f.process.pid}`) || ''
+      }`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  };
 }
 
 /**
@@ -475,7 +502,9 @@ function matchStatus(f, status) {
     case '5xx':
       return st >= 500 && st < 600;
     default:
-      return true;
+      // 具体状态码（404 / 500）：按数值精确匹配。
+      // 以前这里无条件返回 true，MCP 传 status:'404' 等于没筛。
+      return /^\d{3}$/.test(status) ? st === Number(status) : true;
   }
 }
 
@@ -527,4 +556,4 @@ function summary(f) {
   };
 }
 
-module.exports = { FlowStore, summary, matchStatus };
+module.exports = { FlowStore, summary, matchStatus, prepareFilter, ensureDerived };

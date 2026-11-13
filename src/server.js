@@ -10,7 +10,8 @@ const os = require('os');
 const path = require('path');
 const { URL } = require('url');
 const { replay } = require('./replay');
-const { summary } = require('./store');
+const { summary, prepareFilter } = require('./store');
+const { FlowHistory, tailPage } = require('./history');
 const { parseAppAliases } = require('./derive');
 const { savePersistedConfig } = require('./user-config');
 const { normalize: normalizeNetworkSim } = require('./network-sim');
@@ -152,6 +153,13 @@ class ConsoleServer {
     this.server = null;
     /* MCP 授权：令牌只存哈希，界面里生成与撤销；默认关闭，开了也必须有令牌 */
     this.mcpAuth = new McpAuth({ config: this.config, dataDir: this.dataDir });
+    /* 历史记录（每次清空一条）：列表来自 index，回看按字节游标从文件尾部倒序读 */
+    this.history = this.dataDir
+      ? new FlowHistory({
+          dir: path.join(this.dataDir, 'flows'),
+          indexFile: path.join(this.dataDir, 'history.json'),
+        })
+      : null;
     this._ensurePassthroughMeta();
   }
 
@@ -280,6 +288,12 @@ class ConsoleServer {
       this._broadcast({ type: 'flow-update', flow: summary(flow) })
     );
     this.store.on('clear', () => this._broadcast({ type: 'clear' }));
+    // 清空会在磁盘上留下一份归档 —— 它就是界面上新出现的那条历史记录
+    this.store.on('archived', (info) => {
+      if (!this.history) return;
+      const item = this.history.add(info);
+      this._broadcast({ type: 'history-changed', item });
+    });
     // 握手失败是「连接层」事件，不是 HTTP flow，单独推给控制台的列表诊断行
     if (this.proxy && typeof this.proxy.on === 'function') {
       this.proxy.on('tls-failure', (failure) =>
@@ -390,6 +404,9 @@ class ConsoleServer {
     /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
     if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
 
+    /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ---------------- */
+    if (parts[1] === 'history') return this._apiHistory(req, res, parts, method, url);
+
     /** 前端批量问图标：本机 .app 直接给 URL，取不到的由前端用内置 / 默认图标 */
     if (parts[1] === 'app-icons' && method === 'GET') {
       const names = (url.searchParams.get('names') || '')
@@ -435,6 +452,10 @@ class ConsoleServer {
     }
 
     if (parts[1] === 'flows') {
+      // 分页列表：内存取完自动接着读今天的落盘文件，前端滚到底就无感续上
+      if (method === 'GET' && parts.length === 3 && parts[2] === 'page') {
+        return this._json(res, 200, this._flowsPage(url.searchParams));
+      }
       if (method === 'GET' && parts.length === 2) {
         return this._json(
           res,
@@ -774,6 +795,162 @@ class ConsoleServer {
     }
 
     return this._json(res, 404, { error: '未知接口: ' + pathname });
+  }
+
+  /* ---------------- 流量分页（往下滑无感加载） ----------------
+   * 内存只留 maxFlows 条（设置页可调），磁盘上今天的文件才是全部。
+   * 这里把两者接成一条逻辑流：先用 id 游标在内存里翻，翻完给一个 d: 游标，
+   * 接着从落盘文件尾部往前读。前端拿到的 cursor 是不透明字符串，不关心它是什么。
+   */
+  _pageFilters(sp) {
+    return {
+      query: sp.get('q') || '',
+      method: sp.get('method') || '',
+      status: sp.get('status') || '',
+      onlyMocked: sp.get('mocked') === '1',
+      host: sp.get('host') || '',
+      ip: sp.get('ip') || '',
+      app: sp.get('app') || '',
+      route: sp.get('route') || '',
+    };
+  }
+
+  _flowsPage(sp) {
+    const limit = Math.min(Math.max(Number(sp.get('limit')) || 200, 1), 500);
+    const cursor = sp.get('cursor') || '';
+    const filters = this._pageFilters(sp);
+    const memoryTotal = this.store.flows.length;
+
+    if (cursor.startsWith('d:')) {
+      const [, rawTs, rawBytes] = cursor.split(':');
+      const beforeTs = Number(rawTs) || 0;
+      const bytes = Number(rawBytes) || null;
+      try {
+        const res = tailPage(this.store.todayFile(), {
+          cursor: bytes,
+          limit,
+          filters: { ...filters, beforeTs },
+        });
+        return {
+          flows: res.flows,
+          nextCursor: res.hasMore ? `d:${beforeTs}:${res.nextCursor}` : '',
+          hasMore: res.hasMore,
+          total: memoryTotal,
+          fromDisk: true,
+        };
+      } catch (_) {
+        return { flows: [], nextCursor: '', hasMore: false, total: memoryTotal, fromDisk: true };
+      }
+    }
+
+    const list = this.store.list({ ...filters, before: cursor, limit });
+    if (list.length >= limit) {
+      return {
+        flows: list,
+        nextCursor: list[list.length - 1].id,
+        hasMore: true,
+        total: memoryTotal,
+      };
+    }
+    // 内存见底了：磁盘上还有更早的（今天的落盘文件），下一次请求接着往前读。
+    // 用内存里最旧一条的时间当分界线，磁盘那边只给比它更早的，避免和内存重复。
+    let oldest = 0;
+    for (const f of this.store.flows) {
+      const ts = Number(f.ts) || 0;
+      if (!oldest || (ts && ts < oldest)) oldest = ts;
+    }
+    const canDisk = this.store.persist && oldest > 0;
+    return {
+      flows: list,
+      nextCursor: canDisk ? `d:${oldest}:` : '',
+      hasMore: canDisk,
+      total: memoryTotal,
+    };
+  }
+
+  /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ----------------
+   *   GET    /api/history                  → 列表 + 总占用
+   *   PATCH  /api/history/:id              → { name } 改名
+   *   DELETE /api/history/:id              → 删掉这一条（连文件）
+   *   DELETE /api/history                  → 全删
+   *   GET    /api/history/:id/flows        → 分页回看（cursor 是字节游标）
+   */
+  async _apiHistory(req, res, parts, method, url) {
+    const h = this.history;
+    if (!h) return this._json(res, 400, { error: '未启用落盘，没有历史记录' });
+
+    if (parts[2] && parts[3] === 'flows' && parts[4] && method === 'GET') {
+      const out = h.getFlow(parts[2], parts[4]);
+      if (out.error) {
+        const gone = out.error === 'missing';
+        return this._json(res, gone ? 410 : 404, {
+          error: gone ? '文件已被删除' : '这条流量不在该记录里',
+        });
+      }
+      return this._json(res, 200, out.flow);
+    }
+
+    /* 历史里重放：归档不参与抓包，但要能拿那条记录真发一次 */
+    if (parts[2] && parts[3] === 'flows' && parts[4] && parts[5] === 'replay' && method === 'POST') {
+      const out = h.getFlow(parts[2], parts[4]);
+      if (out.error) {
+        const gone = out.error === 'missing';
+        return this._json(res, gone ? 410 : 404, {
+          error: gone ? '文件已被删除' : '这条流量不在该记录里',
+        });
+      }
+      const body = (await this._body(req)) || {};
+      const result = await replay({ store: this.store, flow: out.flow, overrides: body || {} });
+      return this._json(res, 200, result);
+    }
+
+    if (parts[2] && parts[3] === 'flows' && method === 'GET') {
+      const sp = url.searchParams;
+      const limit = Math.min(Math.max(Number(sp.get('limit')) || 200, 1), 500);
+      const cursor = sp.get('cursor');
+      const out = h.page(parts[2], {
+        cursor: cursor ? Number(cursor) : null,
+        limit,
+        filters: this._pageFilters(sp),
+      });
+      if (out.error) {
+        const gone = out.error === 'missing';
+        return this._json(res, gone ? 410 : 404, { error: gone ? '文件已被删除' : '记录不存在' });
+      }
+      return this._json(res, 200, {
+        flows: out.flows,
+        nextCursor: out.hasMore ? String(out.nextCursor) : '',
+        hasMore: out.hasMore,
+        total: out.item.count == null ? null : out.item.count,
+        item: out.item,
+      });
+    }
+
+    if (method === 'GET') {
+      return this._json(res, 200, { items: h.list(), stats: h.stats() });
+    }
+
+    if (method === 'DELETE' && parts.length === 2) {
+      const removed = h.clearAll();
+      this._broadcast({ type: 'history-changed' });
+      return this._json(res, 200, { ok: true, removed, items: [], stats: h.stats() });
+    }
+
+    if (parts[2] && method === 'PATCH') {
+      const body = (await this._body(req)) || {};
+      const item = h.rename(parts[2], body.name);
+      if (!item) return this._json(res, 404, { error: '记录不存在' });
+      this._broadcast({ type: 'history-changed', item });
+      return this._json(res, 200, { ok: true, item });
+    }
+
+    if (parts[2] && method === 'DELETE') {
+      const ok = h.remove(parts[2]);
+      this._broadcast({ type: 'history-changed' });
+      return this._json(res, ok ? 200 : 404, { ok, items: h.list(), stats: h.stats() });
+    }
+
+    return this._json(res, 405, { error: 'method not allowed' });
   }
 
   /**
