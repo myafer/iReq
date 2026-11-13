@@ -162,6 +162,12 @@
 
     <main class="layout">
       <section class="listpane">
+        <div class="hist-bar" id="histBar" hidden>
+          <span class="hist-dot" aria-hidden="true"></span>
+          <span class="hist-bar-title">正在查看历史 · <b id="histBarName"></b></span>
+          <span class="hist-bar-meta" id="histBarMeta"></span>
+          <button class="btn ghost" id="histBack">回到实时</button>
+        </div>
         <div class="listhead">
           <span class="c-method">方法</span>
           <span class="c-url">地址</span>

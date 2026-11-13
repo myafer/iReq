@@ -47,6 +47,17 @@ const S = {
   bodyView: {},
   facets: { hosts: [], apps: [], devices: [], routes: [] },
   bookmarks: [],
+  /* 列表分页：内存条数是可配的，磁盘上今天的文件才是全部。
+   * cursor 是不透明字符串（内存 id，或 d:<ts>:<字节偏移>），滚到底自动要下一页。 */
+  pageCursor: '',
+  pageHasMore: false,
+  pageLoading: false,
+  /* 历史记录：每次「清空」留一条，可改名 / 回看 / 删除。
+   * historyView 非空时，主列表看的是那条归档，不再接实时流。 */
+  history: [],
+  historyStats: { count: 0, bytes: 0 },
+  historyView: null,
+  historyRenaming: null,
   closedGroups: new Set(JSON.parse(localStorage.getItem('reqlite-side-closed') || '[]')),
   /* 接口结构树：与默认展开态相反的目录 key（顶层默认展开，深层默认收起） */
   routeToggled: new Set(JSON.parse(localStorage.getItem('reqlite-route-toggled') || '[]')),
@@ -359,8 +370,15 @@ function renderUpdate(u) {
   }
 }
 
-async function loadFlows() {
-  const params = new URLSearchParams({ limit: '800' });
+/* 一页取多少条：够填满一屏半，滚到底再要下一批，用户感觉不到在「翻页」 */
+const PAGE_SIZE = 200;
+/** 列表最多留住多少行：实时流会一直往队头插，不封顶 DOM 会越滚越卡 */
+const LIVE_MAX = 1000;
+/** 距离底部这么近就预取，等到真到底再加载会看到空白 */
+const PAGE_PREFETCH_PX = 500;
+
+function flowFilterParams() {
+  const params = new URLSearchParams();
   if (S.filter.q) params.set('q', S.filter.q);
   if (S.filter.status) params.set('status', S.filter.status);
   if (S.filter.mocked) params.set('mocked', '1');
@@ -369,13 +387,160 @@ async function loadFlows() {
   }
   // 应用是多选（侧栏勾选），逗号分隔传给服务端
   if (S.filter.app.length) params.set('app', S.filter.app.join(','));
-  const list = await api('/api/flows?' + params.toString());
-  S.flows = list;
+  return params;
+}
+
+async function loadFlows() {
+  if (S.historyView) return loadHistoryFlows(S.historyView);
+  const params = flowFilterParams();
+  params.set('limit', String(PAGE_SIZE));
+  try {
+    const data = await api('/api/flows/page?' + params.toString());
+    S.flows = data.flows || [];
+    S.pageCursor = data.nextCursor || '';
+    S.pageHasMore = !!data.hasMore;
+  } catch (_) {
+    S.flows = [];
+    S.pageCursor = '';
+    S.pageHasMore = false;
+  }
   renderList();
-  if (S.selectedId && !list.some((f) => f.id === S.selectedId)) {
+  if (S.selectedId && !S.flows.some((f) => f.id === S.selectedId)) {
     // 过滤后不在这批里，保留详情但不高亮
     $$('.row').forEach((r) => r.classList.remove('sel'));
   }
+}
+
+/** 打开一条历史：把主列表切到「回看」模式，实时流暂时不进列表 */
+async function openHistory(item) {
+  if (!item) return;
+  S.historyView = item;
+  S.selectedId = null;
+  S.selected = null;
+  S.flows = [];
+  S.pageCursor = '';
+  S.pageHasMore = false;
+  syncHistBar();
+  renderList();
+  await loadHistoryFlows(item);
+  // 侧栏的历史分组高亮跟着走
+  renderSide();
+}
+
+async function loadHistoryFlows(item) {
+  const params = flowFilterParams();
+  params.set('limit', String(PAGE_SIZE));
+  try {
+    const data = await api(`/api/history/${encodeURIComponent(item.id)}/flows?` + params);
+    S.flows = data.flows || [];
+    S.pageCursor = data.nextCursor || '';
+    S.pageHasMore = !!data.hasMore;
+    if (data.item) {
+      S.historyView = data.item;
+      // 条数是打开时才数出来的，顺手更新侧栏那一行
+      const row = S.history.find((x) => x.id === data.item.id);
+      if (row) row.count = data.item.count;
+    }
+  } catch (err) {
+    S.flows = [];
+    S.pageCursor = '';
+    S.pageHasMore = false;
+    toast(err.message || '历史记录读取失败');
+  }
+  syncHistBar();
+  renderList();
+}
+
+/** 回到实时视图 */
+function backToLive() {
+  if (!S.historyView) return;
+  S.historyView = null;
+  S.selectedId = null;
+  S.selected = null;
+  syncHistBar();
+  renderSide();
+  loadFlows();
+}
+
+function syncHistBar() {
+  const bar = $('#histBar');
+  if (!bar) return;
+  const item = S.historyView;
+  bar.hidden = !item;
+  if (!item) return;
+  const name = $('#histBarName');
+  if (name) name.textContent = item.name;
+  const meta = $('#histBarMeta');
+  if (meta) {
+    // 时间放 title：列表区不宽，挤在一行会把「条数 · 大小」截成省略号
+    const n = item.count == null ? S.flows.length : item.count;
+    meta.textContent = `${n} 条 · ${fmtSize(item.bytes)}`;
+    meta.title = new Date(item.createdAt || Date.now()).toLocaleString();
+  }
+}
+
+/** 把「加载更多」的尾巴画出来：无感加载靠它给一点点反馈，不打断阅读 */
+function syncListMore() {
+  const list = $('#list');
+  if (!list) return;
+  let el = list.querySelector('.list-more');
+  const empty = list.children.length === 0;
+  if (empty || (!S.pageHasMore && !S.pageLoading)) {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'list-more';
+    list.appendChild(el);
+  } else if (el !== list.lastElementChild) {
+    list.appendChild(el);
+  }
+  el.textContent = S.pageLoading
+    ? '载入中…'
+    : S.historyView
+      ? '向下滚动继续加载'
+      : '向下滚动加载更早的请求';
+}
+
+async function loadMoreFlows() {
+  if (S.pageLoading || !S.pageHasMore || !S.pageCursor) return;
+  S.pageLoading = true;
+  syncListMore();
+  try {
+    const params = flowFilterParams();
+    params.set('limit', String(PAGE_SIZE));
+    params.set('cursor', S.pageCursor);
+    const url = S.historyView
+      ? `/api/history/${encodeURIComponent(S.historyView.id)}/flows?` + params.toString()
+      : '/api/flows/page?' + params.toString();
+    const data = await api(url);
+    const more = data.flows || [];
+    const known = new Set(S.flows.map((f) => f.id));
+    const fresh = more.filter((f) => !known.has(f.id));
+    S.flows.push(...fresh);
+    S.pageCursor = data.nextCursor || '';
+    S.pageHasMore = !!data.hasMore;
+    if (fresh.length) appendRows(fresh);
+  } catch (_) {
+    S.pageHasMore = false;
+  } finally {
+    S.pageLoading = false;
+    syncListMore();
+    const list = $('#list');
+    if (list) $('#count').textContent = `${list.children.length - (list.querySelector('.list-more') ? 1 : 0)} 条`;
+  }
+}
+
+/** 追加到列表尾部（不能整表重绘：滚动位置和已加载的几百行经不起折腾） */
+function appendRows(flows) {
+  const list = $('#list');
+  if (!list) return;
+  const html = flows.map(rowHtml).join('');
+  const more = list.querySelector('.list-more');
+  if (more) more.insertAdjacentHTML('beforebegin', html);
+  else list.insertAdjacentHTML('beforeend', html);
+  syncListMore();
 }
 
 /* 列表渲染：结构性变化（筛选/搜索/清空）整表重绘；SSE 来的新记录/补丁只动对应行。
@@ -437,8 +602,15 @@ function applyFlowDelta() {
     const anchor = tlsRows.length ? tlsRows[tlsRows.length - 1] : null;
     if (anchor) anchor.insertAdjacentHTML('afterend', html);
     else list.insertAdjacentHTML('afterbegin', html);
-    const extra = list.children.length - 800;
-    for (let i = 0; i < extra; i++) list.lastElementChild.remove();
+    // 已加载的行数与 S.flows 对齐：实时流不能无限撑大 DOM，
+    // 超出的从尾部摘掉（那些属于已经翻过去的老分页，往上滚还在）
+    const rows = list.querySelectorAll('.row:not(.tls)').length;
+    let extra = rows - S.flows.length;
+    while (extra-- > 0) {
+      const tail = [...list.children].reverse().find((el) => !el.classList.contains('list-more'));
+      if (!tail || tail.classList.contains('tls')) break;
+      tail.remove();
+    }
   }
   for (const f of patches) {
     const row = list.querySelector(`.row[data-id="${f.id}"]`);
@@ -450,7 +622,7 @@ function applyFlowDelta() {
     if (row.classList.contains('sel')) next.classList.add('sel');
     row.replaceWith(next);
   }
-  $('#count').textContent = `${list.children.length} 条`;
+  $('#count').textContent = `${list.querySelectorAll('.row').length} 条`;
   $('#listEmpty').hidden = list.children.length > 0;
   // 顶部插入会把旧内容往下推：不在顶部时补偿高度，视觉上不跳
   if (prevTop > 0) list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
@@ -509,7 +681,8 @@ function matchStatusUi(f, status) {
     case '5xx':
       return st >= 500 && st < 600;
     default:
-      return true;
+      // 与服务端 matchStatus 保持一致：具体状态码精确匹配
+      return /^\d{3}$/.test(status) ? st === Number(status) : true;
   }
 }
 
@@ -532,23 +705,30 @@ function renderList() {
     const title = empty.querySelector('.empty-title');
     const hint = empty.querySelector('.empty-hint');
     if (title)
-      title.textContent = tlsOnly
-        ? '没有握手失败的域名'
-        : filtering
-        ? '没有匹配的请求'
-        : '还没有流量';
+      title.textContent = S.historyView
+        ? filtering
+          ? '这条历史里没有匹配的请求'
+          : '这条历史里没有流量'
+        : tlsOnly
+          ? '没有握手失败的域名'
+          : filtering
+            ? '没有匹配的请求'
+            : '还没有流量';
     if (hint) {
       const a = currentAddr();
-      hint.innerHTML = tlsOnly
-        ? '客户端不信任根证书、或端口跑的不是 HTTP 时，连不上的域名会实时出现在这里。'
-        : filtering
-        ? '换个条件，或点上方已选筛选的 × 取消。'
-        : `<b>抓本机</b>：右上「设置 › 本机抓包」一键接管系统代理（顶栏也有快捷入口）；<br>` +
-          `<b>抓手机 / 其它设备</b>：Wi-Fi 代理指向 <code id="emptyProxy">${esc(addrFull(a))}</code>（IP / 端口可在顶栏分别复制），然后刷新页面。`;
+      hint.innerHTML = S.historyView
+        ? '这条归档是空的。点上方「回到实时」继续抓包。'
+        : tlsOnly
+          ? '客户端不信任根证书、或端口跑的不是 HTTP 时，连不上的域名会实时出现在这里。'
+          : filtering
+            ? '换个条件，或点上方已选筛选的 × 取消。'
+            : `<b>抓本机</b>：右上「设置 › 本机抓包」一键接管系统代理（顶栏也有快捷入口）；<br>` +
+              `<b>抓手机 / 其它设备</b>：Wi-Fi 代理指向 <code id="emptyProxy">${esc(addrFull(a))}</code>（IP / 端口可在顶栏分别复制），然后刷新页面。`;
     }
   }
   const sel = list.querySelector(`.row[data-id="${S.selectedId}"]`);
   if (sel) sel.classList.add('sel');
+  syncListMore();
 }
 
 function rowHtml(f) {
@@ -1045,6 +1225,8 @@ function clearFlowsUi({ resetDetail = false } = {}) {
   pendingAdds.length = 0;
   pendingPatches.length = 0;
   S.flows = [];
+  S.pageCursor = '';
+  S.pageHasMore = false;
   renderList();
   if (resetDetail) {
     S.selectedId = null;
@@ -1060,6 +1242,113 @@ function activeFilterKeys() {
   );
 }
 
+/* ---------------------------------------------------------- 历史记录（侧栏）
+ * 每次「清空」都会把当天抓包归档，界面上就是一条记录：点开回看、双击改名、✕ 删除。
+ * 名字默认是清空时刻（11-14 13:20），改过名的记录不会再被系统覆盖。 */
+function historyGroupHtml() {
+  const items = S.history || [];
+  const closed = S.closedGroups.has('history');
+  const rows = items.length
+    ? items
+        .map((it) => {
+          const renaming = S.historyRenaming && S.historyRenaming.id === it.id;
+          const on = S.historyView && S.historyView.id === it.id && !renaming ? 'on' : '';
+          const name = renaming
+            ? `<input class="hg-rename" data-hist-input="${esc(it.id)}" value="${esc(
+                S.historyRenaming.value
+              )}" spellcheck="false" />`
+            : `<span class="hg-name" data-hist-name="${esc(it.id)}" title="${esc(
+                '双击改名 · ' + fmtSize(it.bytes)
+              )}">${esc(it.name)}</span>`;
+          const cnt =
+            it.count == null ? '<span class="cnt">—</span>' : `<span class="cnt">${it.count}</span>`;
+          return `<div class="hg-row ${on}" data-hist-id="${esc(it.id)}">
+        <span class="hg-main">${name}</span>${cnt}
+        <button class="hg-del" data-hist-del="${esc(it.id)}" title="删除这条历史" aria-label="删除这条历史">✕</button>
+      </div>`;
+        })
+        .join('')
+    : '<div class="side-empty">点一次「清空」就会在这里留一条，随时能回来看</div>';
+  const bytes = S.historyStats && S.historyStats.bytes ? ` · ${fmtSize(S.historyStats.bytes)}` : '';
+  return `<div class="sgroup hg ${closed ? 'closed' : ''}" data-group="history">
+    <button class="sgroup-head" data-toggle="history">
+      <span class="caret">▾</span>历史记录<span class="n">${items.length || ''}</span>
+    </button>
+    <div class="sitems">${rows}</div>
+    ${items.length ? `<div class="hg-foot">${items.length} 条 · 占用 ${fmtSize(S.historyStats.bytes || 0)}</div>` : ''}
+  </div>`;
+}
+
+async function loadHistory() {
+  try {
+    const data = await api('/api/history');
+    S.history = data.items || [];
+    S.historyStats = data.stats || { count: 0, bytes: 0 };
+    // 正在看的那条被别人删了：退回实时视图，别停在一个不存在的归档上
+    if (S.historyView && !S.history.some((x) => x.id === S.historyView.id)) backToLive();
+  } catch (_) {
+    S.history = [];
+    S.historyStats = { count: 0, bytes: 0 };
+  }
+  renderSide();
+}
+
+/** 改名输入框：渲染后要抢焦点，否则双击完还得再点一下 */
+function focusHistInput() {
+  const input = $('#sideBody .hg-rename');
+  if (!input) return;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function startHistRename(id, seed) {
+  S.historyRenaming = { id, value: seed };
+  renderSide();
+  focusHistInput();
+}
+
+async function commitHistRename(save) {
+  const cur = S.historyRenaming;
+  if (!cur) return;
+  S.historyRenaming = null;
+  const next = String(cur.value || '').trim();
+  const item = S.history.find((x) => x.id === cur.id);
+  if (!save || !next || (item && item.name === next)) {
+    renderSide();
+    return;
+  }
+  try {
+    const res = await api('/api/history/' + encodeURIComponent(cur.id), {
+      method: 'PATCH',
+      body: { name: next },
+    });
+    if (item && res.item) item.name = res.item.name;
+    if (S.historyView && S.historyView.id === cur.id) {
+      S.historyView.name = res.item ? res.item.name : next;
+      syncHistBar();
+    }
+  } catch (err) {
+    toast(netTr('改名失败：') + err.message);
+  }
+  renderSide();
+}
+
+async function removeHistory(id) {
+  const item = S.history.find((x) => x.id === id);
+  if (!item) return;
+  const ask = `${netTr('删除这条历史记录？')}\n${item.name}\n${netTr('文件会被一并删除，无法恢复。')}`;
+  if (!confirm(ask)) return;
+  try {
+    await api('/api/history/' + encodeURIComponent(id), { method: 'DELETE' });
+    S.history = S.history.filter((x) => x.id !== id);
+    if (S.historyView && S.historyView.id === id) backToLive();
+    await loadHistory();
+    toast('已删除');
+  } catch (err) {
+    toast(netTr('删除失败：') + err.message);
+  }
+}
+
 function renderSide() {
   const body = $('#sideBody');
   if (!body) return;
@@ -1068,12 +1357,15 @@ function renderSide() {
   // 上面的收藏 / 设备分组不再展示，应用分组本身始终显示全部应用
   const appChecked = S.filter.app.length > 0;
   const groups = [];
+  // 历史记录放最上面：清空之后第一件想做的事就是「刚才那些还在吗」
+  groups.push(historyGroupHtml());
   if (!appChecked) groups.push(bookmarkGroupHtml());
   for (const section of FACET_SECTIONS) {
     if (appChecked && section.key === 'devices') continue;
     groups.push(facetGroupHtml(section));
   }
   body.innerHTML = groups.join('');
+  if (S.historyRenaming) focusHistInput();
 }
 
 function facetGroupHtml(section) {
@@ -1562,7 +1854,12 @@ async function selectFlow(id) {
     return;
   }
   try {
-    const flow = await api('/api/flows/' + id);
+    // 回看历史时记录已经不在内存里了，详情要从那条归档里捞
+    const flow = await api(
+      S.historyView
+        ? `/api/history/${encodeURIComponent(S.historyView.id)}/flows/${encodeURIComponent(id)}`
+        : '/api/flows/' + id
+    );
     S.selected = flow;
     S.detailTab = 'overview';
     renderDetail();
@@ -2397,7 +2694,11 @@ async function sendReplay() {
   btn.disabled = true;
   btn.textContent = '发送中…';
   try {
-    const result = await api(`/api/flows/${f.id}/replay`, {
+    // 历史记录里的请求同样能重放：归档只是不在内存里，内容都还在
+    const replayUrl = S.historyView
+      ? `/api/history/${encodeURIComponent(S.historyView.id)}/flows/${encodeURIComponent(f.id)}/replay`
+      : `/api/flows/${f.id}/replay`;
+    const result = await api(replayUrl, {
       method: 'POST',
       body: {
         method: $('#rpMethod').value,
@@ -4857,7 +5158,29 @@ function bind() {
   });
 
   // 分组边栏
+  let histClickTimer = null;
   $('#sideBody').addEventListener('click', async (e) => {
+    const histDel = e.target.closest('[data-hist-del]');
+    if (histDel) {
+      e.stopPropagation();
+      clearTimeout(histClickTimer);
+      await removeHistory(histDel.dataset.histDel);
+      return;
+    }
+    // 改名输入框里的点击不能当成「打开这条历史」
+    if (e.target.closest('[data-hist-input]')) return;
+    const histRow = e.target.closest('[data-hist-id]');
+    if (histRow) {
+      const item = S.history.find((x) => x.id === histRow.dataset.histId);
+      if (!item) return;
+      // 单击先等一个双击间隔：双击名字是改名，不能先把它打开一遍
+      clearTimeout(histClickTimer);
+      histClickTimer = setTimeout(() => {
+        histClickTimer = null;
+        openHistory(item);
+      }, 220);
+      return;
+    }
     const nd = e.target.closest('[data-net-app]');
     if (nd) {
       e.stopPropagation();
@@ -4915,6 +5238,55 @@ function bind() {
     if (facet) setFacet(facet.dataset.facet, facet.dataset.value);
   });
 
+  /* 历史记录：双击名字就地改名（跟规则文件树同一套手感） */
+  $('#sideBody').addEventListener('dblclick', (e) => {
+    const name = e.target.closest('[data-hist-name]');
+    if (!name) return;
+    const item = S.history.find((x) => x.id === name.dataset.histName);
+    if (!item) return;
+    e.preventDefault();
+    clearTimeout(histClickTimer);
+    histClickTimer = null;
+    startHistRename(item.id, item.name);
+  });
+
+  $('#sideBody').addEventListener('input', (e) => {
+    const input = e.target.closest('[data-hist-input]');
+    if (input && S.historyRenaming) S.historyRenaming.value = input.value;
+  });
+
+  $('#sideBody').addEventListener('keydown', (e) => {
+    const input = e.target.closest('[data-hist-input]');
+    if (!input) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitHistRename(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      commitHistRename(false);
+    }
+  });
+
+  $('#sideBody').addEventListener('focusout', (e) => {
+    const input = e.target.closest('[data-hist-input]');
+    // 点到别处等于确认；已经在提交时 historyRenaming 已是 null，不会重入
+    if (input && S.historyRenaming) commitHistRename(true);
+  });
+
+  $('#histBack').addEventListener('click', backToLive);
+
+  /* 列表往下滑到底前就开始取下一页：等到真触底才加载会看到一截空白 */
+  $('#list').addEventListener(
+    'scroll',
+    () => {
+      const list = $('#list');
+      if (list.scrollHeight - list.scrollTop - list.clientHeight <= PAGE_PREFETCH_PX) {
+        loadMoreFlows();
+      }
+    },
+    { passive: true }
+  );
+
   $('#chips').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-clear]');
     if (btn) clearFacet(btn.dataset.clear);
@@ -4956,6 +5328,8 @@ function bind() {
   });
 
   $('#btnClear').addEventListener('click', async () => {
+    // 正在回看历史时点清空：先回到实时视图，否则清完还停在归档里看起来没生效
+    if (S.historyView) backToLive();
     // 乐观清空：列表、详情、侧栏（设备 / 应用 / 域名 / 接口）先在同一帧消失，
     // 不等 DELETE 往返，也不等 SSE 广播或 facet 定时器。
     S.tlsFailures = [];
@@ -4966,6 +5340,7 @@ function bind() {
       // 诊断记录也一起清，否则点了「清空」列表里还留着几行
       await api('/api/diagnostics', { method: 'DELETE' }).catch(() => {});
       toast('已清空');
+      await loadHistory();
     } catch (err) {
       toast('清空失败: ' + err.message);
       await loadFlows(); // 服务端没清成功，把真实列表拉回来
@@ -5501,6 +5876,8 @@ function bind() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'flow') {
       const f = msg.flow;
+      // 回看历史时不接实时流：列表属于那条归档，混进新包会让人以为归档还在长
+      if (S.historyView) return;
       // 面板打开期间也让「已模拟 N 条」跟着涨，不用手动刷新
       if (f.simMode && S.status && S.status.stats) {
         S.status.stats.simulated = (S.status.stats.simulated || 0) + 1;
@@ -5559,7 +5936,7 @@ function bind() {
         (!S.filter.q || hay.includes(S.filter.q.toLowerCase()));
       if (match) {
         S.flows.unshift(m);
-        if (S.flows.length > 800) S.flows.pop();
+        while (S.flows.length > LIVE_MAX) S.flows.pop();
         // 「握手失败」视图只渲染诊断行，别把新流量插进 DOM
         if (S.filter.status !== 'tls') scheduleFlowAdd(m);
         scheduleFacets();
@@ -5567,6 +5944,7 @@ function bind() {
     } else if (msg.type === 'flow-update') {
       // 两种来源：① 请求完成（占位记录就地补上状态码 / 耗时 / 响应类型）；
       // ② 本机进程名是 lsof 异步查到的。都推的是完整 summary，整行合并即可。
+      if (S.historyView) return;
       const f = msg.flow;
       const row = S.flows.find((x) => x.id === f.id);
       if (row) {
@@ -5621,8 +5999,15 @@ function bind() {
       if (S.rulesTreeData) loadRules().catch(() => {});
     } else if (msg.type === 'clear') {
       // 别的窗口点了清空：列表和侧栏同步消失，不走 80ms 定时器
-      clearFlowsUi();
-      scheduleRender();
+      if (!S.historyView) {
+        clearFlowsUi();
+        scheduleRender();
+      }
+      // 这次清空刚好在磁盘上留了一条历史记录
+      loadHistory();
+    } else if (msg.type === 'history-changed') {
+      // 任何窗口改名 / 删除 / 新增历史，侧栏一起同步
+      loadHistory();
     }
   };
   es.onerror = () => {
@@ -6155,7 +6540,7 @@ async function init() {
   await loadPassthrough(); // 白名单角标 + 管理列表（服务端持久化）
   await loadFlows(); // 内部 renderList 会一并渲染置顶的诊断行
   await loadRules();
-  await Promise.all([loadFacets(), loadBookmarks()]);
+  await Promise.all([loadFacets(), loadBookmarks(), loadHistory()]);
   renderChips();
   NARROW.addEventListener('change', () => {
     syncSideForViewport();
