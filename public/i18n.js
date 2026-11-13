@@ -40,6 +40,9 @@
     [/^(\d+) 条 · 占用 (.+)$/, function (m, a, b) { return a + (a === '1' ? ' snapshot' : ' snapshots') + ' · ' + b; }],
     [/^(.+ · )?(\d+) 条 · (.+)$/, function (m, when, a, b) { return (when || '') + a + (a === '1' ? ' flow' : ' flows') + ' · ' + b; }],
     [/^双击改名 · (.+)$/, function (m, a) { return 'Double-click to rename · ' + a; }],
+    // 导出历史：条数是动态的，整句翻译（必须排在下面的通用「N 条」之前）
+    [/^已导出 (\d+) 条（达到上限，只导了最近的）$/, function (m, a) { return 'Exported ' + a + ' flow(s) — limit reached, most recent only'; }],
+    [/^已导出 (\d+) 条$/, function (m, a) { return 'Exported ' + a + (a === '1' ? ' flow' : ' flows'); }],
     // 跳过解密管理列表：条数 / 命中数 / 域名是动态的，必须抢在通用「X 条」「匹配 X」之前
     [/^已加入 (\d+) 条规则$/, function (m, a) { return a + (a === '1' ? ' rule' : ' rules') + ' added'; }],
     [/^已透传 (\d+) 次连接$/, function (m, a) { return a + (a === '1' ? ' connection' : ' connections') + ' passed through'; }],

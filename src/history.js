@@ -16,6 +16,8 @@ const { prepareFilter, summary, ensureDerived } = require('./store');
 const CLEARED_RE = /^flows-(\d{4}-\d{2}-\d{2})\.jsonl\.cleared-(\d+)$/;
 const CHUNK = 64 * 1024;
 const NAME_MAX = 60;
+/** 单次导出条数上限：HAR 是一个 JSON 对象，只能整体序列化，得防着几百 MB 的归档 */
+const EXPORT_MAX = 50000;
 /** reconcile 时同步数行数的上限：超过这个大小的归档留空，等用户点开时再数 */
 const COUNT_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -79,12 +81,19 @@ class FlowHistory {
 
   /**
    * 同一分钟内连清两次会撞名（一条 11-14 00:49 分不清是哪次），
-   * 撞上了就退到带秒的写法。用户自己改的名字不做去重，那是他的选择。
+   * 撞上了先退到带秒；同一秒内还撞（脚本连着清）就加序号，
+   * 名字必须唯一，否则用户没法指认「要删/要导出的是哪一条」。
+   * 用户自己改的名字不做去重，那是他的选择。
    */
   _uniqueName(ts, exceptId) {
-    const base = defaultName(ts);
     const taken = new Set(this.items.filter((x) => x.id !== exceptId).map((x) => x.name));
-    return taken.has(base) ? defaultName(ts, true) : base;
+    const base = defaultName(ts);
+    if (!taken.has(base)) return base;
+    const withSec = defaultName(ts, true);
+    if (!taken.has(withSec)) return withSec;
+    let n = 2;
+    while (taken.has(`${withSec} (${n})`)) n += 1;
+    return `${withSec} (${n})`;
   }
 
   /** 老版本留下的 .cleared-* 没进过索引，启动时补登记，不然它们在界面上凭空消失 */
@@ -258,6 +267,26 @@ class FlowHistory {
     }
     return { ...res, item: { ...item } };
   }
+
+  /**
+   * 导出整条归档。倒着读（跟回看同一套逻辑），倒序先遇到的是「完成态」，
+   * 按 id 去重后天然拿到每条流量的最终状态，不用在正序里反复覆盖。
+   * 结果仍是新→旧，调用方（HAR / JSON）自己决定顺序。
+   */
+  async exportFlows(id, { filters = {}, limit = EXPORT_MAX } = {}) {
+    const item = this.find(id);
+    if (!item) return { error: 'not-found' };
+    const abs = this._abs(item.file);
+    let size = 0;
+    try {
+      size = (await fs.promises.stat(abs)).size;
+    } catch (_) {
+      return { error: 'missing' };
+    }
+    const cap = Math.max(1, Math.min(Number(limit) || EXPORT_MAX, EXPORT_MAX));
+    const flows = await readArchive(abs, { size, limit: cap, filters });
+    return { flows, item: { ...item }, truncated: flows.length >= cap };
+  }
 }
 
 /**
@@ -321,6 +350,56 @@ function tailPage(file, { size = null, cursor = null, limit = 200, filters = {} 
     hasMore: nextCursor > 0,
     totalRead: wantTotal ? countMatching(file, filters) : null,
   };
+}
+
+/**
+ * 导出用：整个归档倒着读一遍，凑够 limit 条就停。
+ *
+ * 跟 tailPage 的区别是不分页、要全量，所以用 awaits 的 fs 读 —— 几百 MB 的归档
+ * 同步读会把控制台（含 SSE、代理）整条阻塞好几秒，用户会以为界面卡死了。
+ */
+async function readArchive(file, { size = null, limit = EXPORT_MAX, filters = {} } = {}) {
+  const total = size == null ? (await fs.promises.stat(file)).size : size;
+  const ok = prepareFilter(filters);
+  const out = [];
+  const seen = new Set();
+  let pos = total;
+  let head = Buffer.alloc(0);
+  const fh = await fs.promises.open(file, 'r');
+  try {
+    let stop = false;
+    while (pos > 0 && !stop) {
+      const len = Math.min(CHUNK, pos);
+      pos -= len;
+      const buf = Buffer.allocUnsafe(len);
+      await fh.read(buf, 0, len, pos);
+      const data = head.length ? Buffer.concat([buf, head]) : buf;
+      let end = data.length;
+      for (let i = data.length - 1; i >= 0; i--) {
+        if (data[i] !== 0x0a) continue;
+        const line = data.subarray(i + 1, end);
+        end = i;
+        if (!line.length) continue;
+        const f = parseFlow(line, seen);
+        if (f && ok(f)) {
+          out.push(f);
+          if (out.length >= limit) {
+            stop = true;
+            break;
+          }
+        }
+      }
+      if (!stop) head = data.subarray(0, end);
+    }
+    // 走到文件开头：head 是第一行（前面没有换行了）
+    if (!stop && head.length) {
+      const f = parseFlow(head, seen);
+      if (f && ok(f)) out.push(f);
+    }
+  } finally {
+    await fh.close();
+  }
+  return out;
 }
 
 /** 全文数一遍「满足筛选的条数」。只在打开一条历史的第一页调用。 */

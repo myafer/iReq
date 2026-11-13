@@ -19,6 +19,8 @@ const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
 const { McpAuth } = require('./mcp-auth');
 const mcp = require('./mcp');
 
+const VERSION = require('../package.json').version;
+
 /**
  * 列出非回环 IPv4 地址及其网卡。控制台顶栏要展示「局域网 IP」并允许在多网卡间切换，
  * 只有 IP 数组时用户分不清哪个是 Wi-Fi、哪个是 VPN / 虚拟网卡。
@@ -78,6 +80,29 @@ function harContent(flow, isRequest) {
     content.text = text == null ? '' : String(text);
   }
   return content;
+}
+
+/* 导出文件名用记录名（下载下来一看就知道是哪次抓的）；中文走 RFC 5987，老客户端用 ASCII 兜底 */
+function exportDisposition(item, format) {
+  const ext = format === 'json' ? 'json' : 'har';
+  const stamp = new Date((item && item.createdAt) || Date.now())
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .slice(0, 19);
+  const name = String((item && item.name) || '')
+    .replace(/[\\/:*?"<>|\r\n\t]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  const ascii = `ireq-${stamp}.${ext}`;
+  if (!name) return `attachment; filename="${ascii}"`;
+  /* 默认名本身就是「11-14 02-37」这种时间（冒号已在上面换成 -），再拼一遍 createdAt 就重复了 */
+  const full = /^\d{2}-\d{2} \d{2}-\d{2}/.test(name) ? `${name}.${ext}` : `${name}-${stamp}.${ext}`;
+  const encoded = encodeURIComponent(full).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 function toHar(flows, version) {
@@ -396,7 +421,7 @@ class ConsoleServer {
         uaAppMap: this.config.uaAppMap || [],
         networkSim: normalizeNetworkSim(this.config.networkSim),
         appIcons: this.appIcons ? this.appIcons.status() : { supported: false },
-        version: require('../package.json').version,
+        version: VERSION,
         update: this.updater ? this.updater.status() : null,
       });
     }
@@ -438,7 +463,7 @@ class ConsoleServer {
         route: sp.get('route') || '',
         limit: Math.min(Number(sp.get('limit')) || 2000, 2000),
       });
-      const payload = format === 'json' ? flows.slice().reverse() : toHar(flows, require('../package.json').version);
+      const payload = format === 'json' ? flows.slice().reverse() : toHar(flows, VERSION);
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const data = Buffer.from(JSON.stringify(payload, null, format === 'har' ? 2 : 0));
       res.writeHead(200, {
@@ -878,6 +903,36 @@ class ConsoleServer {
   async _apiHistory(req, res, parts, method, url) {
     const h = this.history;
     if (!h) return this._json(res, 400, { error: '未启用落盘，没有历史记录' });
+
+    /* 导出这条历史：HAR（默认，能直接拖进浏览器 DevTools）或原始 JSONL 行 */
+    if (parts[2] && parts[3] === 'export' && method === 'GET') {
+      const sp = url.searchParams;
+      const format = sp.get('format') === 'json' ? 'json' : 'har';
+      const out = await h.exportFlows(parts[2], {
+        filters: this._pageFilters(sp),
+        limit: Math.min(Number(sp.get('limit')) || undefined, 50000),
+      });
+      if (out.error) {
+        const gone = out.error === 'missing';
+        return this._json(res, gone ? 410 : 404, { error: gone ? '文件已被删除' : '记录不存在' });
+      }
+      const flows = out.flows;
+      const payload =
+        format === 'json' ? flows.slice().reverse() : toHar(flows, VERSION);
+      const data = Buffer.from(JSON.stringify(payload, null, format === 'har' ? 2 : 0));
+      res.writeHead(200, {
+        'content-type':
+          format === 'har'
+            ? 'application/har+json; charset=utf-8'
+            : 'application/json; charset=utf-8',
+        'content-disposition': exportDisposition(out.item, format),
+        'content-length': data.length,
+        'x-flow-count': String(flows.length),
+        'x-export-truncated': out.truncated ? '1' : '0',
+        'cache-control': 'no-store',
+      });
+      return res.end(data);
+    }
 
     if (parts[2] && parts[3] === 'flows' && parts[4] && method === 'GET') {
       const out = h.getFlow(parts[2], parts[4]);

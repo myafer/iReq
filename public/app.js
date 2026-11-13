@@ -1264,6 +1264,7 @@ function historyGroupHtml() {
             it.count == null ? '<span class="cnt">—</span>' : `<span class="cnt">${it.count}</span>`;
           return `<div class="hg-row ${on}" data-hist-id="${esc(it.id)}">
         <span class="hg-main">${name}</span>${cnt}
+        <button class="hg-dl" data-hist-export="${esc(it.id)}" title="导出 HAR（按住 Shift 导出原始 JSON）" aria-label="导出这条历史">⤓</button>
         <button class="hg-del" data-hist-del="${esc(it.id)}" title="删除这条历史" aria-label="删除这条历史">✕</button>
       </div>`;
         })
@@ -1347,6 +1348,57 @@ async function removeHistory(id) {
   } catch (err) {
     toast(netTr('删除失败：') + err.message);
   }
+}
+
+/**
+ * 导出这条历史（整条，不受当前筛选影响）：默认 HAR，能直接拖进浏览器 DevTools
+ * 或别的抓包工具看；Shift 点一下给原始 JSON，方便脚本里接着处理。
+ * 文件名以服务端给的 Content-Disposition 为准（带记录名，中文走 filename*）。
+ */
+async function exportHistory(id, format = 'har') {
+  const item = S.history.find((x) => x.id === id);
+  if (!item) return;
+  const ext = format === 'json' ? 'json' : 'har';
+  if (item.bytes > 200 * 1024 * 1024) {
+    if (!confirm(`${item.name}\n${netTr('这条历史比较大，导出要跑一会儿，继续吗？')}`)) return;
+  }
+  toast(netTr('正在导出…'));
+  try {
+    const r = await fetch(`/api/history/${encodeURIComponent(id)}/export?format=${ext}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const count = Number(r.headers.get('X-Flow-Count') || 0);
+    const truncated = r.headers.get('X-Export-Truncated') === '1';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filenameFromDisposition(r.headers.get('Content-Disposition'), `ireq.${ext}`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast(
+      truncated
+        ? netTr('已导出 ' + count + ' 条（达到上限，只导了最近的）')
+        : netTr('已导出 ' + count + ' 条')
+    );
+  } catch (err) {
+    toast(netTr('导出失败：') + err.message);
+  }
+}
+
+/** Content-Disposition 里优先取 filename*（UTF-8 原名），没有就用 ASCII 兜底名 */
+function filenameFromDisposition(cd, fallback) {
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd || '');
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch (_) {
+      /* 编码坏了就往下走 */
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(cd || '');
+  return plain ? plain[1].trim() : fallback;
 }
 
 function renderSide() {
@@ -5160,6 +5212,13 @@ function bind() {
   // 分组边栏
   let histClickTimer = null;
   $('#sideBody').addEventListener('click', async (e) => {
+    const histDl = e.target.closest('[data-hist-export]');
+    if (histDl) {
+      e.stopPropagation();
+      clearTimeout(histClickTimer);
+      await exportHistory(histDl.dataset.histExport, e.shiftKey ? 'json' : 'har');
+      return;
+    }
     const histDel = e.target.closest('[data-hist-del]');
     if (histDel) {
       e.stopPropagation();
@@ -5274,6 +5333,12 @@ function bind() {
   });
 
   $('#histBack').addEventListener('click', backToLive);
+
+  /* 回看时最顺手的位置：提示条上的「导出」 */
+  $('#histExport').addEventListener('click', (e) => {
+    if (!S.historyView) return;
+    exportHistory(S.historyView.id, e.shiftKey ? 'json' : 'har');
+  });
 
   /* 列表往下滑到底前就开始取下一页：等到真触底才加载会看到一截空白 */
   $('#list').addEventListener(

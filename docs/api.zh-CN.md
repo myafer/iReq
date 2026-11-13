@@ -15,6 +15,8 @@ PATCH  /api/history/:id         { name } 改名（去空白，最长 60 字）
 DELETE /api/history/:id         删掉一条（文件也删）
 DELETE /api/history             清空全部历史
 GET    /api/history/:id/flows?...  回看：同上筛选 + cursor（字节游标），倒序分页
+GET    /api/history/:id/export?format=har|json  导出整条历史（默认 HAR）
+                                → 附件下载，带 X-Flow-Count / X-Export-Truncated；单次上限 5 万条
 GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }

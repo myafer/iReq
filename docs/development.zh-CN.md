@@ -100,6 +100,9 @@ CFNetwork=我的 iOS 客户端
   - **回看是从文件尾部倒序分块读**（64KB 一块）：归档能到几百 MB，整份读进内存再切片，
     点一次卡一次。游标是字节偏移，不是行号 —— 行号得从头数，越往后越慢。
   - 条数在第一次打开这条记录时整份数一遍（带当前筛选条件），结果写回索引，之后不再重复扫。
+  - **导出**走 `GET /api/history/:id/export`（默认 HAR，`format=json` 给原始记录）：同样是倒序读、
+    按 id 去重取最终状态，再用 `toHar` 转 HAR 1.2。HAR 是一个 JSON 对象只能整体序列化，所以
+    单次封顶 5 万条，超了置 `X-Export-Truncated: 1`；文件名用记录名（中文走 RFC 5987 `filename*`）。
 - **日文件才有封顶**：`flows-YYYY-MM-DD.jsonl` 没人看得到，留最近 7 份、总量 ≤ 200MB，
   超出从最旧删（启动时也会检查）。不封顶的话一天几百 MB，一周就是 GB 级。
   设置 › 高级设置里能看到 data 目录当前占用与文件数。
@@ -155,7 +158,7 @@ node tools/check-net-live.js     # 一键断网/弱网真生效 + 规则变更�
 node tools/check-simple-ui.js    # 顶栏更多 / 筛选更多 / 连接向导 / 快速 Mock / ⌘K 命令面板 / 就近菜单（26 项）
 node tools/check-tree-fs.js     # 文件树当文件管理器：行内新建 / 双击改名 / 复制粘贴 / 绝对路径 / reveal（28 项）
 node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协议握手 / 15 个工具 / 筛选与聚合 / scope / 撤销 / Origin / stdio 桥（84 项）
-node tools/check-history.js     # 历史记录与分页：游标翻页 / 内存见底续读磁盘 / 清空留档 / 回看 / 改名 / 删除（34 项）
+node tools/check-history.js     # 历史记录与分页：游标翻页 / 内存见底续读磁盘 / 清空留档 / 回看 / 改名 / 导出 / 删除（50 项）
 ```
 
 `check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；

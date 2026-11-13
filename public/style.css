@@ -1008,7 +1008,8 @@ pre {
   color: var(--accent);
 }
 
-.hg-del {
+.hg-del,
+.hg-dl {
   flex: none;
   width: calc(16px * var(--ui-scale));
   height: calc(16px * var(--ui-scale));
@@ -1022,11 +1023,13 @@ pre {
   opacity: 0;
 }
 
-.hg-row:hover .hg-del {
+.hg-row:hover .hg-del,
+.hg-row:hover .hg-dl {
   opacity: 1;
 }
 
-.hg-del:hover {
+.hg-del:hover,
+.hg-dl:hover {
   background: var(--border);
   color: var(--text);
 }

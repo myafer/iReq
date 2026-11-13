@@ -199,13 +199,102 @@ function viaProxy(hostPort, p) {
     createdIds.push(second.id);
     ok('第二次清空又加一条', hist2.items.length === histBefore.items.length + 2, `${hist2.items.length} 条`);
     ok('同一分钟内不会被当成同一条', second.id !== item.id);
-    ok('同一分钟撞名时名字退到带秒', /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(second.name), second.name);
+    ok(
+      '同一分钟撞名时名字退到带秒',
+      /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(second.name) && second.name !== item.name,
+      second.name
+    );
+
+    /* 同一秒内连着清（脚本 / 自动化）：名字必须还能区分，不能三条都叫 02:37:35 */
+    {
+      const { FlowHistory } = require('../src/history');
+      const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ireq-hn-'));
+      const fh = new FlowHistory({ dir: tmp, indexFile: path.join(tmp, 'history.json') });
+      const ts = Date.now();
+      const names = ['a', 'b', 'c'].map((id, i) =>
+        fh.add({ id, file: `f${i}`, createdAt: ts, bytes: 10, count: 1 }).name
+      );
+      ok('同一秒连清三条：名字互不相同', new Set(names).size === 3, names.join(' / '));
+      ok('同一秒连清三条：最后一条带序号', /\(\d+\)$/.test(names[2]), names[2]);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
 
     /* ---------------- ⑥ 改名 ---------------- */
     const renamed = (await jsonApi('/api/history/' + item.id, { method: 'PATCH', body: { name: '  下单链路排查  ' } })).body;
     ok('改名：去空白后生效', renamed.item && renamed.item.name === '下单链路排查', renamed.item && renamed.item.name);
     const listed = (await jsonApi('/api/history')).body.items.find((x) => x.id === item.id);
     ok('改名：列表里也变了', listed && listed.name === '下单链路排查', listed && listed.name);
+
+    /* ---------------- ⑥' 导出：HAR（默认）/ 原始 JSON ---------------- */
+    const harRes = await fetch(`${UI}/api/history/${item.id}/export`);
+    const harText = await harRes.text();
+    const har = JSON.parse(harText);
+    ok('导出 HAR：200 + 正确的 content-type', harRes.status === 200 && /har\+json/.test(harRes.headers.get('content-type') || ''), String(harRes.status));
+    ok('导出 HAR：版本 1.2 且条目齐全', har.log && har.log.version === '1.2' && har.log.entries.length === 12, `entries=${har.log && har.log.entries.length}`);
+    ok('导出 HAR：条数响应头对得上', harRes.headers.get('x-flow-count') === '12', String(harRes.headers.get('x-flow-count')));
+    ok('导出 HAR：没被截断', harRes.headers.get('x-export-truncated') === '0', String(harRes.headers.get('x-export-truncated')));
+
+    const e0 = har.log.entries[0];
+    const eN = har.log.entries[har.log.entries.length - 1];
+    ok(
+      '导出 HAR：条目按时间正序（跟列表的倒序相反）',
+      new Date(e0.startedDateTime) <= new Date(eN.startedDateTime),
+      `${e0.startedDateTime} → ${eN.startedDateTime}`
+    );
+    ok(
+      '导出 HAR：请求/响应字段齐全',
+      e0.request && e0.request.method === 'GET' && /hist-[ab]\?/.test(e0.request.url || '') &&
+        e0.response && typeof e0.response.status === 'number' &&
+        Array.isArray(e0.response.headers) && e0.timings && typeof e0.time === 'number',
+      `${e0.request && e0.request.method} status=${e0.response && e0.response.status}`
+    );
+    ok('导出 HAR：扩展字段带应用/设备信息', e0._iReq && 'clientIp' in e0._iReq && 'mocked' in e0._iReq);
+
+    const cd = harRes.headers.get('content-disposition') || '';
+    ok('导出文件名：带记录名（中文走 filename*）', /filename\*=UTF-8''/.test(cd) && /ireq-/.test(cd), cd.slice(0, 80));
+    ok(
+      '导出文件名：中文被正确编码',
+      decodeURIComponent((/filename\*=UTF-8''([^;]+)/.exec(cd) || [])[1] || '').includes('下单链路排查')
+    );
+
+    const jsonRes = await fetch(`${UI}/api/history/${item.id}/export?format=json`);
+    const jsonList = JSON.parse(await jsonRes.text());
+    ok('导出 JSON：条目数一样', Array.isArray(jsonList) && jsonList.length === 12, String(jsonList.length));
+    ok(
+      '导出 JSON：正序且带完整 headers',
+      jsonList[0] && jsonList[0].reqHeaders && jsonList[0].id !== undefined,
+      jsonList[0] && jsonList[0].url
+    );
+
+    const cappedRes = await fetch(`${UI}/api/history/${item.id}/export?limit=5`);
+    const capped = JSON.parse(await cappedRes.text());
+    ok(
+      '导出：limit 生效并标了截断',
+      capped.log.entries.length === 5 && cappedRes.headers.get('x-export-truncated') === '1',
+      `entries=${capped.log.entries.length}`
+    );
+
+    const expMissing = await fetch(`${UI}/api/history/nope-123/export`);
+    ok('导出：不存在的记录 404', expMissing.status === 404, String(expMissing.status));
+
+    /* 上面那些 .test 域名解析不到（上游 502），HAR 里 status=0 是正常的。
+       再用 IP 直连造一条真正的成功响应，验证状态码 / 响应体 / 响应头都导进去了 */
+    await jsonApi('/api/flows', { method: 'DELETE' });
+    await wait(150);
+    await viaProxy(`127.0.0.1:${upPort}`, '/hist-a');
+    await wait(350);
+    await jsonApi('/api/flows', { method: 'DELETE' });
+    await wait(250);
+    const okItem = (await jsonApi('/api/history')).body.items[0];
+    createdIds.push(okItem.id);
+    const okHar = JSON.parse(await (await fetch(`${UI}/api/history/${okItem.id}/export`)).text());
+    const oe = okHar.log.entries[0];
+    ok(
+      '导出 HAR：成功响应带出状态码 / 响应体 / 响应头',
+      oe && oe.response.status === 200 && String(oe.response.content.text).includes('/hist-a') &&
+        oe.response.headers.some((h) => h.name.toLowerCase() === 'content-type'),
+      `status=${oe && oe.response.status}`
+    );
 
     const blank = (await jsonApi('/api/history/' + item.id, { method: 'PATCH', body: { name: '   ' } })).body;
     ok('改名：空名字当没改', blank.item && blank.item.name === '下单链路排查', blank.item && blank.item.name);

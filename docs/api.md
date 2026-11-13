@@ -15,6 +15,8 @@ PATCH  /api/history/:id         { name } rename (trimmed, max 60 chars)
 DELETE /api/history/:id         Delete one entry (file goes too)
 DELETE /api/history             Clear all history
 GET    /api/history/:id/flows?...  Replay: same filters + cursor (byte offset), newest first
+GET    /api/history/:id/export?format=har|json  Export a whole snapshot (HAR by default)
+                                → attachment download with X-Flow-Count / X-Export-Truncated; capped at 50k flows
 GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
