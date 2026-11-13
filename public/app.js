@@ -4601,7 +4601,7 @@ function renderMcpTools(tools) {
   const box = $('#mcpTools');
   if (!box) return;
   const count = $('#mcpToolCount');
-  if (count) count.textContent = `${tools.length} 个`;
+  if (count) count.textContent = `${tools.length} 个工具`;
   box.innerHTML = tools
     .map(
       (t) => `<div class="mcp-tool-row">

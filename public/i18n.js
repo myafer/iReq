@@ -28,6 +28,7 @@
     // MCP 接入面板：开关状态 / 令牌计数 / 最近使用（数字是动态的，必须整句翻译）
     [/^已开启 · (\d+) 个令牌$/, function (m, a) { return 'On · ' + a + (a === '1' ? ' token' : ' tokens'); }],
     [/^(\d+) 个令牌$/, function (m, a) { return a + (a === '1' ? ' token' : ' tokens'); }],
+    [/^(\d+) 个工具$/, function (m, a) { return a + (a === '1' ? ' tool' : ' tools'); }],
     [/^刚刚 · 调用 (\d+) 次$/, function (m, a) { return 'just now · ' + a + (a === '1' ? ' call' : ' calls'); }],
     [/^(\d+) 分钟前 · 调用 (\d+) 次$/, function (m, a, b) { return a + ' min ago · ' + b + (b === '1' ? ' call' : ' calls'); }],
     [/^(\d+) 小时前 · 调用 (\d+) 次$/, function (m, a, b) { return a + ' h ago · ' + b + (b === '1' ? ' call' : ' calls'); }],

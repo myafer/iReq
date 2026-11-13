@@ -169,6 +169,7 @@ class FlowStore extends EventEmitter {
     ip = '',
     app = '',
     route = '',
+    since = 0,
     limit = 500,
   } = {}) {
     const q = String(query || '').toLowerCase();
@@ -182,8 +183,11 @@ class FlowStore extends EventEmitter {
           .map((s) => s.trim())
           .filter(Boolean);
     const out = [];
+    const sinceMs = Number(since) || 0;
     for (const f0 of this.flows) {
       const f = ensureDerived(f0);
+      // 时间窗：MCP 里「只看最近 N 秒」用，前端列表不传就是全量
+      if (sinceMs && Number(f.ts || 0) < sinceMs) continue;
       if (onlyMocked && !f.mocked) continue;
       if (method && f.method !== method.toUpperCase()) continue;
       if (!matchStatus(f, status)) continue;
@@ -211,6 +215,15 @@ class FlowStore extends EventEmitter {
 
   list(options = {}) {
     return this.filter(options).map(summary);
+  }
+
+  /**
+   * 只要「匹配多少条」，不关心内容。
+   * MCP 的 list_flows 用它算 total：列表本身被 limit 截断，但调用方
+   * 需要知道「是不是还有更多」，否则 AI 会把 50 条当成全部。
+   */
+  count(options = {}) {
+    return this.filter({ ...options, limit: Infinity }).length;
   }
 
   /** 导出用：带 headers / body 的完整记录，条数上限交给调用方。

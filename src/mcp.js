@@ -128,34 +128,48 @@ const TOOLS = [
     name: 'list_flows',
     title: '查询抓包流量',
     description:
-      '按关键词 / 方法 / 状态码 / 域名 / 应用筛选最近的请求，返回精简列表（含 id、URL、状态、耗时、应用）。关键词匹配 URL、应用名、IP、设备；状态码支持 2xx / 404 / error 等写法。',
+      '按域名 / 应用 / 设备 / 接口 / 方法 / 状态码 / 关键词 / 时间窗筛选最近的请求，返回精简列表（含 id、URL、状态、耗时、应用）。' +
+      '返回 total（匹配总数）与 returned（本次返回条数），has_more=true 说明还有更多，可缩小条件或翻 limit。' +
+      '不知道该查哪个域名时先调 list_hosts 看聚合。状态码支持 2xx / 404 / error / json 等写法。',
     scope: 'read',
     readOnly: true,
     inputSchema: {
       type: 'object',
       properties: {
-        query: S.str('关键词，匹配 URL / 应用名 / IP / 设备'),
+        query: S.str('关键词，匹配 URL / 应用名 / IP / 设备 / 进程名'),
         method: S.str('HTTP 方法，如 GET / POST'),
         status: S.str('状态码筛选：2xx / 4xx / 500 / ok / error / json（内容类型）'),
         host: S.str('域名精确匹配，如 api.example.com'),
         app: S.str('应用名（可逗号分隔多个）'),
+        ip: S.str('客户端 IP 精确匹配；传 local 表示本机'),
+        route: S.str('接口路径，如 GET /api/user（取自 list_hosts 的 routes）'),
+        since_seconds: S.int('只看最近 N 秒内产生的请求；0 表示不限', { minimum: 0, maximum: 86400 }),
         only_mocked: S.bool('只看被 Mock 命中的请求'),
         limit: S.int('返回条数，默认 50，最大 200', { minimum: 1, maximum: 200 }),
       },
       additionalProperties: false,
     },
     run(ctx, args) {
-      const flows = ctx.server.store.list({
+      const limit = optInt(args, 'limit', { min: 1, max: 200 }) || 50;
+      const sinceSec = optInt(args, 'since_seconds', { min: 0, max: 86400 });
+      const opts = {
         query: optString(args, 'query', 200) || '',
         method: optString(args, 'method', 20) || '',
         status: optString(args, 'status', 40) || '',
         host: optString(args, 'host', 200) || '',
         app: optString(args, 'app', 200) || '',
+        ip: optString(args, 'ip', 100) || '',
+        route: optString(args, 'route', 200) || '',
+        since: sinceSec ? Date.now() - sinceSec * 1000 : 0,
         onlyMocked: optBool(args, 'only_mocked') === true,
-        limit: optInt(args, 'limit', { min: 1, max: 200 }) || 50,
-      });
+      };
+      /* 列表按 limit 截断，但要让调用方知道「筛完到底有多少条」 */
+      const total = ctx.server.store.count(opts);
+      const flows = ctx.server.store.list({ ...opts, limit });
       return {
-        count: flows.length,
+        total,
+        returned: flows.length,
+        has_more: total > flows.length,
         flows: flows.map((f) => ({
           id: f.id,
           time: new Date(f.ts || Date.now()).toISOString(),
@@ -170,6 +184,47 @@ const TOOLS = [
           content_type: f.resContentType || null,
           error: f.error || null,
         })),
+      };
+    },
+  },
+
+  {
+    name: 'list_hosts',
+    title: '列出抓到的域名 / 应用 / 设备',
+    description:
+      '把当前抓包的域名、应用、设备、接口聚合出来（带条数，从多到少）。' +
+      '流量很多时先调它看清全局，再把挑中的 host / app / ip / route 传给 list_flows 精确查。' +
+      'hosts 与 routes 受 app / ip / since_seconds 收窄；apps 与 devices 始终是全量。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app: S.str('只在这个应用范围内聚合域名与接口'),
+        ip: S.str('只在这个客户端 IP 范围内聚合；local 表示本机'),
+        since_seconds: S.int('只统计最近 N 秒内的流量；0 表示不限', { minimum: 0, maximum: 86400 }),
+        limit: S.int('每类返回条数，默认 20，最大 100', { minimum: 1, maximum: 100 }),
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const limit = optInt(args, 'limit', { min: 1, max: 100 }) || 20;
+      const app = optString(args, 'app', 200);
+      const ip = optString(args, 'ip', 100);
+      const sinceSec = optInt(args, 'since_seconds', { min: 0, max: 86400 });
+      const base = {};
+      if (app) base.app = app;
+      if (ip) base.ip = ip;
+      if (sinceSec) base.since = Date.now() - sinceSec * 1000;
+      const scoped = Object.keys(base).length > 0;
+      const facets = ctx.server.store.facets(limit, scoped ? { hosts: base, routes: base } : null);
+      return {
+        total_flows: ctx.server.store.stats().total,
+        scoped,
+        hosts: facets.hosts,
+        apps: facets.apps,
+        devices: facets.devices,
+        routes: (facets.routes || []).slice(0, limit),
       };
     },
   },
@@ -795,7 +850,9 @@ async function handleMessage(msg, { server, token, auth, ip }) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'ireq', title: 'iReq', version: pkg.version },
         instructions:
-          'iReq 是抓包 / Mock / 弱网工具。常用流程：ireq_status 看状态 → list_flows 找接口 → get_flow 读详情 → mock_flow 或 create_rule 造 Mock → set_network_sim 模拟弱网。修改类操作需要读写令牌。',
+          'iReq 是抓包 / Mock / 弱网工具。常用流程：ireq_status 看状态 → list_hosts 看有哪些域名 / 应用 → ' +
+            'list_flows 按 host / app / route / since_seconds 筛出接口 → get_flow 读详情 → ' +
+            'mock_flow 或 create_rule 造 Mock → set_network_sim 模拟弱网。修改类操作需要读写令牌。',
       });
     }
 

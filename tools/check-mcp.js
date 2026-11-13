@@ -133,6 +133,11 @@ function runBridge(args, lines, { timeout = 20000 } = {}) {
       res.writeHead(200, { 'content-type': 'application/json', 'x-up': 'yes' });
       return res.end(JSON.stringify({ hello: 'mcp', path: req.url }));
     }
+    /* 第二条接口：给 list_flows 的 route 筛选与 list_hosts 的 routes 聚合做区分度 */
+    if (String(req.url || '').split('?')[0] === '/mcp-other') {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      return res.end('other');
+    }
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('nope');
   });
@@ -279,7 +284,7 @@ function runBridge(args, lines, { timeout = 20000 } = {}) {
     await wait(400);
 
     const flows = toolJson(await callTool(TOKEN, 'list_flows', { query: 'mcp-check', limit: 5 }));
-    ok('list_flows 能查到刚抓的请求', flows && flows.count >= 1, flows && flows.count);
+    ok('list_flows 能查到刚抓的请求', flows && flows.returned >= 1, flows && flows.returned);
     const flowId = flows && flows.flows && flows.flows[0] && flows.flows[0].id;
     ok('列表里带 id / status / url', !!(flowId && flows.flows[0].status === 200 && /mcp-check/.test(flows.flows[0].url)));
 
@@ -290,6 +295,74 @@ function runBridge(args, lines, { timeout = 20000 } = {}) {
     ok('body=none 时不给正文', !!(noBody && noBody.response && noBody.response.body === undefined));
     const missing = await callTool(TOKEN, 'get_flow', { id: 'no-such-flow' });
     ok('不存在的 flow 返回 isError', missing.body.result.isError === true);
+
+    // ------------------------------------------------------ ⑥-b 筛选与聚合
+    await proxyRequest(`http://127.0.0.1:${upPort}/mcp-other?y=1`);
+    await wait(400);
+
+    const all = toolJson(await callTool(TOKEN, 'list_flows', { limit: 200 }));
+    ok(
+      'list_flows 同时给 total 与 returned',
+      !!(all && all.total === all.returned && all.returned === all.flows.length && all.has_more === false),
+      all && JSON.stringify({ total: all.total, returned: all.returned })
+    );
+
+    const one = toolJson(await callTool(TOKEN, 'list_flows', { limit: 1 }));
+    ok(
+      'limit 截断时 total 仍是匹配总数',
+      !!(one && one.returned === 1 && one.total >= 2 && one.has_more === true),
+      one && JSON.stringify({ total: one.total, returned: one.returned, has_more: one.has_more })
+    );
+
+    const byHost = toolJson(await callTool(TOKEN, 'list_flows', { host: '127.0.0.1' }));
+    ok(
+      '按域名筛选能收窄且不漏',
+      !!(byHost && byHost.total >= 2 && byHost.flows.every((f) => /127\.0\.0\.1/.test(f.url))),
+      byHost && byHost.total
+    );
+
+    const byRoute = toolJson(await callTool(TOKEN, 'list_flows', { route: 'GET /mcp-other' }));
+    ok(
+      '按接口筛选只留该接口',
+      !!(byRoute && byRoute.total === 1 && /mcp-other/.test(byRoute.flows[0] && byRoute.flows[0].url)),
+      byRoute && byRoute.total
+    );
+
+    const byIp = toolJson(await callTool(TOKEN, 'list_flows', { ip: 'local' }));
+    ok('按客户端 IP 筛选（local=本机）', !!(byIp && byIp.total >= 2), byIp && byIp.total);
+
+    const bySince = toolJson(await callTool(TOKEN, 'list_flows', { since_seconds: 3600 }));
+    ok('时间窗参数可用且不误杀', !!(bySince && bySince.total === all.total), bySince && bySince.total);
+
+    const zeroSince = toolJson(await callTool(TOKEN, 'list_flows', { since_seconds: 0 }));
+    ok('since_seconds=0 表示不限时间', !!(zeroSince && zeroSince.total === all.total), zeroSince && zeroSince.total);
+
+    const badSince = await callTool(TOKEN, 'list_flows', { since_seconds: 'abc' });
+    ok('since_seconds 非数字时报错', badSince.body.result.isError === true);
+
+    const hosts = toolJson(await callTool(TOKEN, 'list_hosts', { limit: 10 }));
+    ok(
+      'list_hosts 聚合出域名与条数',
+      !!(hosts && hosts.hosts.some((h) => h.key === '127.0.0.1' && h.count >= 2)),
+      hosts && JSON.stringify(hosts.hosts)
+    );
+    ok(
+      'list_hosts 带应用 / 设备 / 接口',
+      !!(
+        hosts &&
+        hosts.apps.length &&
+        hosts.devices.length &&
+        hosts.routes.some((r) => /mcp-other/.test(r.key))
+      ),
+      hosts && JSON.stringify({ apps: hosts.apps.length, routes: hosts.routes.map((r) => r.key) })
+    );
+
+    const hostsScoped = toolJson(await callTool(TOKEN, 'list_hosts', { app: '不存在的应用' }));
+    ok(
+      'list_hosts 按应用收窄后域名清空',
+      !!(hostsScoped && hostsScoped.scoped === true && hostsScoped.hosts.length === 0),
+      hostsScoped && JSON.stringify({ scoped: hostsScoped.scoped, hosts: hostsScoped.hosts.length })
+    );
 
     // ------------------------------------------------------ ⑦ 规则类工具
     const made = toolJson(

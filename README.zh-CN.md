@@ -477,7 +477,8 @@ iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户
 | 工具 | 作用 |
 | --- | --- |
 | `ireq_status` | 代理 / 控制台端口、局域网地址、流量与规则数量、证书信任、安全模式 |
-| `list_flows` / `get_flow` | 按关键词、方法、状态码、域名、应用筛流量；按 id 读完整请求响应与正文 |
+| `list_hosts` | 先看清全局：域名 / 应用 / 设备 / 接口各有多少条，按条数排序 |
+| `list_flows` / `get_flow` | 按域名、应用、设备 IP、接口、方法、状态码、关键词、时间窗筛流量；按 id 读完整请求响应与正文 |
 | `list_rules` / `get_rule` | 列规则（可按文件夹）、按 id 或路径读单条规则含响应体 |
 | `get_settings` | 抓包开关、解密端口、白名单、UA 别名、弱网参数 |
 | `create_rule` / `update_rule` / `delete_rule` | 增删改 Mock 规则（匹配方式 contains / wildcard / regex） |
@@ -486,6 +487,13 @@ iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户
 | `set_network_sim` | 开弱网、断网、超时，按应用 / 域名 / IP 加规则 |
 | `set_passthrough` | 管理「跳过解密的域名」 |
 | `clear_flows` | 清空内存里的流量列表 |
+
+流量攒到几千条时，别让 AI 从第一页开始翻。推荐两步：
+
+1. `list_hosts`（可加 `app` / `ip` / `since_seconds` 收窄）拿到域名、应用、设备、接口各自的条数；
+2. 挑中之后再 `list_flows` 精确筛：`host`（域名）、`app`（应用，逗号分隔多个）、`ip`（客户端 IP，`local` 表示本机）、`route`（接口，如 `GET /api/user`）、`method`、`status`（`2xx` / `404` / `error` / `json` 等）、`query`（关键词）、`since_seconds`（最近 N 秒，`0` 不限）、`only_mocked`。
+
+`list_flows` 会同时返回 `total`（匹配总数）与 `returned`（本次返回条数）；`has_more: true` 说明还有更多，要么缩小条件、要么把 `limit` 调大（上限 200）。
 
 **安全上做了这些**
 
@@ -542,7 +550,7 @@ node tools/check-network-sim.js  # HTTP/CONNECT 断网 / 弱网 / 超时、规�
 node tools/check-net-live.js     # 一键断网/弱网真生效 + 规则变更切断存量隧道 + 不误伤 + 状态条（23 项）
 node tools/check-simple-ui.js    # 顶栏更多 / 筛选更多 / 连接向导 / 快速 Mock / ⌘K 命令面板 / 就近菜单（26 项）
 node tools/check-tree-fs.js     # 文件树当文件管理器：行内新建 / 双击改名 / 复制粘贴 / 绝对路径 / reveal（28 项）
-node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协议握手 / 14 个工具 / scope / 撤销 / Origin / stdio 桥（73 项）
+node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协议握手 / 15 个工具 / 筛选与聚合 / scope / 撤销 / Origin / stdio 桥（84 项）
 ```
 
 `check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；

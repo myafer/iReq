@@ -473,7 +473,8 @@ A read-only token does not even see write tools in `tools/list`, and calls are r
 | Tool | Purpose |
 | --- | --- |
 | `ireq_status` | Proxy / console ports, LAN addresses, flow and rule counts, CA trust, safe mode |
-| `list_flows` / `get_flow` | Filter traffic by keyword, method, status, host, app; read one flow with bodies |
+| `list_hosts` | See the big picture first: host / app / device / route counts, largest first |
+| `list_flows` / `get_flow` | Filter traffic by host, app, client IP, route, method, status, keyword or time window; read one flow with bodies |
 | `list_rules` / `get_rule` | List rules (optionally per folder) and read a single rule with its body |
 | `get_settings` | Capture, decryption ports, allowlist, UA aliases, network-sim parameters |
 | `create_rule` / `update_rule` / `delete_rule` | Manage mock rules (contains / wildcard / regex matching) |
@@ -482,6 +483,13 @@ A read-only token does not even see write tools in `tools/list`, and calls are r
 | `set_network_sim` | Weak network, offline, timeout, with per-app / host / IP rules |
 | `set_passthrough` | Manage the "skip decryption" allowlist |
 | `clear_flows` | Clear the in-memory flow list |
+
+When the capture has thousands of flows, don't make the model page through them. Two steps:
+
+1. `list_hosts` (optionally narrowed by `app` / `ip` / `since_seconds`) returns counts for hosts, apps, devices and routes.
+2. Then filter precisely with `list_flows`: `host`, `app` (comma-separated), `ip` (client IP, `local` for this machine), `route` (e.g. `GET /api/user`), `method`, `status` (`2xx` / `404` / `error` / `json` …), `query`, `since_seconds` (last N seconds, `0` for no limit), `only_mocked`.
+
+`list_flows` returns both `total` (all matches) and `returned` (this page); `has_more: true` means there are more — narrow the filters or raise `limit` (max 200).
 
 **Security notes**
 
@@ -538,7 +546,7 @@ node tools/check-network-sim.js  # offline / slow / timeout on HTTP + CONNECT, r
 node tools/check-net-live.js     # one-click offline/slow really works + rule change drops live tunnels + no false positives + status strip (23 items)
 node tools/check-simple-ui.js    # top-bar More / filter More / connection guide / Quick Mock / ⌘K palette / context menus (26 items)
 node tools/check-tree-fs.js     # file tree as a file manager: inline create / double-click rename / copy-paste / absolute path / reveal (28 items)
-node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake / 14 tools / scopes / revoke / Origin / stdio bridge (73 items)
+node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake / 15 tools / filters / scopes / revoke / Origin / stdio bridge (84 items)
 ```
 
 `check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;
