@@ -35,6 +35,7 @@ Going deeper: [API and SSE events](docs/api.md) · [MCP access](docs/mcp.md) · 
 | Streamlined interaction | Only Capture / Rules / Clear / ⋯ More stay in the top bar; low-frequency tools live in "⋯ More", actions appear next to the selected request (right-click / Network ▾), and ⌘K finds both requests and commands |
 | VSCode-style rule workspace | Activity bar + explorer + multi-tab editor + breadcrumb + status bar; clicking a rule opens a tab instead of a modal, several rules can stay open, unsaved edits survive tab switches, with ⌘S / ⌘W / ⌘1..9 |
 | MCP access (AI clients) | Optional: use iReq as an **MCP server** so an AI client can read traffic, mock responses and tune network simulation. **Off by default, token-authenticated** (hashes only, shown once, revocable, read vs read+write). [How to connect](docs/mcp.md) |
+| History | Every "Clear" leaves one entry — open it in the sidebar to replay that batch (double-click to rename, ✕ to delete). The list **keeps loading as you scroll**: memory holds only the configured count, older requests come from today's on-disk file |
 
 ## Quick start
 

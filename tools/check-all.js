@@ -37,6 +37,8 @@ const SUITES = [
   ['文件树编辑', 'check-tree-fs.js'],
   // 自带上游 + 临时令牌，跑完把 MCP 关掉、令牌撤销
   ['MCP 接入', 'check-mcp.js'],
+  // 会清空流量并生成历史记录，跑完恢复内存上限、删掉自己造的历史
+  ['历史记录与分页', 'check-history.js'],
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
   ['控制坞', 'check-dock.js'],

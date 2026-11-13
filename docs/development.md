@@ -92,11 +92,18 @@ Every item in the sidebar's "App" group, the second line of the request list, an
   other requests return `508 Loop Detected` to prevent infinite self-forwarding. Opening the proxy port with `https://` returns a clear 403 telling you to use `http://`.
 - **WebSocket**: the handshake is detected and recorded, frames pass through as a raw tunnel, no decryption.
 - **Console listens on localhost only by default** (127.0.0.1), while the proxy listens on 0.0.0.0 so phones can connect. The console has no auth — don't change it to 0.0.0.0 on a public network.
-- **Clear also archives today's capture**: clicking "Clear" doesn't just clear memory, it also renames the day's `flows-YYYY-MM-DD.jsonl` to
-  `.cleared-<timestamp>`. Otherwise restoring history on restart would "resurrect" everything you just cleared. Archived files aren't auto-loaded,
-  but they do take real disk space, so both are capped: **at most 3 archives and 50MB total, and the last 7 daily files within 200MB**,
-  oldest dropped first (checked on startup too). Without a cap, a few hundred MB a day plus frequent clearing adds up to gigabytes within a week —
-  Settings › Advanced shows the current size and file count of the data folder.
+- **Clear leaves a history entry**: clicking "Clear" doesn't just clear memory, it renames the day's `flows-YYYY-MM-DD.jsonl` to
+  `.cleared-<timestamp>` and registers an entry in `data/history.json` (named after the moment you cleared). Otherwise restoring
+  history on restart would "resurrect" everything you just cleared.
+  - **Those archives are never auto-deleted**: they are the "History" entries in the sidebar, and deleting them is the user's call —
+    auto-pruning would silently erase something they can see. Disk usage shows at the bottom of the sidebar group and in Settings.
+  - **Replay reads backwards from the end of the file in 64KB chunks**: archives reach hundreds of MB, and reading the whole file
+    into memory before slicing it makes every click stall. The cursor is a byte offset, not a line number — line numbers mean
+    counting from the top, which gets slower the further back you go.
+  - The count is computed on the first open (honouring the active filters) and cached in the index.
+- **Only daily files are capped**: `flows-YYYY-MM-DD.jsonl` is invisible to users, so keep the last 7 within 200MB, oldest dropped
+  first (also checked on startup). Uncapped, a few hundred MB a day adds up to gigabytes within a week.
+  Settings › Advanced shows the current data folder size and file count.
 - **Taking over the local system proxy means the exit must restore it exactly**: just setting the proxy state to off isn't enough — macOS keeps
   `Server/Port` even when off, plus the bypass domains we added — so the next time the user manually enables the proxy it connects to an already-stopped iReq.
   So a full snapshot is saved to disk before enabling, and on release the host/port and bypass domains are written back together; `localhost / 127.0.0.1 / ::1 / *.local`
@@ -149,6 +156,7 @@ node tools/check-net-live.js     # one-click offline/slow really works + rule ch
 node tools/check-simple-ui.js    # top-bar More / filter More / connection guide / Quick Mock / ⌘K palette / context menus (26 items)
 node tools/check-tree-fs.js     # file tree as a file manager: inline create / double-click rename / copy-paste / absolute path / reveal (28 items)
 node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake / 15 tools / filters / scopes / revoke / Origin / stdio bridge (84 items)
+node tools/check-history.js     # history & paging: cursor paging / disk fallback / clear leaves an entry / replay / rename / delete (34 items)
 ```
 
 `check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;

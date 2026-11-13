@@ -8,6 +8,13 @@ MCP 相关端点（`/mcp` 与 `/api/mcp*`）的用法见 [MCP 接入](mcp.zh-CN.
 ```
 GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]、proxyPort、caTrust、caInfo、dataDir、safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
+GET    /api/flows/page?...      分页版：同上筛选 + cursor，回 { flows, nextCursor, hasMore, total, fromDisk }
+                                内存翻完会自动接着读当天落盘文件（cursor 传回来即可，格式不透明）
+GET    /api/history             历史记录列表 { items: [{id, name, file, count, bytes, createdAt}], stats }
+PATCH  /api/history/:id         { name } 改名（去空白，最长 60 字）
+DELETE /api/history/:id         删掉一条（文件也删）
+DELETE /api/history             清空全部历史
+GET    /api/history/:id/flows?...  回看：同上筛选 + cursor（字节游标），倒序分页
 GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }
@@ -47,7 +54,7 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthr
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough / rules-changed
+                                  network-sim / passthrough / rules-changed / history-changed
                                   （flow = 请求发起时的进行中占位记录；flow-update = 响应完成就地补完，
                                    以及本机进程名异步回填；clear = 列表与侧栏同步清空；
                                    tls-remove = 加入跳过解密 / 握手成功后撤掉已解决的诊断行；

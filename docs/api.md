@@ -8,6 +8,13 @@ For the MCP endpoints (`/mcp` and `/api/mcp*`) see [MCP access](mcp.md).
 ```
 GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, iface}], proxyPort, caTrust, caInfo, dataDir, safeMode
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
+GET    /api/flows/page?...      Paged version: same filters + cursor → { flows, nextCursor, hasMore, total, fromDisk }
+                                When memory runs out it continues from today's on-disk file (cursor is opaque)
+GET    /api/history             History list { items: [{id, name, file, count, bytes, createdAt}], stats }
+PATCH  /api/history/:id         { name } rename (trimmed, max 60 chars)
+DELETE /api/history/:id         Delete one entry (file goes too)
+DELETE /api/history             Clear all history
+GET    /api/history/:id/flows?...  Replay: same filters + cursor (byte offset), newest first
 GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
@@ -39,7 +46,7 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthr
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough / rules-changed
+                                  network-sim / passthrough / rules-changed / history-changed
                                   (flow = in-flight placeholder emitted when the request starts; flow-update = response
                                    completion in place, plus async local process name backfill; clear = list + sidebar reset;
                                    tls-remove = resolved handshake failures after allowlisting / a successful handshake;

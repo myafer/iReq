@@ -24,7 +24,14 @@ const { seedFlows } = require('./_seed');
     }))
   );
   console.log('侧栏分组:', JSON.stringify(groups));
-  checks.push(['五个分组齐全', groups.length === 5 && ['收藏', '设备', '应用', '域名', '接口结构'].every((t) => groups.some((g) => g.title === t))]);
+  checks.push([
+    '六个分组齐全（历史记录 + 收藏 + 设备 / 应用 / 域名 / 接口结构）',
+    groups.length === 6 &&
+      ['历史记录', '收藏', '设备', '应用', '域名', '接口结构'].every((t) =>
+        groups.some((g) => g.title === t)
+      ),
+    groups.map((g) => g.title).join('/'),
+  ]);
   checks.push(['四个数据维度都有条目', ['设备', '应用', '域名', '接口结构'].every((t) => groups.find((g) => g.title === t)?.items > 0)]);
 
   const hosts = await page.$$eval('[data-facet="host"]', (els) =>
