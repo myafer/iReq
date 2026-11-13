@@ -24,6 +24,26 @@ function savePersistedConfig(dataDir, cfg) {
   // 首启引导只值得看一次：存服务端而不是 localStorage，
   // 否则换个浏览器 / 清一次缓存就又弹一遍。
   if (cfg.onboarded === true) out.onboarded = true;
+  // MCP 接入：开关 + 令牌哈希（明文永不落盘）+ scope。属于授权凭据，必须持久化。
+  if (cfg.mcp && typeof cfg.mcp === 'object') {
+    out.mcp = {
+      enabled: cfg.mcp.enabled === true,
+      tokens: Array.isArray(cfg.mcp.tokens)
+        ? cfg.mcp.tokens.map((t) => ({
+            id: String(t.id || ''),
+            name: String(t.name || ''),
+            prefix: String(t.prefix || ''),
+            salt: String(t.salt || ''),
+            hash: String(t.hash || ''),
+            scopes: Array.isArray(t.scopes) ? t.scopes.filter((s) => s === 'read' || s === 'write') : ['read'],
+            createdAt: Number(t.createdAt) || 0,
+            lastUsedAt: Number(t.lastUsedAt) || 0,
+            calls: Number(t.calls) || 0,
+            expiresAt: Number(t.expiresAt) || 0,
+          }))
+        : [],
+    };
+  }
   try {
     fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(out, null, 2) + '\n');
   } catch {

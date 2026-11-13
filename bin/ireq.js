@@ -6,6 +6,7 @@
  *   ireq start [-p 9090] [-u 9091] [--bind 0.0.0.0] [--ui-host 127.0.0.1]
  *                 [--data <dir>] [--ca-dir <dir>] [--no-persist] [--no-ui] [--passthrough a.com,b.com]
  *   ireq ca [--print]      查看 / 导出根证书
+ *   ireq mcp [--url <u>] [--token <t>]   stdio 版 MCP 服务（把 iReq 给 AI 客户端用）
  *   ireq --version
  */
 
@@ -64,6 +65,13 @@ iReq —— 轻量跨平台 HTTP(S) 抓包 / Mock / 重放
   ireq ca --print           把根证书 PEM 输出到终端
   ireq local status         查看本机系统代理状态
   ireq local on|off         接管 / 释放本机系统代理（抓本机浏览器、桌面 App 的流量）
+
+  ireq mcp                  把 iReq 以 stdio 形式接给 AI 客户端（MCP）
+      --url <url>             MCP 端点，默认 http://127.0.0.1:9091/mcp
+      --token <token>         访问令牌（在控制台「设置 › MCP 接入」生成）
+      --timeout-ms <n>        单次调用超时，默认 120000
+    说明：先在控制台打开 MCP 接入并生成令牌；令牌只显示一次。
+          支持 HTTP 的客户端可直接连 --url，不需要这个桥。
 
 安装根证书（只需一次，桌面版在「证书与连接」里可一键安装）:
   macOS   security add-trusted-cert -r trustRoot \\
@@ -135,6 +143,16 @@ async function main() {
     console.log(`安全 Web    : ${st.secure ? `${st.secure.enabled ? '开' : '关'} ${st.secure.host}:${st.secure.port}` : '—'}`);
     console.log(`iReq 接管: ${st.ours ? '是' : '否'}`);
     console.log(`\n开启命令:\n${sp.commands(st.service).on}\n\n关闭命令:\n${sp.commands(st.service).off}`);
+    return;
+  }
+
+  if (cmd === 'mcp') {
+    const { runStdio } = require('../src/mcp-stdio');
+    await runStdio({
+      url: args.url,
+      token: args.token,
+      timeoutMs: Number(args['timeout-ms']) || 120000,
+    });
     return;
   }
 

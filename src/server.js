@@ -15,6 +15,8 @@ const { parseAppAliases } = require('./derive');
 const { savePersistedConfig } = require('./user-config');
 const { normalize: normalizeNetworkSim } = require('./network-sim');
 const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
+const { McpAuth } = require('./mcp-auth');
+const mcp = require('./mcp');
 
 /**
  * 列出非回环 IPv4 地址及其网卡。控制台顶栏要展示「局域网 IP」并允许在多网卡间切换，
@@ -148,6 +150,8 @@ class ConsoleServer {
     this.publicDir = publicDir || path.join(__dirname, '..', 'public');
     this.clients = new Set();
     this.server = null;
+    /* MCP 授权：令牌只存哈希，界面里生成与撤销；默认关闭，开了也必须有令牌 */
+    this.mcpAuth = new McpAuth({ config: this.config, dataDir: this.dataDir });
     this._ensurePassthroughMeta();
   }
 
@@ -225,6 +229,23 @@ class ConsoleServer {
     return { passthrough: next, killed };
   }
 
+  /**
+   * 弱网改动的唯一入口（设置页 / 控制坞 / MCP 工具都走这里）：
+   * 归一化 → 切断受影响的存量连接 → 广播给所有窗口。
+   * 规则只在新连接进来时判定，不切存量的话「中途打开断网」会看起来没生效。
+   */
+  setNetworkSim(raw) {
+    const prev = this.config.networkSim;
+    const next = normalizeNetworkSim(raw);
+    this.config.networkSim = next;
+    const killed =
+      this.proxy && typeof this.proxy.applyNetworkSim === 'function'
+        ? this.proxy.applyNetworkSim(prev, next)
+        : 0;
+    this._broadcast({ type: 'network-sim', sim: next, killed });
+    return { sim: next, killed };
+  }
+
   /** 刷新信任状态并同步给代理（决定本机 HTTPS 是否进入安全透传模式） */
   _syncTrust(force = false) {
     if (!this.caTrust) return null;
@@ -287,6 +308,8 @@ class ConsoleServer {
     const pathname = decodeURIComponent(url.pathname);
 
     if (pathname === '/api/events') return this._sse(req, res);
+    /* MCP 端点：JSON-RPC over HTTP，唯一带令牌认证的入口（其余 /api 供本机控制台用） */
+    if (pathname === '/mcp') return mcp.handleHttp(req, res, { server: this, auth: this.mcpAuth });
     if (pathname.startsWith('/api/')) return this._api(req, res, pathname, url);
     if (pathname === '/ca.pem' || pathname === '/ireq-ca.pem') return this._caFile(res, 'pem');
     if (pathname === '/ca.cer' || pathname === '/ca.crt') return this._caFile(res, 'der');
@@ -363,6 +386,9 @@ class ConsoleServer {
         update: this.updater ? this.updater.status() : null,
       });
     }
+
+    /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
+    if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
 
     /** 前端批量问图标：本机 .app 直接给 URL，取不到的由前端用内置 / 默认图标 */
     if (parts[1] === 'app-icons' && method === 'GET') {
@@ -676,7 +702,7 @@ class ConsoleServer {
     }
 
     if (parts[1] === 'config') {
-      if (method === 'GET') return this._json(res, 200, this.config);
+      if (method === 'GET') return this._json(res, 200, this._publicConfig());
       if (method === 'PUT') {
         const body = (await this._body(req)) || {};
         if (typeof body.capture === 'boolean') this.config.capture = body.capture;
@@ -712,21 +738,10 @@ class ConsoleServer {
         // 首启引导「看过了」：只允许置 true，不给前端把它翻回去的口子
         if (body.onboarded === true) this.config.onboarded = true;
         // 网络模拟是会话级的（不落盘，重启自动恢复），改动实时同步到所有已开窗口。
-        // 关键：规则只在新连接进来时判定，必须顺手断掉受影响的存量长连接，
-        // 否则用户中途打开断网，App 复用已有隧道照样能刷出数据。
-        if (body.networkSim !== undefined) {
-          const prev = this.config.networkSim;
-          const next = normalizeNetworkSim(body.networkSim);
-          this.config.networkSim = next;
-          const killed =
-            this.proxy && typeof this.proxy.applyNetworkSim === 'function'
-              ? this.proxy.applyNetworkSim(prev, next)
-              : 0;
-          this._broadcast({ type: 'network-sim', sim: next, killed });
-        }
+        if (body.networkSim !== undefined) this.setNetworkSim(body.networkSim);
         // 用户偏好落盘（更新开关、跳过解密白名单），重启后保留
         if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
-        return this._json(res, 200, this.config);
+        return this._json(res, 200, this._publicConfig());
       }
     }
 
@@ -759,6 +774,104 @@ class ConsoleServer {
     }
 
     return this._json(res, 404, { error: '未知接口: ' + pathname });
+  }
+
+  /**
+   * MCP 管理接口（本机控制台专用，和 /api/* 同权限）：
+   *   GET    /api/mcp                 → 状态 + 工具清单 + 令牌 + 最近审计
+   *   PUT    /api/mcp                 → { enabled } 开关
+   *   POST   /api/mcp/tokens          → { name, scopes, expiresInDays } 生成（明文只返回一次）
+   *   DELETE /api/mcp/tokens/:id      → 撤销
+   *   DELETE /api/mcp/audit           → 清空审计
+   */
+  async _apiMcp(req, res, parts, method, url) {
+    const auth = this.mcpAuth;
+    const endpoint = `http://127.0.0.1:${this.port}/mcp`;
+
+    if (parts[2] === 'tokens' && method === 'DELETE' && parts[3]) {
+      const ok = auth.revokeToken(parts[3]);
+      return this._json(res, ok ? 200 : 404, { ok, ...this._mcpView(endpoint) });
+    }
+
+    if (parts[2] === 'audit' && method === 'DELETE') {
+      auth.clearAudit();
+      return this._json(res, 200, { ok: true, audit: [] });
+    }
+
+    if (parts[2] === 'tokens' && method === 'POST') {
+      const body = (await this._body(req)) || {};
+      const scopes = body.scopes === 'read' ? ['read'] : ['read', 'write'];
+      const out = auth.createToken({
+        name: body.name,
+        scopes,
+        expiresInDays: body.expiresInDays,
+      });
+      if (!auth.enabled) auth.setEnabled(true); /* 生成令牌即视为要用，省一步 */
+      return this._json(res, 200, {
+        ok: true,
+        token: out.token,
+        entry: out.entry,
+        endpoint,
+        /* 直接可粘贴的客户端配置：token 明文只在这个响应里出现 */
+        snippet: {
+          http: {
+            mcpServers: {
+              ireq: { type: 'http', url: endpoint, headers: { Authorization: `Bearer ${out.token}` } },
+            },
+          },
+          stdio: {
+            mcpServers: {
+              ireq: {
+                command: 'ireq',
+                args: ['mcp', '--url', endpoint, '--token', out.token],
+              },
+            },
+          },
+        },
+        ...this._mcpView(endpoint),
+      });
+    }
+
+    if (parts.length === 2 && method === 'GET') {
+      const limit = Number(url.searchParams.get('audit')) || 20;
+      return this._json(res, 200, { ...this._mcpView(endpoint), audit: auth.audit(limit) });
+    }
+
+    if (parts.length === 2 && method === 'PUT') {
+      const body = (await this._body(req)) || {};
+      if (typeof body.enabled !== 'boolean') {
+        return this._json(res, 400, { error: 'enabled 必须是布尔值' });
+      }
+      auth.setEnabled(body.enabled);
+      return this._json(res, 200, { ok: true, ...this._mcpView(endpoint) });
+    }
+
+    return this._json(res, 405, { error: '不支持的方法' });
+  }
+
+  /** MCP 状态视图（绝不含 hash / salt） */  _mcpView(endpoint) {
+    return {
+      enabled: this.mcpAuth.enabled,
+      endpoint,
+      protocols: mcp.PROTOCOL_VERSIONS,
+      protocols_latest: mcp.LATEST_PROTOCOL,
+      transport: 'streamable-http',
+      tools: mcp.TOOLS.map((t) => ({ name: t.name, title: t.title, scope: t.scope })),
+      tokens: this.mcpAuth.listTokens(),
+      stats: this.mcpAuth.stats(),
+    };
+  }
+
+  /** 配置外发前抹掉凭据：MCP 令牌的 hash / salt 绝不出进程 */
+  _publicConfig() {
+    const out = { ...this.config };
+    if (out.mcp) {
+      out.mcp = {
+        enabled: this.config.mcp.enabled === true,
+        tokenCount: (this.config.mcp.tokens || []).length,
+      };
+    }
+    return out;
   }
 
   _caFile(res, format = 'pem') {
