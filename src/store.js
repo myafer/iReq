@@ -17,6 +17,17 @@ const {
   deviceLabelOf,
 } = require('./local-address');
 
+/**
+ * 落盘封顶：清空产生的 .cleared-* 归档、以及每天一个的 flows-*.jsonl，
+ * 都不会自己消失。不清的话用一两周就是几百 MB（实测 31 个文件 682MB）。
+ * 归档留最近几个（够「刚清错了想捞回来」），日文件留最近几份（只读今天那份）。
+ */
+const ARCHIVE_KEEP = 3;
+const ARCHIVE_MAX_BYTES = 50 * 1024 * 1024;
+const DAILY_KEEP = 7;
+/** 单日流量能到几百 MB，7 份叠起来就上 GB，份数之外再加一道总量线 */
+const DAILY_MAX_BYTES = 200 * 1024 * 1024;
+
 class FlowStore extends EventEmitter {
   constructor({ dir, maxFlows = 2000, persist = true, loadRecent = 300 } = {}) {
     super();
@@ -29,6 +40,7 @@ class FlowStore extends EventEmitter {
     if (persist) {
       fs.mkdirSync(this.dir, { recursive: true });
       this._loadRecent(loadRecent);
+      this._pruneDisk();
     }
   }
 
@@ -310,6 +322,73 @@ class FlowStore extends EventEmitter {
     };
   }
 
+  /**
+   * 磁盘封顶：归档按「数量 + 总量」双封顶，日文件按份数封顶，超出的从最旧的删起。
+   * 今天的落盘文件永远不动（正被追加写），删失败也不影响主流程，下次启动再试。
+   */
+  _pruneDisk() {
+    const out = { removed: 0, freed: 0 };
+    if (!this.persist) return out;
+    let names;
+    try {
+      names = fs.readdirSync(this.dir);
+    } catch (_) {
+      return out;
+    }
+    const todayName = path.basename(this._todayFile());
+    const archives = [];
+    const dailies = [];
+    for (const name of names) {
+      if (name === todayName) continue;
+      const abs = path.join(this.dir, name);
+      let st;
+      try {
+        st = fs.statSync(abs);
+      } catch (_) {
+        continue;
+      }
+      if (!st.isFile()) continue;
+      const arch = /^flows-\d{4}-\d{2}-\d{2}\.jsonl\.cleared-(\d+)$/.exec(name);
+      if (arch) {
+        // 用文件名里的时间戳排序：rename 会保留原文件的 mtime，按它排会错序
+        archives.push({ abs, size: st.size, ts: Number(arch[1]) });
+      } else if (/^flows-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)) {
+        dailies.push({ abs, name, size: st.size });
+      }
+    }
+
+    const doomed = [];
+    // 新的在前：前 ARCHIVE_KEEP 个保留，累计超过上限的（即使在前几个里）也删
+    archives.sort((a, b) => b.ts - a.ts);
+    let bytes = 0;
+    archives.forEach((a, i) => {
+      bytes += a.size;
+      if (i >= ARCHIVE_KEEP || bytes > ARCHIVE_MAX_BYTES) doomed.push(a);
+    });
+    // 日文件名即日期，字典序等于时间序；新的在后
+    dailies.sort((a, b) => (a.name < b.name ? -1 : 1));
+    // 数量封顶
+    if (dailies.length > DAILY_KEEP) doomed.push(...dailies.slice(0, dailies.length - DAILY_KEEP));
+    // 总量封顶：从最新往前累加，加上就超限的（且不是最新那份）删掉；至少留一份
+    let dailyBytes = 0;
+    for (let i = dailies.length - 1; i >= 0; i--) {
+      const next = dailyBytes + dailies[i].size;
+      if (i < dailies.length - 1 && next > DAILY_MAX_BYTES) doomed.push(dailies[i]);
+      else dailyBytes = next;
+    }
+
+    for (const f of [...new Set(doomed)]) {
+      try {
+        fs.unlinkSync(f.abs);
+        out.removed += 1;
+        out.freed += f.size;
+      } catch (_) {
+        /* 被占用 / 权限不足就跳过 */
+      }
+    }
+    return out;
+  }
+
   clear() {
     this.flows = [];
     this.index.clear();
@@ -317,13 +396,19 @@ class FlowStore extends EventEmitter {
       // 「清空」必须连落盘一起处理：只清内存的话，重启时 _loadRecent
       // 会把刚删掉的当日记录全部恢复回来，用户会以为清空按钮坏了。
       // 这里不直接删文件，而是归档成 .cleared-<ts>（不会被 _todayFile 匹配），
-      // 既不会复活，又保留了事后翻查原始抓包的可能。
+      // 既不会复活，又保留了事后翻查原始抓包的可能。归档本身由 _pruneDisk 封顶，
+      // 否则每点一次清空就多一份几百 MB 的拷贝。
       try {
         const file = this._todayFile();
-        if (fs.existsSync(file)) fs.renameSync(file, `${file}.cleared-${Date.now()}`);
+        if (fs.existsSync(file)) {
+          // 同一毫秒内连续清空两次会重名，rename 会静默覆盖前一份归档
+          const stamp = Date.now() + (this._clearSeq = (this._clearSeq || 0) + 1);
+          fs.renameSync(file, `${file}.cleared-${stamp}`);
+        }
       } catch (_) {
         /* 归档失败不影响内存清空 */
       }
+      this._pruneDisk();
     }
     this.emit('clear');
   }

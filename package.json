@@ -1,6 +1,6 @@
 {
   "name": "ireq",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "private": true,
   "description": "iReq - 轻量跨平台 HTTP(S) 抓包 / Mock / 重放工具",
   "author": "myafer",

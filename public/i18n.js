@@ -34,6 +34,8 @@
     [/^(\d+) 小时前 · 调用 (\d+) 次$/, function (m, a, b) { return a + ' h ago · ' + b + (b === '1' ? ' call' : ' calls'); }],
     [/^(\d+) 天前 · 调用 (\d+) 次$/, function (m, a, b) { return a + ' d ago · ' + b + (b === '1' ? ' call' : ' calls'); }],
     [/^从未使用 · 调用 (\d+) 次$/, function (m, a) { return 'Never used · ' + a + (a === '1' ? ' call' : ' calls'); }],
+    // 设置页数据目录占用：大小和文件数都是动态的
+    [/^数据目录占用 (.+) · (\d+) 个文件$/, function (m, a, b) { return 'Data folder ' + a + ' · ' + b + (b === '1' ? ' file' : ' files'); }],
     // 跳过解密管理列表：条数 / 命中数 / 域名是动态的，必须抢在通用「X 条」「匹配 X」之前
     [/^已加入 (\d+) 条规则$/, function (m, a) { return a + (a === '1' ? ' rule' : ' rules') + ' added'; }],
     [/^已透传 (\d+) 次连接$/, function (m, a) { return a + (a === '1' ? ' connection' : ' connections') + ' passed through'; }],

@@ -130,7 +130,8 @@ function fmtSize(n) {
   if (!n) return '0 B';
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1024 / 1024).toFixed(2) + ' MB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
 function fmtTime(ms) {
@@ -4709,6 +4710,19 @@ function bindMcp() {
   }
 }
 
+/** 设置页显示 data 目录占用：flows 攒多了很占地方，用户不会自己去访达里数文件 */
+async function renderDiskUsage() {
+  const el = $('#stDiskUsage');
+  if (!el) return;
+  try {
+    const cfg = await api('/api/config');
+    const du = cfg && cfg.diskUsage;
+    el.textContent = du ? `数据目录占用 ${fmtSize(du.bytes)} · ${du.files} 个文件` : '数据目录占用 —';
+  } catch {
+    el.textContent = '数据目录占用 —';
+  }
+}
+
 async function openSettings() {
   // 打开时用服务端值覆盖输入框；直接赋值不触发 input，不会误判成用户改动
   clearTimeout(settingsSaveTimer);
@@ -4735,6 +4749,7 @@ async function openSettings() {
   loadMcp();
   $('#stMax').value = st.store ? st.store.maxFlows : 2000;
   $('#stH2').checked = st.h2Enabled !== false;
+  renderDiskUsage();
   const infoAddr = currentAddr();
   $('#stInfo').textContent = [
     `代理地址    : ${addrFull(infoAddr)}（${infoAddr.label}）`,

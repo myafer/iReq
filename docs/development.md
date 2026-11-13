@@ -94,7 +94,9 @@ Every item in the sidebar's "App" group, the second line of the request list, an
 - **Console listens on localhost only by default** (127.0.0.1), while the proxy listens on 0.0.0.0 so phones can connect. The console has no auth — don't change it to 0.0.0.0 on a public network.
 - **Clear also archives today's capture**: clicking "Clear" doesn't just clear memory, it also renames the day's `flows-YYYY-MM-DD.jsonl` to
   `.cleared-<timestamp>`. Otherwise restoring history on restart would "resurrect" everything you just cleared. Archived files aren't auto-loaded,
-  open them manually to look back later; if you don't want them, just delete them.
+  but they do take real disk space, so both are capped: **at most 3 archives and 50MB total, and the last 7 daily files within 200MB**,
+  oldest dropped first (checked on startup too). Without a cap, a few hundred MB a day plus frequent clearing adds up to gigabytes within a week —
+  Settings › Advanced shows the current size and file count of the data folder.
 - **Taking over the local system proxy means the exit must restore it exactly**: just setting the proxy state to off isn't enough — macOS keeps
   `Server/Port` even when off, plus the bypass domains we added — so the next time the user manually enables the proxy it connects to an already-stopped iReq.
   So a full snapshot is saved to disk before enabling, and on release the host/port and bypass domains are written back together; `localhost / 127.0.0.1 / ::1 / *.local`

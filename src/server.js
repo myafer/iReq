@@ -871,7 +871,40 @@ class ConsoleServer {
         tokenCount: (this.config.mcp.tokens || []).length,
       };
     }
+    // 设置页要显示 data 目录占了多大：用户不会自己跑去 Application Support 里数文件，
+    // 而 flows 一旦失控（清空归档堆积）能涨到几百 MB。
+    out.diskUsage = this._diskUsage();
     return out;
+  }
+
+  /** data 目录的文件数与总字节数；只在拉配置时算一次，几百个文件的开销可以忽略 */
+  _diskUsage() {
+    if (!this.dataDir) return null;
+    let bytes = 0;
+    let files = 0;
+    const walk = (dir, depth) => {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (_) {
+        return;
+      }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (depth < 6) walk(p, depth + 1);
+        } else if (e.isFile()) {
+          try {
+            bytes += fs.statSync(p).size;
+            files += 1;
+          } catch (_) {
+            /* 文件刚好被删掉 */
+          }
+        }
+      }
+    };
+    walk(this.dataDir, 0);
+    return { bytes, files };
   }
 
   _caFile(res, format = 'pem') {

@@ -92,6 +92,7 @@ window.ReqLiteI18N_EN = {
   "关于 iReq": "About iReq",
   "关闭": "Close",
   "内存保留条数": "Flows kept in memory",
+  "数据目录占用 —": "Data folder —",
   "内容类型": "Content type",
   "其他": "Other",
   "反馈与建议": "Feedback & ideas",
