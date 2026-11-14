@@ -151,7 +151,8 @@ function viaProxy(hostPort, p) {
     const item = hist.items[0];
     ok(
       '新记录用清空时刻命名',
-      /^\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(item.name),
+      // 后缀 " (2)" 是同一秒内第二次清空时的去重标记（服务端有意为之，不能重名覆盖）
+      /^\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?( \(\d+\))?$/.test(item.name),
       item.name
     );
     ok('记录里带条数与大小', item.count > 0 && item.bytes > 0, `count=${item.count} bytes=${item.bytes}`);

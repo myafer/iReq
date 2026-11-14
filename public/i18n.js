@@ -40,6 +40,22 @@
     [/^(\d+) 条 · 占用 (.+)$/, function (m, a, b) { return a + (a === '1' ? ' snapshot' : ' snapshots') + ' · ' + b; }],
     [/^(.+ · )?(\d+) 条 · (.+)$/, function (m, when, a, b) { return (when || '') + a + (a === '1' ? ' flow' : ' flows') + ' · ' + b; }],
     [/^双击改名 · (.+)$/, function (m, a) { return 'Double-click to rename · ' + a; }],
+    // 断点：队列进度与开启提示都是动态文案
+    [/^还有 (\d+) 条在排队（第 (\d+) 条）$/, function (m, a, b) {
+      return a + ' more waiting (#' + b + ')';
+    }],
+    [/^已为 (.+) 打开断点，下次命中会停下来$/, function (m, a) {
+      return 'Breakpoint on ' + a + ' — the next hit will pause';
+    }],
+    // 断点弹窗顶部：阶段 / body 体积 / 自动放行时间都是动态的
+    [/^(请求|响应)阶段 · (.+) · (\d+) 秒不处理会自动放行$/, function (m, a, b, c) {
+      return (a === '响应' ? 'Response' : 'Request') + ' phase · ' + b + ' · auto-releases in ' + c + 's';
+    }],
+    // 排序状态提示：字段名与条数都是动态的
+    [/^已按(耗时|大小|状态)排序 · 共 (\d+) 条$/, function (m, a, b) {
+      var en = { '耗时': 'duration', '大小': 'size', '状态': 'status' }[a] || a;
+      return 'Sorted by ' + en + ' · ' + b + (b === '1' ? ' flow' : ' flows');
+    }],
     // 导出历史：条数是动态的，整句翻译（必须排在下面的通用「N 条」之前）
     [/^已导出 (\d+) 条（达到上限，只导了最近的）$/, function (m, a) { return 'Exported ' + a + ' flow(s) — limit reached, most recent only'; }],
     [/^已导出 (\d+) 条$/, function (m, a) { return 'Exported ' + a + (a === '1' ? ' flow' : ' flows'); }],

@@ -25,7 +25,7 @@ const usedIds = new Set(
 
 // 由 renderDetail() / 规则树面包屑动态插入的元素，不在 index.html 静态结构中
 const DYNAMIC = new Set([
-  'tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'actNet', 'rtCrumbBack',
+  'tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'actNet', 'actBreak', 'rtCrumbBack',
 ]);
 
 const missing = [...usedIds].filter((id) => !htmlIds.has(id) && !DYNAMIC.has(id));

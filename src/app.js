@@ -11,6 +11,7 @@ const { FlowStore } = require('./store');
 const { RuleEngine } = require('./rules');
 const { BookmarkStore } = require('./bookmarks');
 const { ProxyServer } = require('./proxy');
+const { Breakpoints } = require('./breakpoint');
 const { ConsoleServer } = require('./server');
 const { SystemProxy } = require('./system-proxy');
 const { CaTrust } = require('./ca-trust');
@@ -85,12 +86,16 @@ async function createApp({
     /github\.com[/:]([^/]+)\/([^/.#]+)/
   );
 
+  // 断点：会话级，不落盘。上次没放行的断点不该在下次启动时继续拦人。
+  const breakpoints = new Breakpoints();
+
   const proxy = new ProxyServer({
     port: proxyPort,
     host: bindHost,
     ca,
     store,
     rules,
+    breakpoints,
     config: runtimeConfig,
   });
   const updater = new UpdateChecker({
@@ -114,6 +119,7 @@ async function createApp({
     appIcons,
     updater,
     dataDir,
+    breakpoints,
     publicDir: path.join(__dirname, '..', 'public'),
   });
 

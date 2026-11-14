@@ -65,11 +65,19 @@
           <div class="more-menu" id="moreMenu" hidden>
             <div class="more-head">工具</div>
             <button class="more-item" id="btnNetwork">网络模拟 <b id="netCount" hidden>0</b></button>
+            <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
             <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
             <button class="more-item" id="btnCa">证书与连接</button>
             <button class="more-item" id="btnSettings">设置</button>
             <button class="more-item" id="btnExport">导出 HAR</button>
             <a class="more-item upd-badge" id="updBadge" hidden target="_blank" rel="noreferrer" title="点击打开新版本发布页">↑ <span id="updBadgeVer"></span></a>
+            <div class="more-head">排序</div>
+            <div class="more-row sortctl" id="sortCtl">
+              <button type="button" data-sort="time" class="on" title="默认：时间倒序（最新的在上面）">时间<b class="sort-ind"></b></button>
+              <button type="button" data-sort="duration" title="按耗时排">耗时<b class="sort-ind"></b></button>
+              <button type="button" data-sort="size" title="按响应大小排">大小<b class="sort-ind"></b></button>
+              <button type="button" data-sort="status" title="按状态码排">状态<b class="sort-ind"></b></button>
+            </div>
             <div class="more-head">帮助</div>
             <a class="more-item" id="btnFeedback" href="https://github.com/myafer/iReq/issues/new/choose" target="_blank" rel="noreferrer" title="Bug、建议、想要的功能都可以提">反馈与建议</a>
             <div class="more-head">外观</div>
@@ -95,6 +103,13 @@
           />
         </svg>
         <input id="search" type="text" placeholder="搜 URL / 方法 / 状态码…" spellcheck="false" />
+        <button
+          class="search-body"
+          id="searchBody"
+          type="button"
+          aria-pressed="false"
+          title="把搜索范围扩到请求体 / 响应体（也可以直接输 body:关键词）"
+        >body</button>
         <kbd id="searchKbd">⌘K</kbd>
       </div>
       <div class="chips" id="chips"></div>
@@ -172,8 +187,8 @@
         <div class="listhead">
           <span class="c-method">方法</span>
           <span class="c-url">地址</span>
-          <span class="c-status">状态</span>
-          <span class="c-time">耗时</span>
+          <span class="c-status lh-sort" data-sort="status" role="button" tabindex="0" title="点一下按状态码排序，再点切换升序，第三次回到时间倒序">状态<b class="sort-ind"></b></span>
+          <span class="c-time lh-sort" data-sort="duration" role="button" tabindex="0" title="点一下按耗时排序，再点切换升序，第三次回到时间倒序">耗时<b class="sort-ind"></b></span>
         </div>
         <div class="list" id="list"></div>
         <div class="empty" id="listEmpty">
@@ -889,6 +904,70 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
     </div>
 
     <!-- 网络模拟 -->
+    <div class="modal" id="modalBreak" hidden>
+      <div class="modal-card net-dialog">
+        <div class="modal-head">
+          <h2>断点</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="net-top">
+            <label class="switch" title="关闭后规则暂停，正挂着的会立刻放行">
+              <input type="checkbox" id="bpEnabled" data-autofocus />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">启用</span>
+            </label>
+            <span class="hint">命中的请求会停下来等你改；一个人都不管时 60 秒自动放行</span>
+          </div>
+          <div class="net-sub">规则 <span class="hint">URL 包含这段文字就命中，* 是通配符，留空代表全部</span></div>
+          <div class="net-rules" id="bpRules"></div>
+          <div class="net-actions">
+            <button class="btn ghost" id="bpAdd">+ 添加规则</button>
+            <button class="btn ghost" id="bpClear">清空规则</button>
+          </div>
+          <details class="lp-details">
+            <summary>和 Mock 有什么区别？</summary>
+            <ul class="steps">
+              <li>Mock 是事先写死「这个地址永远返回这个」，断点是「这次让我看一眼、改一手再走」。</li>
+              <li>选「请求」：发出前停下来，能改方法 / URL / 头 / body。</li>
+              <li>选「响应」：上游回来了但还没给客户端，能改状态码和响应体。</li>
+              <li>停下来之后点「直接返回」就不碰上游了，客户端立刻收到你写的内容。</li>
+            </ul>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="modalHold" hidden>
+      <div class="modal-card hold-dialog">
+        <div class="modal-head">
+          <h2 id="holdTitle">断点：请求被拦下</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="hold-meta" id="holdMeta"></div>
+          <div class="hold-fields">
+            <label class="inline-field">方法 <input id="holdMethod" class="input mono tiny" spellcheck="false" /></label>
+            <label class="inline-field hold-url">URL <input id="holdUrl" class="input mono" spellcheck="false" /></label>
+          </div>
+          <div class="hold-sec"><span id="holdHeadersLabel">请求头</span><span class="hint">一行一个 key: value</span></div>
+          <textarea id="holdHeaders" class="input mono hold-ta" rows="4" spellcheck="false"></textarea>
+          <div class="hold-sec"><span>Body</span><span class="hint" id="holdBodyHint"></span></div>
+          <textarea id="holdBody" class="input mono hold-ta" rows="10" spellcheck="false"></textarea>
+          <div class="hold-status" id="holdStatusWrap" hidden>
+            <label class="inline-field">状态码 <input id="holdStatus" class="input mono tiny" type="number" min="100" max="599" /></label>
+            <span class="hint">改成别的值可以模拟异常返回，留空沿用上游</span>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="hint" id="holdQueue"></span>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="holdAbort" title="不碰上游，直接用下面这段 body 回给客户端">直接返回</button>
+          <button class="btn primary" id="holdResume">放行</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal" id="modalNetwork" hidden>
       <div class="modal-card net-dialog">
         <div class="modal-head">

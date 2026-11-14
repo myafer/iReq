@@ -17,6 +17,12 @@ const S = {
   selected: null,
   detailTab: 'overview',
   filter: { q: '', status: '', mocked: false, host: '', ip: '', app: [], route: '' },
+  /* 列表排序：'' = 时间倒序（内存队列本来的顺序）。其余见 SORT_LABELS。
+   * 排序只在实时列表生效 —— 历史回看是倒序分块读文件，跨块排序得整份读进内存。 */
+  sort: localStorage.getItem('reqlite-sort') || '',
+  sortDir: localStorage.getItem('reqlite-sort-dir') === 'asc' ? 'asc' : 'desc',
+  /* 搜索范围是否包含请求体 / 响应体（默认关：每条 body 最大 2MB，开着筛更慢） */
+  inBody: localStorage.getItem('reqlite-search-body') === '1',
   rules: [],
   rulesDir: localStorage.getItem('reqlite-rule-dir') || '', /* 文件树当前选中的目录（'' = 根），跨开关保留 */
   rulesTreeOpen: new Set(JSON.parse(localStorage.getItem('reqlite-rule-dirs') || '[]')),
@@ -41,6 +47,12 @@ const S = {
   status: {},
   /* 网络模拟规则（会话级，服务端不落盘） */
   networkSim: { enabled: true, latencyMs: 800, kbps: 64, timeoutMs: 30000, rules: [] },
+  /* 断点（会话级）：命中的请求 / 响应会挂起，等这个窗口放行 */
+  breakEnabled: false,
+  breakRules: [],
+  /* 待处理队列 + 当前正在编辑的那条 */
+  holdQueue: [],
+  holdCurrent: null,
   /* Mock 总开关（会话级）：false 时所有规则整体旁路 */
   mockEnabled: true,
   editingRule: null,
@@ -323,6 +335,20 @@ async function loadStatus() {
     S.mockEnabled = st.mockEnabled !== false;
     S.networkSim = normalizeNetSim(st.networkSim);
     syncNetBadge();
+    // 断点：刷新页面后角标与开关要跟服务端一致；有挂起的把队列补回来
+    if (st.breakpoints) {
+      S.breakEnabled = !!st.breakpoints.enabled;
+      S.breakRules = st.breakpoints.rules || [];
+      if (st.breakpoints.pending) {
+        try {
+          const cfg = await api('/api/breakpoints');
+          S.holdQueue = cfg.pending || [];
+        } catch (_) {
+          /* 拉不到就只显示计数 */
+        }
+        syncBreakBadge();
+      }
+    }
     applyAddr();
     renderDock();
     renderUpdate(st.update);
@@ -387,7 +413,70 @@ function flowFilterParams() {
   }
   // 应用是多选（侧栏勾选），逗号分隔传给服务端
   if (S.filter.app.length) params.set('app', S.filter.app.join(','));
+  // 排序与「搜正文」只影响实时列表；历史回看不要带，服务端会按时间倒序给
+  if (S.sort && !S.historyView) {
+    params.set('sort', S.sort);
+    params.set('dir', S.sortDir);
+  }
+  if (S.inBody && S.filter.q) params.set('body', '1');
   return params;
+}
+
+/* ---------------------------------------------------------------- 排序 */
+
+/* 提示行文案用（「已按耗时排序 · 共 N 条」） */
+const SORT_NAME = { duration: '耗时', size: '大小', status: '状态' };
+
+/** 排序改动统一走这里：切排序一律先降序，点同一项再翻向，再点回默认时间序 */
+function setSort(key, { toggleDirOnly = false } = {}) {
+  if (S.historyView) {
+    toast(netTr('历史回看按时间倒序，先回到实时再排序'));
+    return;
+  }
+  if (!key || key === 'time') {
+    S.sort = '';
+    S.sortDir = 'desc';
+  } else if (S.sort !== key) {
+    S.sort = key;
+    S.sortDir = 'desc';
+  } else if (toggleDirOnly) {
+    S.sortDir = S.sortDir === 'desc' ? 'asc' : 'desc';
+  } else if (S.sortDir === 'desc') {
+    S.sortDir = 'asc';
+  } else {
+    // 三态循环：降序 → 升序 → 取消（回到时间倒序）
+    S.sort = '';
+    S.sortDir = 'desc';
+  }
+  localStorage.setItem('reqlite-sort', S.sort);
+  localStorage.setItem('reqlite-sort-dir', S.sortDir);
+  syncSortUi();
+  loadFlows();
+}
+
+function syncSortUi() {
+  const cur = S.sort || 'time';
+  // 历史回看固定时间倒序，排序状态只是实时列表的偏好，回看时不能装成「已排序」
+  const liveSort = S.historyView ? '' : S.sort;
+  for (const b of $$('#sortCtl [data-sort]')) {
+    b.classList.toggle('on', (cur === b.dataset.sort) && !S.historyView);
+    const ind = b.querySelector('.sort-ind');
+    if (ind) ind.textContent = liveSort && liveSort === b.dataset.sort ? (S.sortDir === 'asc' ? '↑' : '↓') : '';
+  }
+  for (const th of $$('.listhead [data-sort]')) {
+    const active = !!liveSort && liveSort === th.dataset.sort;
+    th.classList.toggle('on', active);
+    const ind = th.querySelector('.sort-ind');
+    if (ind) ind.textContent = active ? (S.sortDir === 'asc' ? '↑' : '↓') : '';
+  }
+  // 搜索框的「body」开关
+  const sb = $('#searchBody');
+  if (sb) {
+    sb.classList.toggle('on', S.inBody);
+    sb.setAttribute('aria-pressed', S.inBody ? 'true' : 'false');
+  }
+  // 排序模式下后端一次给全，不会有下一页；提示行的文案由 syncListMore 按 S.sort 决定
+  syncListMore();
 }
 
 async function loadFlows() {
@@ -421,6 +510,7 @@ async function openHistory(item) {
   S.pageCursor = '';
   S.pageHasMore = false;
   syncHistBar();
+  syncSortUi();
   renderList();
   await loadHistoryFlows(item);
   // 侧栏的历史分组高亮跟着走
@@ -458,6 +548,7 @@ function backToLive() {
   S.selectedId = null;
   S.selected = null;
   syncHistBar();
+  syncSortUi();
   renderSide();
   loadFlows();
 }
@@ -484,8 +575,11 @@ function syncListMore() {
   const list = $('#list');
   if (!list) return;
   let el = list.querySelector('.list-more');
-  const empty = list.children.length === 0;
-  if (empty || (!S.pageHasMore && !S.pageLoading)) {
+  const rows = list.querySelectorAll('.row').length;
+  // 排序模式：全量重排后没有「下一页」概念，这行改成状态说明（否则用户会一直往下滑等加载）
+  // 历史回看不参与排序，仍按「往下滑继续加载」显示
+  const sorted = !!S.sort && !S.historyView;
+  if (!rows || (!sorted && !S.pageHasMore && !S.pageLoading)) {
     if (el) el.remove();
     return;
   }
@@ -496,11 +590,14 @@ function syncListMore() {
   } else if (el !== list.lastElementChild) {
     list.appendChild(el);
   }
+  el.classList.toggle('is-sorted', sorted);
   el.textContent = S.pageLoading
     ? '载入中…'
-    : S.historyView
-      ? '向下滚动继续加载'
-      : '向下滚动加载更早的请求';
+    : sorted
+      ? `已按${SORT_NAME[S.sort] || ''}排序 · 共 ${rows} 条`
+      : S.historyView
+        ? '向下滚动继续加载'
+        : '向下滚动加载更早的请求';
 }
 
 async function loadMoreFlows() {
@@ -2027,6 +2124,8 @@ function renderDetail() {
     ['response', '响应'],
     ['raw', '原始'],
   ];
+  // 重放出来的请求才有对照物：原请求可能已被清空，取不到就退化成「找不到」
+  if (f.replayOf) tabs.push(['diff', '对比原请求']);
 
   const bodyHtml =
     S.detailTab === 'overview'
@@ -2035,6 +2134,8 @@ function renderDetail() {
       ? tabRequest(f)
       : S.detailTab === 'response'
       ? tabResponse(f)
+      : S.detailTab === 'diff'
+      ? tabDiff(f)
       : tabRaw(f);
 
   pane.innerHTML = `
@@ -2053,6 +2154,7 @@ function renderDetail() {
         <span class="dactions">
           <button class="btn" id="actReplay">重放</button>
           <button class="btn" id="actMock">Mock 此请求</button>
+          <button class="btn ghost" id="actBreak" title="给这个路径加一条断点规则：下次命中时停下来让你改">断点</button>
           <button class="btn ghost" id="actNet">网络 ▾</button>
           <button class="btn ghost" id="actStar">☆ 收藏</button>
           <button class="btn ghost" id="actCurl">复制 cURL</button>
@@ -2087,6 +2189,7 @@ function renderDetail() {
 
   $('#actReplay')?.addEventListener('click', openReplay);
   $('#actMock')?.addEventListener('click', () => openQuickMock(f));
+  $('#actBreak')?.addEventListener('click', () => breakThisFlow(f));
   $('#actNet')?.addEventListener('click', (e) => openFlowNetMenu(e, f));
   $('#actStar')?.addEventListener('click', () => bookmarkFlow(f));
   $('#actCurl')?.addEventListener('click', () => {
@@ -2327,6 +2430,220 @@ function tabRaw(f) {
   return `${sec('请求原文', 'req', reqBin)}${sec('响应原文', 'res', resBin)}`;
 }
 
+/* ------------------------------------------------- 重放对比（diff） */
+
+/* 原请求缓存：重放产生的记录只带 replayOf（原请求 id），原请求可能已经被清空。
+ * 一次详情会话里只拉一次，取不到记成 'missing' 免得反复请求。 */
+S.diffBase = {};
+
+function ensureDiffBase(id) {
+  if (!id) return Promise.resolve();
+  if (S.diffBase[id]) return Promise.resolve();
+  return api('/api/flows/' + encodeURIComponent(id))
+    .then((d) => {
+      S.diffBase[id] = d && d.flow ? d.flow : d && d.id ? d : 'missing';
+    })
+    .catch(() => {
+      S.diffBase[id] = 'missing';
+    });
+}
+
+const DIFF_TEXT_MAX = 800; // 文本行 diff 的规模上限：DP 是 O(n*m)，超过就只比前 N 行
+
+function fmtDiffVal(v) {
+  if (v === undefined) return '—';
+  const s = typeof v === 'string' ? v : JSON.stringify(v);
+  const t = s === undefined ? String(v) : s;
+  return t.length > 240 ? t.slice(0, 240) + '…' : t;
+}
+
+/** 结构化对比：对象按 key、数组按下标递归，产出「某条路径变了什么」的扁平列表 */
+function jsonFlatDiff(a, b, prefix, out) {
+  const kindOf = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+  const ka = kindOf(a);
+  const kb = kindOf(b);
+  if (ka !== kb) {
+    out.push({ p: prefix || '(根)', type: 'change', a: fmtDiffVal(a), b: fmtDiffVal(b) });
+    return out;
+  }
+  if (ka === 'object') {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      const p = prefix ? `${prefix}.${k}` : k;
+      if (!(k in a)) out.push({ p, type: 'add', b: fmtDiffVal(b[k]) });
+      else if (!(k in b)) out.push({ p, type: 'del', a: fmtDiffVal(a[k]) });
+      else jsonFlatDiff(a[k], b[k], p, out);
+    }
+    return out;
+  }
+  if (ka === 'array') {
+    const n = Math.max(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      const p = `${prefix}[${i}]`;
+      if (i >= a.length) out.push({ p, type: 'add', b: fmtDiffVal(b[i]) });
+      else if (i >= b.length) out.push({ p, type: 'del', a: fmtDiffVal(a[i]) });
+      else jsonFlatDiff(a[i], b[i], p, out);
+    }
+    return out;
+  }
+  if (a !== b) out.push({ p: prefix || '(根)', type: 'change', a: fmtDiffVal(a), b: fmtDiffVal(b) });
+  return out;
+}
+
+/** 行级 LCS：返回 [{ type: 'same'|'add'|'del', text }]，用来对比非 JSON 的文本响应 */
+function lineDiff(aText, bText) {
+  let a = String(aText).split('\n');
+  let b = String(bText).split('\n');
+  if (a.length > DIFF_TEXT_MAX || b.length > DIFF_TEXT_MAX) {
+    a = a.slice(0, DIFF_TEXT_MAX);
+    b = b.slice(0, DIFF_TEXT_MAX);
+  }
+  const n = a.length;
+  const m = b.length;
+  const dp = new Int32Array((n + 1) * (m + 1));
+  const at = (i, j) => i * (m + 1) + j;
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[at(i, j)] =
+        a[i] === b[j] ? dp[at(i + 1, j + 1)] + 1 : Math.max(dp[at(i + 1, j)], dp[at(i, j + 1)]);
+    }
+  }
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ type: 'same', text: a[i] });
+      i += 1;
+      j += 1;
+    } else if (dp[at(i + 1, j)] >= dp[at(i, j + 1)]) {
+      out.push({ type: 'del', text: a[i] });
+      i += 1;
+    } else {
+      out.push({ type: 'add', text: b[j] });
+      j += 1;
+    }
+  }
+  while (i < n) out.push({ type: 'del', text: a[i++] });
+  while (j < m) out.push({ type: 'add', text: b[j++] });
+  return out;
+}
+
+/** 响应头对比：只看两边都关心的键，标出新增 / 删除 / 改动 */
+function headerDiff(oldH, newH) {
+  const norm = (h) => {
+    const o = {};
+    for (const [k, v] of Object.entries(h || {})) {
+      if (k.startsWith(':')) continue; // HTTP/2 伪头（:status 等）单独显示
+      o[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : String(v);
+    }
+    return o;
+  };
+  const a = norm(oldH);
+  const b = norm(newH);
+  const rows = [];
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (!(k in a)) rows.push({ key: k, type: 'add', b: b[k] });
+    else if (!(k in b)) rows.push({ key: k, type: 'del', a: a[k] });
+    else if (a[k] !== b[k]) rows.push({ key: k, type: 'change', a: a[k], b: b[k] });
+  }
+  // 值变动多的排前面（content-type / content-length 这类噪音不会被当成重点）
+  const weight = { change: 0, add: 1, del: 2 };
+  return rows.sort((x, y) => weight[x.type] - weight[y.type] || x.key.localeCompare(y.key));
+}
+
+function tabDiff(f) {
+  const base = S.diffBase[f.replayOf];
+  if (!base) {
+    ensureDiffBase(f.replayOf).then(() => {
+      if (S.selected && S.selected.id === f.id && S.detailTab === 'diff') renderDetail();
+    });
+    return '<div class="dsec-hint">正在取原请求…</div>';
+  }
+  if (base === 'missing') {
+    return '<div class="dsec-hint">原请求已经被清空或删除，没有可对比的对象。</div>';
+  }
+
+  const stat = (label, oldV, newV, cls) => {
+    const same = oldV === newV;
+    return `<div class="dstat ${same ? '' : 'changed'}">
+      <span class="dstat-k">${esc(label)}</span>
+      <span class="dstat-old">${esc(String(oldV))}</span>
+      <span class="dstat-arrow">→</span>
+      <span class="dstat-new ${esc(cls || '')}">${esc(String(newV))}</span>
+    </div>`;
+  };
+
+  const stats = [
+    stat('状态', `${base.status || '—'} ${base.statusText || ''}`.trim(), `${f.status || '—'} ${f.statusText || ''}`.trim()),
+    stat('耗时', fmtTime(base.duration), fmtTime(f.duration)),
+    stat('响应大小', fmtSize(base.resSize), fmtSize(f.resSize)),
+    stat('响应类型', base.resContentType || '—', f.resContentType || '—'),
+  ].join('');
+
+  const hrows = headerDiff(base.resHeaders, f.resHeaders);
+  const headerHtml = hrows.length
+    ? `<div class="sec"><div class="sec-head">响应头差异 <span class="hint">${hrows.length} 处</span></div>
+        <div class="dtab">${hrows
+          .map(
+            (r) => `<div class="drow ${r.type}">
+              <span class="dsign">${r.type === 'add' ? '+' : r.type === 'del' ? '−' : '~'}</span>
+              <span class="dkey">${esc(r.key)}</span>
+              <span class="dval">${esc(r.type === 'change' ? `${r.a}  →  ${r.b}` : r.a || r.b)}</span>
+            </div>`
+          )
+          .join('')}</div></div>`
+    : '<div class="sec"><div class="sec-head">响应头差异 <span class="hint">没有差异</span></div></div>';
+
+  const oldBody = String(base.resBody || '');
+  const newBody = String(f.resBody || '');
+  let bodyHtml = '';
+  if (!oldBody && !newBody) {
+    bodyHtml = '<div class="sec"><div class="sec-head">响应体差异 <span class="hint">两边都是空的</span></div></div>';
+  } else if (oldBody === newBody) {
+    bodyHtml = '<div class="sec"><div class="sec-head">响应体差异 <span class="hint">完全一致</span></div></div>';
+  } else {
+    let pa = null;
+    let pb = null;
+    try {
+      pa = JSON.parse(oldBody);
+      pb = JSON.parse(newBody);
+    } catch (_) {
+      /* 不是 JSON，走文本行对比 */
+    }
+    if (pa !== null && pb !== null) {
+      const rows = jsonFlatDiff(pa, pb, '', []);
+      bodyHtml = `<div class="sec"><div class="sec-head">响应体差异 <span class="hint">按 JSON 结构比，${rows.length} 处</span></div>
+        <div class="dtab">${rows
+          .map(
+            (r) => `<div class="drow ${r.type}">
+              <span class="dsign">${r.type === 'add' ? '+' : r.type === 'del' ? '−' : '~'}</span>
+              <span class="dkey">${esc(r.p)}</span>
+              <span class="dval">${esc(r.type === 'change' ? `${r.a}  →  ${r.b}` : r.a || r.b)}</span>
+            </div>`
+          )
+          .join('')}</div></div>`;
+    } else {
+      const lines = lineDiff(oldBody, newBody);
+      const changed = lines.filter((l) => l.type !== 'same').length;
+      const truncated = base.resBody && newBody && (oldBody.split('\n').length > DIFF_TEXT_MAX || newBody.split('\n').length > DIFF_TEXT_MAX);
+      bodyHtml = `<div class="sec"><div class="sec-head">响应体差异 <span class="hint">按行比，${changed} 行变化${
+        truncated ? `（只比了前 ${DIFF_TEXT_MAX} 行）` : ''
+      }</span></div>
+        <pre class="code-block raw-view diff-view">${lines
+          .map((l) => `<div class="dline ${l.type}"><span class="dsign">${l.type === 'add' ? '+' : l.type === 'del' ? '−' : ' '}</span>${esc(l.text)}</div>`)
+          .join('')}</pre></div>`;
+    }
+  }
+
+  return `
+    <div class="dsec-hint diff-head">左边是原请求（#${esc(String(f.replayOf))}），右边是这次重放的结果。
+      <button class="btn ghost" data-goto="${esc(String(f.replayOf))}">打开原请求</button></div>
+    <div class="sec"><div class="sec-head">概要</div><div class="dstats">${stats}</div></div>
+    ${headerHtml}
+    ${bodyHtml}`;
+}
+
 function toCurl(f) {
   const skip = ['host', 'content-length', 'connection', 'accept-encoding', 'proxy-connection'];
   const parts = [`curl -X ${f.method} '${f.url}'`];
@@ -2370,6 +2687,11 @@ function closeModals() {
   if (!$('#modalNetwork').hidden && netDirty) {
     clearTimeout(netTimer);
     putNetSim(netFromPanel(), true);
+  }
+  // 断点面板：开关 / 规则都是停了 250ms 才写的，关窗前补一次，否则「点了✕等于没改」
+  if (!$('#modalBreak').hidden) {
+    clearTimeout(bpTimer);
+    putBreak();
   }
   $$('.modal').forEach((m) => (m.hidden = true));
   closeAllPopups();
@@ -2680,6 +3002,251 @@ function bindNetwork() {
     await putNetSim(sim, true);
     renderNetPanel();
   });
+}
+
+/* ------------------------------------------------------------ 断点 */
+
+const BP_PHASES = [['request', '请求'], ['response', '响应'], ['both', '两者']];
+let bpTimer = null;
+
+function bpFromPanel() {
+  const rules = $$('#bpRules .bp-rule').map((row, i) => ({
+    id: row.dataset.id || 'bp' + i,
+    phase: row.querySelector('.bp-phase').value,
+    match: row.querySelector('.bp-match').value.trim(),
+    method: row.querySelector('.bp-method').value.trim().toUpperCase(),
+  }));
+  return { enabled: $('#bpEnabled').checked, rules };
+}
+
+function syncBreakBadge() {
+  const n = S.holdQueue.length;
+  const badge = $('#bpCount');
+  if (badge) {
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+  }
+  if (S.status && S.status.breakpoints) S.status.breakpoints.pending = n;
+}
+
+async function putBreak() {
+  const cfg = bpFromPanel();
+  S.breakEnabled = cfg.enabled;
+  S.breakRules = cfg.rules;
+  try {
+    const out = await api('/api/breakpoints', { method: 'PUT', body: cfg });
+    if (out) {
+      S.breakRules = out.rules || S.breakRules;
+      S.holdQueue = out.pending || S.holdQueue;
+      syncBreakBadge();
+    }
+  } catch (_) {
+    /* 面板输入时网络抖动不打扰，下次输入还会再存 */
+  }
+}
+
+function queueBreakSave() {
+  clearTimeout(bpTimer);
+  bpTimer = setTimeout(putBreak, 250);
+}
+
+function bpRuleHtml(r) {
+  return `<div class="net-rule bp-rule" data-id="${esc(r.id)}">
+    <select class="input mono tiny bp-phase" title="在哪个阶段停下来">${BP_PHASES.map(
+      ([v, l]) => `<option value="${v}"${r.phase === v ? ' selected' : ''}>${l}</option>`
+    ).join('')}</select>
+    <input class="input mono bp-match" value="${esc(r.match || '')}" placeholder="/api/user 或 */order/*" spellcheck="false" title="URL 包含这段文字就命中；* 是通配符；留空代表全部" />
+    <input class="input mono tiny bp-method" value="${esc(r.method || '')}" placeholder="方法" spellcheck="false" title="只拦某个方法，留空不限" />
+    <button class="btn icon ghost" data-bp-del="${esc(r.id)}" title="删除这条规则" aria-label="删除这条规则">✕</button>
+  </div>`;
+}
+
+function renderBreakPanel() {
+  const box = $('#bpRules');
+  if (!box) return;
+  box.innerHTML = S.breakRules.length
+    ? S.breakRules.map(bpRuleHtml).join('')
+    : '<div class="net-empty">还没有规则。点下面「+ 添加规则」，然后在详情页对某条请求点「断点此请求」最快。</div>';
+}
+
+async function openBreakPanel() {
+  try {
+    const cfg = await api('/api/breakpoints');
+    S.breakEnabled = !!cfg.enabled;
+    S.breakRules = cfg.rules || [];
+    S.holdQueue = cfg.pending || [];
+  } catch (_) {
+    /* 用本地状态顶上 */
+  }
+  syncBreakBadge();
+  // 有请求停在断点上时，先把他带回那条；没人等着才给配置面板
+  if (S.holdQueue.length) return showHold(S.holdQueue[0]);
+  const sw = $('#bpEnabled');
+  if (sw) sw.checked = !!S.breakEnabled;
+  renderBreakPanel();
+  openModal('#modalBreak');
+}
+
+function headersToText(h) {
+  return Object.entries(h || {})
+    .filter(([k]) => !k.startsWith(':'))
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+    .join('\n');
+}
+
+function textToHeaders(text) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const i = line.indexOf(':');
+    if (i <= 0) continue;
+    const k = line.slice(0, i).trim();
+    if (!k) continue;
+    out[k.toLowerCase()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
+/** 把一条待处理记录填进编辑框。先填预览，拉到全文再覆盖一次 */
+function fillHoldForm(rec) {
+  const isRes = rec.phase === 'response';
+  $('#holdTitle').textContent = isRes ? '断点：响应被拦下' : '断点：请求被拦下';
+  // 阶段 + body 体积 + 兜底时间。超时自动放行这件事必须写在脸上，否则用户不敢离开
+  const waitSec = Math.round((Number(rec.timeoutMs) || 60000) / 1000);
+  $('#holdMeta').textContent =
+    (isRes ? '响应阶段' : '请求阶段') + ' · ' + fmtSize(rec.bodySize) + ` · ${waitSec} 秒不处理会自动放行`;
+  $('#holdMethod').value = rec.method || '';
+  $('#holdMethod').disabled = isRes;
+  $('#holdUrl').value = rec.url || '';
+  $('#holdUrl').disabled = isRes;
+  $('#holdHeadersLabel').textContent = isRes ? '响应头' : '请求头';
+  $('#holdHeaders').value = headersToText(rec.headers);
+  $('#holdBody').value = rec.body == null ? rec.bodyPreview || '' : rec.body;
+  $('#holdStatusWrap').hidden = !isRes;
+  $('#holdStatus').value = isRes ? rec.status || '' : '';
+  // editable 由服务端判定：二进制 body 或超过 2MB 的一律不给改（改了就是毁数据）
+  const editable = rec.editable !== false;
+  $('#holdBody').disabled = !editable;
+  $('#holdBodyHint').textContent = rec.bodyTruncated
+    ? '这段 body 太大或不是文本，只能原样放行'
+    : rec.phase === 'request'
+      ? '改完点「放行」，改动会真的发出去'
+      : '改完点「放行」，客户端收到的就是这段';
+  const idx = S.holdQueue.findIndex((x) => x.id === rec.id);
+  $('#holdQueue').textContent =
+    S.holdQueue.length > 1 ? `还有 ${S.holdQueue.length - 1} 条在排队（第 ${idx + 1} 条）` : '';
+}
+
+function showHold(rec) {
+  if (!rec) return;
+  if (S.holdCurrent && S.holdCurrent.id === rec.id) return;
+  S.holdCurrent = rec;
+  fillHoldForm(rec);
+  openModal('#modalHold');
+  // 预览只有前 4KB，全文单独拉一次
+  api('/api/breakpoints/' + encodeURIComponent(rec.id))
+    .then((full) => {
+      if (full && S.holdCurrent && S.holdCurrent.id === full.id) {
+        S.holdCurrent = { ...rec, ...full };
+        fillHoldForm(S.holdCurrent);
+      }
+    })
+    .catch(() => {});
+}
+
+/** 放行当前这条，然后看队列里还有没有下一条 */
+function dropHold(id) {
+  S.holdQueue = S.holdQueue.filter((x) => x.id !== id);
+  syncBreakBadge();
+  if (!S.holdCurrent || S.holdCurrent.id !== id) return;
+  S.holdCurrent = null;
+  const next = S.holdQueue[0];
+  if (next) showHold(next);
+  else closeModals();
+}
+
+async function submitHold(abort) {
+  const rec = S.holdCurrent;
+  if (!rec) return;
+  const isRes = rec.phase === 'response';
+  const body = $('#holdBody').value;
+  const headers = textToHeaders($('#holdHeaders').value);
+  let action;
+  if (abort) {
+    action = {
+      type: 'abort',
+      status: Number($('#holdStatus').value) || 403,
+      body,
+      headers: Object.keys(headers).length ? headers : { 'content-type': 'text/plain; charset=utf-8' },
+    };
+  } else {
+    action = { type: 'resume', headers, body };
+    // 二进制 body 不给编辑：界面上那框是空的，把空串发回去等于把请求体清空
+    if (rec.editable === false) delete action.body;
+    if (!isRes) {
+      action.method = $('#holdMethod').value.trim() || undefined;
+      action.url = $('#holdUrl').value.trim() || undefined;
+    } else if ($('#holdStatus').value) {
+      action.status = Number($('#holdStatus').value) || undefined;
+    }
+  }
+  const id = rec.id;
+  try {
+    await api('/api/breakpoints/' + encodeURIComponent(id), { method: 'POST', body: action });
+  } catch (_) {
+    toast('这条断点已经不在队列里了');
+  }
+  dropHold(id);
+}
+
+/** 详情页「断点」按钮：把这条请求的路径加成一条断点规则（请求 + 响应都停） */
+async function breakThisFlow(f) {
+  const path = String(f.path || '/').split('?')[0] || '/';
+  try {
+    const cfg = await api('/api/breakpoints');
+    const rules = cfg.rules || [];
+    if (!rules.some((r) => r.match === path)) {
+      rules.push({ id: 'bp' + Date.now().toString(36), match: path, phase: 'both', method: '' });
+    }
+    const out = await api('/api/breakpoints', { method: 'PUT', body: { enabled: true, rules } });
+    S.breakEnabled = true;
+    S.breakRules = (out && out.rules) || rules;
+    syncBreakBadge();
+    toast(`已为 ${path} 打开断点，下次命中会停下来`);
+  } catch (_) {
+    toast('打开断点失败');
+  }
+}
+
+function bindBreak() {
+  $('#btnBreak').addEventListener('click', openBreakPanel);
+  $('#modalBreak').addEventListener('input', () => {
+    queueBreakSave();
+  });
+  $('#modalBreak').addEventListener('change', () => {
+    queueBreakSave();
+  });
+  $('#bpRules').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-bp-del]');
+    if (!del) return;
+    S.breakRules = S.breakRules.filter((r) => r.id !== del.dataset.bpDel);
+    renderBreakPanel();
+    putBreak();
+  });
+  $('#bpAdd').addEventListener('click', () => {
+    const cfg = bpFromPanel();
+    cfg.rules.push({ id: 'bp' + Date.now().toString(36), match: '', phase: 'request', method: '' });
+    S.breakRules = cfg.rules;
+    renderBreakPanel();
+    const last = $('#bpRules .bp-rule:last-child .bp-match');
+    if (last) last.focus();
+  });
+  $('#bpClear').addEventListener('click', () => {
+    S.breakRules = [];
+    renderBreakPanel();
+    putBreak();
+  });
+  $('#holdResume').addEventListener('click', () => submitHold(false));
+  $('#holdAbort').addEventListener('click', () => submitHold(true));
 }
 
 /* 导出：跟随当前筛选条件，后端生成 HAR 1.2（含完整 headers / body） */
@@ -5209,6 +5776,32 @@ function bind() {
     searchTimer = setTimeout(loadFlows, 220);
   });
 
+  // 搜正文开关：打开后 q 同时扫请求体 / 响应体（服务端 inBody）
+  $('#searchBody').addEventListener('click', () => {
+    S.inBody = !S.inBody;
+    localStorage.setItem('reqlite-search-body', S.inBody ? '1' : '0');
+    syncSortUi();
+    if (S.filter.q) loadFlows();
+    toast(S.inBody ? netTr('搜索范围已包含请求 / 响应正文') : netTr('只搜 URL、方法、状态码'));
+  });
+
+  // 排序：更多菜单里四项，表头「状态 / 耗时」也能直接点（三态循环）
+  $('#sortCtl').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sort]');
+    if (b) setSort(b.dataset.sort, { toggleDirOnly: true });
+  });
+  $('.listhead').addEventListener('click', (e) => {
+    const th = e.target.closest('[data-sort]');
+    if (th) setSort(th.dataset.sort);
+  });
+  $('.listhead').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const th = e.target.closest('[data-sort]');
+    if (!th) return;
+    e.preventDefault();
+    setSort(th.dataset.sort);
+  });
+
   // 分组边栏
   let histClickTimer = null;
   $('#sideBody').addEventListener('click', async (e) => {
@@ -5448,6 +6041,7 @@ function bind() {
   const wlFeedback = $('#wlFeedback');
   if (wlFeedback) wlFeedback.addEventListener('click', () => closeModals());
   bindNetwork();
+  bindBreak();
   $('#updAuto').addEventListener('change', async (e) => {
     const on = e.target.checked;
     try {
@@ -6073,6 +6667,34 @@ function bind() {
     } else if (msg.type === 'history-changed') {
       // 任何窗口改名 / 删除 / 新增历史，侧栏一起同步
       loadHistory();
+    } else if (msg.type === 'break-hold') {
+      // 有请求停在断点上：入队 + 弹窗。另一个窗口正在编辑别打断它
+      const rec = msg.record;
+      if (!rec) return;
+      S.holdQueue = S.holdQueue.filter((x) => x.id !== rec.id).concat(rec);
+      syncBreakBadge();
+      if (S.holdCurrent && S.holdCurrent.id === rec.id) return;
+      const busy = $$('.modal').some((m) => !m.hidden);
+      if (!busy || !$('#modalHold').hidden) showHold(rec);
+    } else if (msg.type === 'break-release') {
+      // 自己放行的也会收到，靠 id 对上再动，避免把下一条顶掉
+      const before = S.holdQueue.length;
+      S.holdQueue = S.holdQueue.filter((x) => x.id !== msg.id);
+      if (S.holdQueue.length !== before) syncBreakBadge();
+      if (S.holdCurrent && S.holdCurrent.id === msg.id) {
+        S.holdCurrent = null;
+        const next = S.holdQueue[0];
+        if (next) showHold(next);
+        else closeModals();
+      }
+    } else if (msg.type === 'breakpoints') {
+      // 别的窗口改了断点配置：同步面板与开关
+      if (msg.state) {
+        S.breakEnabled = !!msg.state.enabled;
+        S.breakRules = msg.state.rules || [];
+        const panel = $('#modalBreak');
+        if (panel && !panel.hidden && !panel.querySelector('input:focus, select:focus')) renderBreakPanel();
+      }
     }
   };
   es.onerror = () => {
@@ -6487,8 +7109,8 @@ function bindSimpleUI() {
     toggleMoreMenu('top');
   });
   $('#moreMenu').addEventListener('click', (e) => {
-    // 外观类按钮可以连续点，不收菜单；打开弹窗的类目点完即收
-    const keep = e.target.closest('#fontDown, #fontUp, #fontVal, #btnTheme, #btnLang');
+    // 外观类与排序可以连续点（点完还想翻个方向），不收菜单；打开弹窗的类目点完即收
+    const keep = e.target.closest('#fontDown, #fontUp, #fontVal, #btnTheme, #btnLang, #sortCtl');
     if (!keep) toggleMoreMenu('top', false);
   });
 
@@ -6598,6 +7220,8 @@ async function init() {
   applyPaneWidths();
   bind();
   bindDock();
+  // 刷新后把上次的排序 / 搜正文状态画回界面（S 里已经从 localStorage 恢复了）
+  syncSortUi();
   await loadStatus();
   loadLocalProxy(); // 只读探测，不阻塞首屏
   loadCaStatus(); // 预热证书状态卡：用户点开证书页时不用再等检测

@@ -27,6 +27,8 @@ const { deviceKeyOf, deviceLabelOf } = require('./local-address');
 const { normalize: normalizeNetworkSim, resolve: resolveNetworkSim, throttleTransform } = require('./network-sim');
 
 const MAX_BODY_CAPTURE = 2 * 1024 * 1024; // 每个 body 最多记录 2MB
+// 断点会把 body 整个留在内存里等人操作，超过这个量级就别拦了（大上传 / 大下载）
+const HOLD_MAX = 8 * 1024 * 1024;
 const TEXTUAL_RE =
   /^(text\/|application\/(json|xml|javascript|ecmascript|x-www-form-urlencoded|graphql|x-ndjson|problem\+json|x-js)|application\/[\w.+-]*\+(json|xml)|image\/svg)/i;
 
@@ -252,13 +254,15 @@ class BodyCapture {
 }
 
 class ProxyServer extends EventEmitter {
-  constructor({ port = 9090, host = '0.0.0.0', ca, store, rules, config = {}, processMap } = {}) {
+  constructor({ port = 9090, host = '0.0.0.0', ca, store, rules, config = {}, processMap, breakpoints } = {}) {
     super();
     this.port = port;
     this.host = host;
     this.ca = ca;
     this.store = store;
     this.rules = rules;
+    // 断点：命中规则时把连接停下来等人操作，不传就是没有断点功能
+    this.breakpoints = breakpoints || null;
     // 本机流量可以按「源端口 → 进程」拿到真实应用名；远程设备拿不到，走 UA。
     this.processMap = processMap || new ProcessMap();
     // 注意：必须复用传入的 config 引用（控制台改设置时是直接改这个对象），
@@ -1205,6 +1209,10 @@ class ProxyServer extends EventEmitter {
         host: target.hostname,
       });
       if (rule) return this._replyMock(ctx, rule);
+      // 断点排在 Mock 之后：已经写了 Mock 规则的 URL 不该再被断点拦住
+      if (this.breakpoints && this.breakpoints.match('request', { method: req.method, url: target.toString() })) {
+        return this._holdRequest(ctx, target);
+      }
       this._forward(ctx);
     };
     if (ctx.sim && ctx.sim.latencyMs > 0) {
@@ -1305,22 +1313,59 @@ class ProxyServer extends EventEmitter {
     else send();
   }
 
-  _forward(ctx) {
-    const { req, res, target, startedAt, reqCapture, meta, sim } = ctx;
+  /**
+   * 真正发往上游。override 只在断点放行时出现：
+   *   { method, url, headers, body } —— 没给的字段沿用原请求。
+   * 请求体已被断点读完的情况（ctx.reqBodyHeld）不能再 pipe，改用一次性 end 写出。
+   */
+  _forward(ctx, override) {
+    const { req, res, startedAt, reqCapture, meta, sim } = ctx;
+    const ov = override || {};
+    let target = ctx.target;
+    // 断点改了 URL：协议 / 域名 / 端口 / 路径全要重算，列表里显示的地址也要跟着改
+    if (ov.url && ov.url !== target.toString()) {
+      try {
+        target = new URL(ov.url);
+        ctx.target = target;
+        meta.url = target.toString();
+        meta.host = target.hostname;
+        meta.scheme = target.protocol.replace(':', '');
+        meta.path = (target.pathname || '/') + (target.search || '');
+        meta.route = routeOf(ov.method || req.method, target.pathname || '/');
+      } catch (_) {
+        /* 改了但解析不出来就沿用原地址，别把请求弄丢 */
+      }
+    }
+    const method = ov.method || req.method;
     const isSecure = target.protocol === 'https:';
     const transport = isSecure ? https : http;
 
     const headers = {};
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (DROP_HEADERS.includes(k)) continue;
+    // 用户改过头就整份替换（不再过滤 DROP_HEADERS，他写什么就发什么）；
+    // 没改则沿用安全过滤后的原头
+    for (const [k, v] of Object.entries(ov.headers || req.headers)) {
+      if (!ov.headers && DROP_HEADERS.includes(k)) continue;
+      if (k.startsWith(':')) continue;
       headers[k] = v;
     }
-    headers.host = target.host;
+    // URL 被改到别的域名时，host 头必须跟着换，否则上游按旧域名回源
+    if (!headers.host || (ov.url && headers.host !== target.host)) headers.host = target.host;
+
+    // 断点已经把请求体读全了：流早结束，只能一次性发；长度必须在建连接前算好
+    const heldBody = ctx.reqBodyHeld
+      ? ov.body !== undefined && ov.body !== null
+        ? Buffer.from(String(ov.body), 'utf8')
+        : ctx.reqBodyRaw || Buffer.alloc(0)
+      : null;
+    if (heldBody) {
+      headers['content-length'] = heldBody.length;
+      delete headers['transfer-encoding'];
+    }
 
     let upstream;
     try {
       upstream = transport.request({
-        method: req.method,
+        method,
         protocol: target.protocol,
         hostname: target.hostname,
         port: Number(target.port) || (isSecure ? 443 : 80),
@@ -1340,13 +1385,28 @@ class ProxyServer extends EventEmitter {
       upstream.destroy(new Error('上游响应超时（120s）'));
     });
 
-    // 请求体流式转发（同时被 BodyCapture 记录），chunked / 大文件都不会被卡住
-    req.pipe(upstream);
+    // 请求体流式转发（同时被 BodyCapture 记录），chunked / 大文件都不会被卡住。
+    // 断点已经读全了 body 的话流早结束了，再 pipe 是空的，必须一次性写出去。
+    if (ctx.reqBodyHeld) {
+      upstream.end(heldBody || Buffer.alloc(0));
+    } else {
+      // 断点收了一部分又因为太大放弃拦截：先把已收的写进去，剩下继续流式转发
+      if (ctx.reqBodyPrefix && ctx.reqBodyPrefix.length) upstream.write(ctx.reqBodyPrefix);
+      req.pipe(upstream);
+    }
     req.on('aborted', () => upstream.destroy());
 
     upstream.on('response', (upRes) => {
       const resHeaders = { ...upRes.headers };
       const resCapture = new BodyCapture(resHeaders['content-type'], resHeaders['content-encoding']);
+
+      // 响应断点：头已经到了，正是「看结果、改结果」的位置
+      if (
+        this.breakpoints &&
+        this.breakpoints.match('response', { method, url: target.toString() })
+      ) {
+        return this._holdResponse(ctx, upRes, resHeaders, resCapture, { method, target });
+      }
 
       try {
         res.writeHead(upRes.statusCode, upRes.statusMessage, resHeaders);
@@ -1405,6 +1465,262 @@ class ProxyServer extends EventEmitter {
     });
 
     upstream.on('error', (err) => this._fail(ctx, err));
+  }
+
+  /**
+   * 请求断点：把请求体收全、停下来等控制台操作。
+   *
+   * 大上传不能拦 —— 拦下来就得把整份 body 留在内存里，几十上百 MB 的上传会把
+   * 进程撑爆。超过 HOLD_MAX 就当场放弃拦截，把已经收的字节当成前缀交给 _forward，
+   * 后面的部分继续流式发出去（用户看到的行为就是「大请求不会被断点挡住」）。
+   */
+  _holdRequest(ctx, target) {
+    const { req, reqCapture } = ctx;
+    const chunks = [];
+    let kept = 0;
+    let overflow = false;
+
+    const abandon = () => {
+      ctx.reqBodyPrefix = chunks.length ? Buffer.concat(chunks) : null;
+      chunks.length = 0;
+      this._forward(ctx);
+    };
+
+    let settled = false;
+    const go = () => {
+      if (settled) return;
+      settled = true;
+      ctx.reqBodyHeld = true;
+      ctx.reqBodyRaw = Buffer.concat(chunks);
+      const digest = reqCapture.digest();
+      const rec = {
+        phase: 'request',
+        method: req.method,
+        url: target.toString(),
+        headers: { ...req.headers },
+        // 二进制（图片 / protobuf）不给编辑：转成字符串再发回去就毁了
+        body: digest.text == null ? '' : digest.text,
+        bodyTruncated: digest.truncated,
+        editable: digest.text != null && !reqCapture.truncated,
+        flowId: ctx.flow && ctx.flow.id,
+      };
+      this.breakpoints.hold(rec).then((action) => {
+        if (!action || action.type === 'resume') {
+          this._forward(ctx, {
+            method: action && action.method,
+            url: action && action.url,
+            headers: action && action.headers,
+            body: action && action.body,
+          });
+        } else {
+          this._replyBreak(ctx, action);
+        }
+      });
+    };
+
+    req.on('data', (c) => {
+      if (overflow) return;
+      kept += c.length;
+      chunks.push(c);
+      if (kept > HOLD_MAX) {
+        overflow = true;
+        abandon();
+      }
+    });
+    req.on('error', () => {});
+    if (req.readableEnded) {
+      go();
+    } else {
+      req.on('end', () => {
+        if (!overflow) go();
+      });
+      req.resume();
+    }
+  }
+
+  /**
+   * 响应断点：上游响应头已到、正文还没写到客户端，正好可以整体看一眼再决定。
+   * 同请求侧一样，超过 HOLD_MAX 的响应放弃拦截（把攒下的写出去，剩下的继续流式转发）。
+   */
+  _holdResponse(ctx, upRes, upHeaders, resCapture, info) {
+    const { res, reqCapture, meta, startedAt, sim } = ctx;
+    const chunks = [];
+    let kept = 0;
+    let streaming = false;
+
+    const writeChunk = (chunk) => {
+      res.write(chunk);
+      this.stats.bytes += chunk.length;
+      if (this.config.capture) resCapture.push(chunk);
+    };
+
+    const startStreaming = () => {
+      streaming = true;
+      try {
+        res.writeHead(upRes.statusCode, upRes.statusMessage, upHeaders);
+      } catch (_) {
+        try {
+          res.writeHead(upRes.statusCode, upHeaders);
+        } catch (e) {
+          upRes.destroy();
+          res.destroy();
+          return;
+        }
+      }
+      for (const c of chunks) writeChunk(c);
+      chunks.length = 0;
+    };
+
+    const finish = () => {
+      res.end();
+      if (!this.config.capture) return;
+      const digest = resCapture.digest();
+      const reqDigest = reqCapture.digest();
+      this._record({
+        ...meta,
+        reqBody: reqDigest.text,
+        reqBodyBase64: reqDigest.base64,
+        reqBodyTruncated: reqDigest.truncated,
+        reqSize: reqDigest.size,
+        resHeaders: upHeaders,
+        resBody: digest.text,
+        resBodyBase64: digest.base64,
+        resBodyTruncated: digest.truncated,
+        resSize: digest.size,
+        resContentType: upHeaders['content-type'],
+        status: upRes.statusCode,
+        statusText: upRes.statusMessage || '',
+        duration: elapsed(startedAt),
+        ...(sim ? { simMode: 'weak', simRule: sim.rule.match } : {}),
+      }, ctx);
+    };
+
+    upRes.on('data', (c) => {
+      if (streaming) return writeChunk(c);
+      kept += c.length;
+      chunks.push(c);
+      if (kept > HOLD_MAX) {
+        // 太大了，别拦了：先把攒的写出去，之后的原样流式转发
+        startStreaming();
+      }
+    });
+    upRes.on('end', () => {
+      if (streaming) return finish();
+      // 已 buffered 的也要算进抓包结果
+      if (this.config.capture) for (const c of chunks) resCapture.push(c);
+      const raw = Buffer.concat(chunks);
+      const digest = resCapture.digest();
+      const rec = {
+        phase: 'response',
+        method: info.method,
+        url: info.target.toString(),
+        status: upRes.statusCode,
+        headers: { ...upHeaders },
+        body: digest.text == null ? '' : digest.text,
+        bodyTruncated: digest.truncated,
+        editable: digest.text != null && !resCapture.truncated,
+        flowId: ctx.flow && ctx.flow.id,
+      };
+      this.breakpoints.hold(rec).then((action) => {
+        const aborted = action && action.type === 'abort';
+        let status = upRes.statusCode;
+        let statusText = upRes.statusMessage;
+        let headers = upHeaders;
+        let body = raw;
+        if (aborted) {
+          status = Number(action.status) || 502;
+          statusText = String(action.statusText || '');
+          headers = { ...(action.headers || { 'content-type': 'text/plain; charset=utf-8' }) };
+          body = Buffer.from(String(action.body == null ? '' : action.body), 'utf8');
+        } else if (action) {
+          // 只改状态码也算改动：很多人就是想看看「接口报 500 时 UI 什么反应」
+          if (action.status) status = Number(action.status) || status;
+          if (action.statusText) statusText = String(action.statusText);
+          if (rec.editable && action.body !== undefined && action.body !== null) {
+            body = Buffer.from(String(action.body), 'utf8');
+          }
+        }
+        const changedBody = body !== raw;
+        if (changedBody || aborted || (action && action.status)) {
+          // 改过的 body 长度变了，编码也可能不再成立：这两项必须重算，否则客户端解不出来
+          headers = { ...headers, 'content-length': body.length };
+          delete headers['transfer-encoding'];
+          if (changedBody) delete headers['content-encoding'];
+        }
+        try {
+          res.writeHead(status, statusText || undefined, headers);
+        } catch (_) {
+          try {
+            res.writeHead(status, headers);
+          } catch (e) {
+            res.destroy();
+            return;
+          }
+        }
+        res.end(body);
+        this.stats.bytes += body.length;
+        if (!this.config.capture) return;
+        const reqDigest = reqCapture.digest();
+        this._record({
+          ...meta,
+          reqBody: reqDigest.text,
+          reqBodyBase64: reqDigest.base64,
+          reqBodyTruncated: reqDigest.truncated,
+          reqSize: reqDigest.size,
+          resHeaders: headers,
+          resBody: changedBody ? body.toString('utf8') : digest.text,
+          resBodyBase64: changedBody ? null : digest.base64,
+          resBodyTruncated: digest.truncated,
+          resSize: body.length,
+          resContentType: headers['content-type'],
+          status,
+          statusText: statusText || '',
+          duration: elapsed(startedAt),
+          ...(aborted ? { mocked: true, mockRule: '断点（已拦截）' } : {}),
+          ...(sim ? { simMode: 'weak', simRule: sim.rule.match } : {}),
+        }, ctx);
+      });
+    });
+    upRes.on('error', (err) => {
+      res.destroy();
+      this._fail(ctx, err);
+    });
+    upRes.resume();
+  }
+
+  /** 断点选了「直接返回」：不碰上游，直接给客户端一个响应 */
+  _replyBreak(ctx, action) {
+    const { res, meta, startedAt, reqCapture } = ctx;
+    const body = Buffer.from(String(action.body == null ? '' : action.body), 'utf8');
+    const headers = { ...(action.headers || { 'content-type': 'text/plain; charset=utf-8' }) };
+    headers['content-length'] = body.length;
+    delete headers['transfer-encoding'];
+    const status = Number(action.status) || 502;
+    try {
+      if (!res.headersSent) res.writeHead(status, String(action.statusText || ''), headers);
+      res.end(body);
+    } catch (_) {
+      res.destroy();
+    }
+    this.stats.bytes += body.length;
+    if (!this.config.capture) return;
+    const reqDigest = reqCapture.digest();
+    this._record({
+      ...meta,
+      reqBody: reqDigest.text,
+      reqBodyBase64: reqDigest.base64,
+      reqBodyTruncated: reqDigest.truncated,
+      reqSize: reqDigest.size,
+      resHeaders: headers,
+      resBody: body.toString('utf8'),
+      resSize: body.length,
+      resContentType: headers['content-type'],
+      status,
+      statusText: String(action.statusText || ''),
+      duration: elapsed(startedAt),
+      mocked: true,
+      mockRule: '断点（已拦截）',
+    }, ctx);
   }
 
   _fail(ctx, err) {

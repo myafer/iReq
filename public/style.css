@@ -614,6 +614,32 @@ pre {
   color: var(--muted);
 }
 
+/* 搜索框里的「body」开关：打开后 q 同时扫请求体 / 响应体 */
+.search-body {
+  flex: none;
+  font-family: var(--mono);
+  font-size: calc(9.5px * var(--ui-scale));
+  line-height: 1.6;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.search-body:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.search-body.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--panel);
+}
+
 .seg {
   display: flex;
   background: var(--panel-2);
@@ -1096,6 +1122,12 @@ pre {
   text-align: center;
 }
 
+/* 排序模式下不会有下一页，这行从「往下滑加载」变成状态说明，别再引诱用户滚动 */
+.list-more.is-sorted {
+  padding-bottom: calc(9px * var(--ui-scale));
+  opacity: 0.75;
+}
+
 .side-note {
   padding: 6px 9px;
   font-size: calc(11px * var(--ui-scale));
@@ -1247,6 +1279,38 @@ body.resizing * {
 /* 表头与数据行同向对齐：耗时列数据右对齐（.tm text-align:right），表头也要右对齐才上下对齐 */
 .listhead .c-time {
   text-align: right;
+}
+
+/* 表头可点排序：点一下降序 → 再点升序 → 第三次回到时间倒序 */
+.listhead .lh-sort {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.listhead .c-time.lh-sort {
+  justify-content: flex-end;
+}
+
+.listhead .lh-sort:hover {
+  color: var(--text);
+}
+
+.listhead .lh-sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.listhead .lh-sort.on {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.sort-ind {
+  font-size: 0.9em;
 }
 
 .list {
@@ -1597,6 +1661,143 @@ body.resizing * {
   flex: 1;
   height: 1px;
   background: var(--border);
+}
+
+/* ---------------- 重放对比（diff） ---------------- */
+
+.dsec-hint {
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: calc(12px * var(--ui-scale));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dstats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: calc(12.5px * var(--ui-scale));
+}
+
+.dstat {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+
+/* 有变化的行给底色，扫一眼就知道哪几项变了 */
+.dstat.changed {
+  background: color-mix(in srgb, var(--warn, #d68b00) 12%, transparent);
+}
+
+.dstat-k {
+  color: var(--muted);
+}
+
+.dstat-old {
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.dstat-arrow {
+  color: var(--muted);
+  text-align: center;
+}
+
+.dstat-new {
+  word-break: break-all;
+}
+
+.dtab {
+  font-family: var(--mono);
+  font-size: calc(12.5px * var(--ui-scale));
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.drow {
+  display: grid;
+  grid-template-columns: 18px minmax(120px, 220px) minmax(0, 1fr);
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.drow:last-child {
+  border-bottom: 0;
+}
+
+.dsign {
+  color: var(--muted);
+  user-select: none;
+}
+
+.dkey {
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.dval {
+  word-break: break-all;
+}
+
+.drow.add {
+  background: color-mix(in srgb, var(--ok, #1a9e5c) 10%, transparent);
+}
+
+.drow.add .dsign {
+  color: var(--ok, #1a9e5c);
+}
+
+.drow.del {
+  background: color-mix(in srgb, var(--err, #d64545) 10%, transparent);
+}
+
+.drow.del .dsign {
+  color: var(--err, #d64545);
+}
+
+.drow.change {
+  background: color-mix(in srgb, var(--warn, #d68b00) 12%, transparent);
+}
+
+.drow.change .dsign {
+  color: var(--warn, #d68b00);
+}
+
+/* 文本 body 的行级对比：整行背景色比逐字高亮更好读，也不会打乱等宽对齐 */
+.diff-view {
+  margin: 0;
+}
+
+.diff-view .dline {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-view .dline .dsign {
+  flex: none;
+  width: 10px;
+}
+
+.diff-view .dline.add {
+  background: color-mix(in srgb, var(--ok, #1a9e5c) 14%, transparent);
+}
+
+.diff-view .dline.del {
+  background: color-mix(in srgb, var(--err, #d64545) 14%, transparent);
+  opacity: 0.85;
 }
 
 .kv {
@@ -3931,6 +4132,83 @@ html[data-electron-titlebar="hidden"] .topbar :is(
   align-items: center;
 }
 .net-rule .input { min-width: 0; }
+
+/* 断点规则行：阶段下拉 + 匹配串 + 方法 + 删除，比网络模拟多一列 */
+.bp-rule {
+  grid-template-columns: 92px minmax(0, 1fr) 86px 32px;
+}
+
+.bp-rule .bp-phase {
+  padding: 0 4px;
+}
+
+/* ---------------- 断点：拦下来之后的编辑弹窗 ---------------- */
+
+.hold-dialog {
+  width: min(760px, 94vw);
+}
+
+.hold-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.hold-fields {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.hold-fields .hold-url {
+  flex: 1;
+  min-width: 260px;
+}
+
+.hold-fields .hold-url .input {
+  width: 100%;
+}
+
+.hold-sec {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 5px;
+  color: var(--muted);
+  font-size: calc(11.5px * var(--ui-scale));
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* 段标题是大写样式，旁边的说明不该跟着变 —— 中文还好，英文整句全大写很难读 */
+.hold-sec .hint {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hold-ta {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.hold-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.modal-foot .spacer {
+  flex: 1;
+}
 .net-empty {
   padding: 12px;
   border: 1px dashed var(--border);
@@ -4040,6 +4318,37 @@ html[data-electron-titlebar="hidden"] .topbar :is(
 .more-row .fs-val {
   min-width: 46px;
   text-align: center;
+}
+
+/* 排序四项：与筛选条同一种「选中态」写法，紧凑放进更多菜单 */
+.sortctl {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.sortctl button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.sortctl button:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.sortctl button.on {
+  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-weight: 500;
 }
 html[data-electron-titlebar='hidden'] .more-menu,
 html[data-electron-titlebar='hidden'] .more-wrap {

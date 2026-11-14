@@ -10,6 +10,20 @@ GET    /api/status            含 lan: ["192.168.1.23"]、lanInfo: [{ip, iface}]
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
 GET    /api/flows/page?...      分页版：同上筛选 + cursor，回 { flows, nextCursor, hasMore, total, fromDisk }
                                 内存翻完会自动接着读当天落盘文件（cursor 传回来即可，格式不透明）
+  额外参数：
+    body=1                      搜索范围扩到请求体 / 响应体（默认只搜 URL / 方法 / 状态 / 应用 / IP / 进程）
+    q=body:关键词               等价于「只搜正文」，不需要 body=1
+    sort=duration|size|status   排序（默认时间倒序）。排序结果一次给全：hasMore=false、nextCursor=""、
+                                回包里带 sorted=true。磁盘阶段不支持排序（跨块排序得整份读进内存）
+    dir=asc|desc                排序方向，默认 desc；缺值（进行中还没有耗时）永远沉底
+GET    /api/breakpoints         断点配置与队列 { enabled, timeoutMs, rules, pending: [{id, phase, method, url, status, headers, bodyPreview, editable, at}] }
+PUT    /api/breakpoints         { enabled, rules: [{id, phase: request|response|both, match, method}], timeoutMs? }
+                                match 是 URL 包含匹配，含 * 当通配符，留空 = 全部；关掉 enabled 会立刻放行所有挂起项
+GET    /api/breakpoints/:id     单条待处理（含 body 全文）
+POST   /api/breakpoints/:id     放行：{ type:"resume", method?, url?, headers?, body?, status? }
+                                或直接返回：{ type:"abort", status, statusText?, headers?, body? }
+                                已经放行过的 id 回 404
+POST   /api/breakpoints/release-all   全部原样放行
 GET    /api/history             历史记录列表 { items: [{id, name, file, count, bytes, createdAt}], stats }
 PATCH  /api/history/:id         { name } 改名（去空白，最长 60 字）
 DELETE /api/history/:id         删掉一条（文件也删）

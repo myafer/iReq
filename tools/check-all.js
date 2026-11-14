@@ -39,6 +39,10 @@ const SUITES = [
   ['MCP 接入', 'check-mcp.js'],
   // 会清空流量并生成历史记录，跑完恢复内存上限、删掉自己造的历史
   ['历史记录与分页', 'check-history.js'],
+  // 造上游流量验证「搜正文」与排序，跑完清掉历史
+  ['正文搜索与排序', 'check-search.js'],
+  // 断点会真的把连接挂起来，跑完把开关关掉、队列清空
+  ['断点拦截', 'check-breakpoint.js'],
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
   ['控制坞', 'check-dock.js'],

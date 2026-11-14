@@ -159,6 +159,8 @@ node tools/check-simple-ui.js    # 顶栏更多 / 筛选更多 / 连接向导 / 
 node tools/check-tree-fs.js     # 文件树当文件管理器：行内新建 / 双击改名 / 复制粘贴 / 绝对路径 / reveal（28 项）
 node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协议握手 / 15 个工具 / 筛选与聚合 / scope / 撤销 / Origin / stdio 桥（84 项）
 node tools/check-history.js     # 历史记录与分页：游标翻页 / 内存见底续读磁盘 / 清空留档 / 回看 / 改名 / 导出 / 删除（50 项）
+node tools/check-search.js      # 正文搜索与排序：默认不搜 body / body: 前缀 / 大小写 / 正则元字符 / 四列升降序 / 缺值沉底（22 项）
+node tools/check-breakpoint.js  # 断点拦截：请求与响应挂起 / 改体改址改码 / 长度重算 / 超时放行 / 大包放弃 / SSE（32 项）
 ```
 
 `check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；

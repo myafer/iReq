@@ -157,6 +157,8 @@ node tools/check-simple-ui.js    # top-bar More / filter More / connection guide
 node tools/check-tree-fs.js     # file tree as a file manager: inline create / double-click rename / copy-paste / absolute path / reveal (28 items)
 node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake / 15 tools / filters / scopes / revoke / Origin / stdio bridge (84 items)
 node tools/check-history.js     # history & paging: cursor paging / disk fallback / clear leaves an entry / replay / rename / export / delete (50 items)
+node tools/check-search.js      # body search & sorting: body off by default / body: prefix / case / regex metachars / four columns asc-desc / nulls last (22 items)
+node tools/check-breakpoint.js  # breakpoints: hold request & response / edit body-url-method-status / length recompute / timeout release / skip large / SSE (32 items)
 ```
 
 `check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;

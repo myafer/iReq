@@ -171,8 +171,20 @@ class FlowStore extends EventEmitter {
    * 协议（http/https/ws/sse/http1/http2）、内容类型（json/xml/text/html/js/image/media/binary）、
    * 状态码（1xx..5xx）、error / ok / json（历史值，保持兼容）。
    */
-  filter({ limit = 500, before = '', ...opts } = {}) {
+  filter({ limit = 500, before = '', sort = '', dir = '', ...opts } = {}) {
     const ok = prepareFilter(opts);
+    const key = SORT_KEYS[String(sort || '')];
+    // 排序模式：内存条数有上限（默认 2000），全量匹配后排完再切前 limit 条。
+    // 游标翻页在这里没意义 —— 第 2 页的「第 200 名」要重新排一遍才知道是谁，
+    // 所以忽略 before，调用方看到 hasMore=false 就别再要求下一页了。
+    if (key) {
+      const all = [];
+      for (const f0 of this.flows) {
+        const f = ensureDerived(f0);
+        if (ok(f)) all.push(f);
+      }
+      return sortFlows(all, key, dir).slice(0, limit);
+    }
     const out = [];
     // 游标：从某条 id 之后（更早）继续取。实时列表「往下滑加载更多」用，
     // 翻页时新流量还在往队头插，用下标分页会错位，所以按 id 定位。
@@ -391,6 +403,46 @@ class FlowStore extends EventEmitter {
  * 历史记录从磁盘分页读时复用同一套语义，避免「内存里筛得出来、归档里筛不出来」。
  * beforeTs 是「只看比这个时间更早的」，用于内存已取完后接着读今天的落盘文件。
  */
+/* ---------------- 搜索与排序 ---------------- */
+
+/** 列表可点的排序字段。时间本身就是内存队列的默认序，只有这三项需要真排 */
+const SORT_KEYS = { time: 'ts', duration: 'duration', size: 'resSize', status: 'status' };
+
+/** 升 / 降序。缺值（进行中还没有耗时）永远沉底，升序降序都不该让它冒到最前面 */
+function sortFlows(list, key, dir) {
+  const mul = String(dir || '').toLowerCase() === 'asc' ? 1 : -1;
+  const val = (f) => {
+    const n = Number(key === 'ts' ? f.ts : f[key]);
+    return Number.isFinite(n) ? n : null;
+  };
+  return list.sort((a, b) => {
+    const va = val(a);
+    const vb = val(b);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    return (va - vb) * mul;
+  });
+}
+
+/**
+ * 正文命中：请求体 / 响应体任一命中即可。
+ * re 由 prepareFilter 编译好传进来，这里只 test，不重复构造。
+ */
+function bodyHit(f, re) {
+  return (
+    (typeof f.reqBody === 'string' && !!f.reqBody && re.test(f.reqBody)) ||
+    (typeof f.resBody === 'string' && !!f.resBody && re.test(f.resBody))
+  );
+}
+
+/**
+ * 条件筛选：返回完整 flow 对象。
+ *
+ * inBody：把搜索范围扩到请求体 / 响应体。默认关闭 —— 每条 body 最大 2MB，
+ * 开着搜等于每帧筛一遍几十 MB 文本，实时列表会掉帧，所以做成显式开关。
+ * query 以 `body:` 开头时等价于「只搜正文」，方便 MCP / 命令行直接指定。
+ */
 function prepareFilter({
   query = '',
   method = '',
@@ -402,8 +454,17 @@ function prepareFilter({
   route = '',
   since = 0,
   beforeTs = 0,
+  inBody = false,
 } = {}) {
-  const q = String(query || '').toLowerCase();
+  let q = String(query || '').trim();
+  // `body:xxx` = 只搜正文（元信息不参与）
+  const bodyOnly = /^body:/i.test(q);
+  if (bodyOnly) q = q.slice(5).trim();
+  q = q.toLowerCase();
+  // 大小写不敏感又不想复制字符串：body 能有 2MB，逐条 toLowerCase() 是一次大分配，
+  // 改用 /i 正则扫原串（V8 在原文上匹配，不建副本）
+  const bodyRe =
+    (inBody || bodyOnly) && q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
   const h = String(host || '').toLowerCase();
   const ipq = String(ip || '').trim();
   const wantIp = ipq && ipq !== LOCAL_KEY ? normalizeIp(ipq) : '';
@@ -434,12 +495,17 @@ function prepareFilter({
     } else if (wantIp && normalizeIp(f.clientIp) !== wantIp) return false;
     if (route && f.route !== route) return false;
     if (q) {
-      const hay = `${f.method} ${f.url} ${f.status} ${f.app || ''} ${f.clientIp || ''} ${
-        f.deviceLabel || ''
-      } ${
-        (f.process && `${f.process.name} ${f.process.command} ${f.process.pid}`) || ''
-      }`.toLowerCase();
-      if (!hay.includes(q)) return false;
+      // body: 前缀只搜正文；否则先看元信息，没命中再看正文（仅当开关打开）
+      const metaHit =
+        !bodyOnly &&
+        `${f.method} ${f.url} ${f.status} ${f.app || ''} ${f.clientIp || ''} ${
+          f.deviceLabel || ''
+        } ${
+          (f.process && `${f.process.name} ${f.process.command} ${f.process.pid}`) || ''
+        }`
+          .toLowerCase()
+          .includes(q);
+      if (!metaHit && !(bodyRe && bodyHit(f, bodyRe))) return false;
     }
     return true;
   };

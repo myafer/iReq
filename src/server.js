@@ -159,7 +159,7 @@ function toHar(flows, version) {
 }
 
 class ConsoleServer {
-  constructor({ port = 9091, host = '127.0.0.1', store, rules, bookmarks, proxy, ca, config, systemProxy, caTrust, appIcons, updater, dataDir, publicDir }) {
+  constructor({ port = 9091, host = '127.0.0.1', store, rules, bookmarks, proxy, ca, config, systemProxy, caTrust, appIcons, updater, dataDir, publicDir, breakpoints }) {
     this.port = port;
     this.host = host;
     this.store = store;
@@ -172,6 +172,7 @@ class ConsoleServer {
     this.caTrust = caTrust;
     this.appIcons = appIcons || null;
     this.updater = updater || null;
+    this.breakpoints = breakpoints || (proxy && proxy.breakpoints) || null;
     this.dataDir = dataDir || null;
     this.publicDir = publicDir || path.join(__dirname, '..', 'public');
     this.clients = new Set();
@@ -329,6 +330,16 @@ class ConsoleServer {
         this._broadcast({ type: 'tls-remove', hosts })
       );
     }
+    // 断点挂起 / 放行：所有窗口同步弹窗与角标（开两个标签页时两边都能操作同一条）
+    if (this.breakpoints) {
+      this.breakpoints.events.on('hold', (record) => {
+        const { body, ...rest } = record;
+        this._broadcast({ type: 'break-hold', record: { ...rest, bodyPreview: String(body || '').slice(0, 2000) } });
+      });
+      this.breakpoints.events.on('release', ({ id, phase }) =>
+        this._broadcast({ type: 'break-release', id, phase })
+      );
+    }
   }
 
   _broadcast(payload) {
@@ -421,6 +432,15 @@ class ConsoleServer {
         uaAppMap: this.config.uaAppMap || [],
         networkSim: normalizeNetworkSim(this.config.networkSim),
         appIcons: this.appIcons ? this.appIcons.status() : { supported: false },
+        // 断点只在状态里给「开了没 / 几条规则 / 几条在等」，body 走单独接口
+        breakpoints: this.breakpoints
+          ? {
+              enabled: this.breakpoints.enabled,
+              timeoutMs: this.breakpoints.timeoutMs,
+              rules: this.breakpoints.rules.map((r) => ({ ...r })),
+              pending: this.breakpoints.pending.size,
+            }
+          : null,
         version: VERSION,
         update: this.updater ? this.updater.status() : null,
       });
@@ -429,8 +449,11 @@ class ConsoleServer {
     /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
     if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
 
-    /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ---------------- */
+  /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ---------------- */
     if (parts[1] === 'history') return this._apiHistory(req, res, parts, method, url);
+
+    /* ---------------- 断点：命中规则时挂起请求 / 响应，等人放行 ---------------- */
+    if (parts[1] === 'breakpoints') return this._apiBreak(req, res, parts, method);
 
     /** 前端批量问图标：本机 .app 直接给 URL，取不到的由前端用内置 / 默认图标 */
     if (parts[1] === 'app-icons' && method === 'GET') {
@@ -837,6 +860,8 @@ class ConsoleServer {
       ip: sp.get('ip') || '',
       app: sp.get('app') || '',
       route: sp.get('route') || '',
+      // 搜索范围扩到正文（请求体 / 响应体）。默认关，前端搜索框上有个开关
+      inBody: sp.get('body') === '1',
     };
   }
 
@@ -845,6 +870,17 @@ class ConsoleServer {
     const cursor = sp.get('cursor') || '';
     const filters = this._pageFilters(sp);
     const memoryTotal = this.store.flows.length;
+    // 排序：只有内存阶段能做（磁盘是倒序分块读，跨块排序得整份读进内存）。
+    // 排序结果一次给全，所以 hasMore 恒为 false，前端也不会再要下一页。
+    // 白名单校验：拼错的 sort 不能被当成「排过序了」而返回半截结果
+    const SORTS = ['time', 'duration', 'size', 'status'];
+    const sort = SORTS.includes(sp.get('sort')) ? sp.get('sort') : '';
+    const dir = sp.get('dir') === 'asc' ? 'asc' : 'desc';
+
+    if (sort) {
+      const flows = this.store.list({ ...filters, sort, dir, limit });
+      return { flows, nextCursor: '', hasMore: false, total: memoryTotal, sorted: true };
+    }
 
     if (cursor.startsWith('d:')) {
       const [, rawTs, rawBytes] = cursor.split(':');
@@ -900,6 +936,58 @@ class ConsoleServer {
    *   DELETE /api/history                  → 全删
    *   GET    /api/history/:id/flows        → 分页回看（cursor 是字节游标）
    */
+  /* ---------------- 断点：命中规则就挂起，等人放行 ----------------
+   *   GET  /api/breakpoints              → { enabled, rules, pending: [...] }
+   *   PUT  /api/breakpoints              → { enabled, rules } 保存（关掉会立刻放行所有挂起项）
+   *   GET  /api/breakpoints/:id          → 单条待处理项（含 body 全文）
+   *   POST /api/breakpoints/:id          → 放行：{ type:'resume', method?,url?,headers?,body? }
+   *                                       或 { type:'abort', status, statusText?, body?, headers? }
+   *   POST /api/breakpoints/release-all  → 全部放行（原样继续）
+   */
+  async _apiBreak(req, res, parts, method) {
+    const bp = this.breakpoints;
+    if (!bp) return this._json(res, 400, { error: '断点模块未启用' });
+
+    if (parts.length === 2) {
+      if (method === 'GET') return this._json(res, 200, bp.state());
+      if (method === 'PUT' || method === 'POST') {
+        const body = (await this._body(req)) || {};
+        if (body.timeoutMs != null) bp.setTimeoutMs(body.timeoutMs);
+        const out = bp.setRules(body.rules, body.enabled);
+        this._broadcast({
+          type: 'breakpoints',
+          state: {
+            enabled: out.enabled,
+            rules: out.rules,
+            pending: out.pending.length,
+            timeoutMs: out.timeoutMs,
+          },
+        });
+        return this._json(res, 200, out);
+      }
+      return this._json(res, 405, { error: '方法不允许' });
+    }
+
+    if (parts[2] === 'release-all' && method === 'POST') {
+      const n = bp.releaseAll('manual');
+      return this._json(res, 200, { released: n });
+    }
+
+    const id = parts[2];
+    if (method === 'GET') {
+      const rec = bp.get(id);
+      if (!rec) return this._json(res, 404, { error: '这条断点已经放行了' });
+      return this._json(res, 200, rec);
+    }
+    if (method === 'POST') {
+      const body = (await this._body(req)) || {};
+      const ok = bp.resolve(id, body);
+      if (!ok) return this._json(res, 404, { error: '这条断点已经放行了' });
+      return this._json(res, 200, { ok: true });
+    }
+    return this._json(res, 405, { error: '方法不允许' });
+  }
+
   async _apiHistory(req, res, parts, method, url) {
     const h = this.history;
     if (!h) return this._json(res, 400, { error: '未启用落盘，没有历史记录' });

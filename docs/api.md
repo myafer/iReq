@@ -10,6 +10,20 @@ GET    /api/status            includes lan: ["192.168.1.23"], lanInfo: [{ip, ifa
 GET    /api/flows?q=&method=&status=error|ok|json&mocked=1&host=&ip=&app=&route=&limit=
 GET    /api/flows/page?...      Paged version: same filters + cursor → { flows, nextCursor, hasMore, total, fromDisk }
                                 When memory runs out it continues from today's on-disk file (cursor is opaque)
+  Extra params:
+    body=1                      Also search request / response bodies (default covers URL / method / status / app / IP / process)
+    q=body:keyword              Shorthand for "bodies only" — no need for body=1
+    sort=duration|size|status   Sort (default is newest first). Sorted results come back in one shot:
+                                hasMore=false, nextCursor="" and sorted=true. Not supported while reading from disk
+    dir=asc|desc                Sort direction, default desc; missing values (in-flight requests) always sink to the bottom
+GET    /api/breakpoints         Config + queue { enabled, timeoutMs, rules, pending: [{id, phase, method, url, status, headers, bodyPreview, editable, at}] }
+PUT    /api/breakpoints         { enabled, rules: [{id, phase: request|response|both, match, method}], timeoutMs? }
+                                match is "URL contains", * acts as a wildcard, empty matches everything; disabling releases everything held
+GET    /api/breakpoints/:id     One held item, full body included
+POST   /api/breakpoints/:id     Release: { type:"resume", method?, url?, headers?, body?, status? }
+                                Or answer directly: { type:"abort", status, statusText?, headers?, body? }
+                                Already-released ids return 404
+POST   /api/breakpoints/release-all   Release everything unchanged
 GET    /api/history             History list { items: [{id, name, file, count, bytes, createdAt}], stats }
 PATCH  /api/history/:id         { name } rename (trimmed, max 60 chars)
 DELETE /api/history/:id         Delete one entry (file goes too)

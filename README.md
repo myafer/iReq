@@ -23,6 +23,10 @@ Going deeper: [API and SSE events](docs/api.md) · [MCP access](docs/mcp.md) · 
 | Grouped sidebar | Automatically aggregates **device / app / domain / API structure**; one click filters; bookmark frequently used filters |
 | Mock | Matches by method + URL (contains / wildcard / regex) + domain, returns custom status code, headers, body; add delay to simulate a slow network |
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
+| Replay diff | Replayed requests get a "Compare" tab: status / duration / size / response headers / body side by side. JSON is compared structurally (`list[2].id: 3 → 4`), plain text line by line |
+| Breakpoints | Hold a request or response by URL, edit method / URL / headers / body / status, then release — or "Return now" without touching upstream. Auto-releases after 60s; bodies over 2MB can only be passed through unchanged |
+| Search bodies | Flip the `body` switch next to the search box to scan request and response bodies too (or type `body:keyword`). Off by default — each body can be 2MB and scanning all of them slows the live list |
+| Sort | Click the Status / Time column headers to sort (descending → ascending → back to newest first); "Sort" under the ⋯ menu also offers response size. Live list only |
 | Exclude specific domains | Add certificate-pinned apps to the "skip decryption" allowlist and pass them through as a raw tunnel. The allowlist has its own manager (source / added time / pass-through hit count), supports add / search / rename / remove / clear / bulk import, and persists across restarts |
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
 | HTTP/2 | Negotiates h2 via ALPN, so **endpoints that only offer h2 can be decrypted too** (Apple ID auth, gRPC gateways, some CDNs); multiplexed streams are captured individually and filterable |
