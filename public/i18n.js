@@ -25,6 +25,18 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 性能视图：范围说明 / 进行中与截断提示 / 筛选反馈都是动态句
+    [/^按(接口|域名) · 内存 (\d+) 条$/, function (m, a, b) {
+      return 'By ' + (a === '域名' ? 'host' : 'endpoint') + ' · ' + b + (b === '1' ? ' flow' : ' flows') + ' in memory';
+    }],
+    [/^另有 (\d+) 条进行中，未计入$/, function (m, a) {
+      return a + (a === '1' ? ' more is' : ' more are') + ' in flight, not counted';
+    }],
+    [/^只显示前 (\d+) 个，其余 (\d+) 个略$/, function (m, a, b) {
+      return 'Showing first ' + a + ', ' + b + ' more hidden';
+    }],
+    [/^统计失败：(.+)$/, function (m, a) { return 'Aggregation failed: ' + a; }],
+    [/^已筛选到 (.+)$/, function (m, a) { return 'Filtered to ' + a; }],
     // MCP 接入面板：开关状态 / 令牌计数 / 最近使用（数字是动态的，必须整句翻译）
     [/^已开启 · (\d+) 个令牌$/, function (m, a) { return 'On · ' + a + (a === '1' ? ' token' : ' tokens'); }],
     [/^(\d+) 个令牌$/, function (m, a) { return a + (a === '1' ? ' token' : ' tokens'); }],

@@ -45,6 +45,12 @@ GET    /api/history/:id/export?format=har|json  导出整条历史（默认 HAR�
 GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/perf?by=route|host&参数同 /api/flows    性能聚合（按接口 / 域名）
+                               回 { by, groups: [{ key, count, p50, p95, avg, max, errorRate, noResponse,
+                                  serverErrors, clientErrors, bytes, methods, slowest }], groupCount, truncated,
+                                  slowest: [{ id, method, path, status, duration }], totals, inMemory }
+                               错误率 = （连不上 + 5xx）/ 已完成条数；4xx 另计；进行中的请求不参与统计
+                               groups 默认按 P95 降序，limit 用 groups= （默认 200，上限 500），最慢用 slowest=（默认 8）
 GET    /api/app-icons?names=A,B   按应用名批量找真实图标 → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      图标文件（仅 data/app-icons/ 里的 hash 文件名）
 GET    /api/diagnostics         { tlsFailures: [{host, count, error, reason, detail}], tunneled, stats, passthrough }
@@ -61,7 +67,8 @@ GET    /api/ca/archive           证书档案元信息（指纹 / 路径 / 来�
 GET    /api/ca/p12               导出 .p12 备份（含私钥，密码在 x-ireq-p12-password 响应头）
 POST   /api/ca/import             { p12: "<base64>", password? } 导入 .p12 并重新检测信任
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows/:id
+GET    /api/flows/:id         单条完整记录，含 timings: { total, dns, tcp, tls, wait, download, reused }
+                              （单位 ms；拿不到的阶段是 null，连接复用时握手三段为 0 且 reused=true）
 DELETE /api/flows
 POST   /api/flows/:id/replay      { method, url, headers, body }
 GET    /api/rules

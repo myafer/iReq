@@ -25,6 +25,7 @@ const { clientIpOf, clientPortOf, platformOf, appOf, aliasOf, routeOf } = requir
 const { ProcessMap } = require('./process-map');
 const { deviceKeyOf, deviceLabelOf } = require('./local-address');
 const { normalize: normalizeNetworkSim, resolve: resolveNetworkSim, throttleTransform } = require('./network-sim');
+const { createCollector } = require('./timing');
 
 const MAX_BODY_CAPTURE = 2 * 1024 * 1024; // 每个 body 最多记录 2MB
 // 断点会把 body 整个留在内存里等人操作，超过这个量级就别拦了（大上传 / 大下载）
@@ -1163,6 +1164,7 @@ class ProxyServer extends EventEmitter {
             status: 0,
             statusText: '',
             duration: elapsed(startedAt),
+            timings: ctx.timing ? ctx.timing.finish() : undefined,
             error: 'iReq: 请求未完成（连接已关闭）',
           });
         });
@@ -1358,6 +1360,9 @@ class ProxyServer extends EventEmitter {
       meta.mappedRule = mapped.ruleId;
     }
     const transport = isSecure ? https : http;
+    // 分阶段计时：lookup 交给采集器，才能在 DNS 上留时间点；不影响转发行为
+    const timing = createCollector(startedAt, { secure: isSecure });
+    ctx.timing = timing;
 
     const headers = {};
     // 用户改过头就整份替换（不再过滤 DROP_HEADERS，他写什么就发什么）；
@@ -1390,6 +1395,8 @@ class ProxyServer extends EventEmitter {
         port: connPort,
         path: connPath,
         headers,
+        // 域名解析走采集器：DNS 段才有真实耗时，IP 直连时 Node 不会调用它
+        lookup: timing.lookup,
         // 调试工具：上游证书异常（企业代理、自签名）不应阻断排查
         rejectUnauthorized: false,
         // SNI 用原域名而不是映射目标：换了 host 之后仍按原域名握手，
@@ -1405,6 +1412,7 @@ class ProxyServer extends EventEmitter {
     upstream.setTimeout(120000, () => {
       upstream.destroy(new Error('上游响应超时（120s）'));
     });
+    timing.attach(upstream);
 
     // 请求体流式转发（同时被 BodyCapture 记录），chunked / 大文件都不会被卡住。
     // 断点已经读全了 body 的话流早结束了，再 pipe 是空的，必须一次性写出去。
@@ -1466,6 +1474,7 @@ class ProxyServer extends EventEmitter {
           status: upRes.statusCode,
           statusText: upRes.statusMessage || '',
           duration: elapsed(startedAt),
+          timings: timing.finish(),
           ...(sim ? { simMode: 'weak', simRule: sim.rule.match } : {}),
         }, ctx);
       };
@@ -1776,6 +1785,8 @@ class ProxyServer extends EventEmitter {
       status: 0,
       statusText: '',
       duration: elapsed(startedAt),
+      // 失败也要留下已经走完的阶段：连不上的请求往往就差在 DNS / TCP / TLS 某一段
+      timings: ctx.timing ? ctx.timing.finish() : undefined,
       error: String(message),
     }, ctx);
   }

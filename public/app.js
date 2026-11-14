@@ -863,7 +863,11 @@ function rowHtml(f) {
       <div class="h">${sub}${badges}</div>
     </span>
     <span class="st ${statusClass(f.status)}">${esc(stText)}</span>
-    <span class="tm ${f.duration > 800 ? 'slow' : ''}">${f.pending || f.duration === undefined ? '' : fmtTime(f.duration)}</span>
+    <span class="tm ${f.duration > 800 ? 'slow' : ''}">${
+      f.pending || f.duration === undefined
+        ? ''
+        : timingBar(f) + `<span class="tmv">${fmtTime(f.duration)}</span>`
+    }</span>
   </div>`;
 }
 
@@ -2136,6 +2140,7 @@ function renderDetail() {
     ['overview', '概览'],
     ['request', '请求'],
     ['response', '响应'],
+    ['timing', '耗时'],
     ['raw', '原始'],
   ];
   // 有对照物才给对比页签：手选的基准优先，其次重放关系里的原请求
@@ -2149,6 +2154,8 @@ function renderDetail() {
       ? tabRequest(f)
       : S.detailTab === 'response'
       ? tabResponse(f)
+      : S.detailTab === 'timing'
+      ? tabTiming(f)
       : S.detailTab === 'diff'
       ? tabDiff(f, cmpId)
       : tabRaw(f);
@@ -2295,8 +2302,108 @@ function tabOverview(f) {
   return notice + `<div class="sec">${kv(rows)}</div>`;
 }
 
-/** 从 base64 头部嗅探真实类型（Content-Type 可能缺失或撒谎） */
-function sniffMime(b64) {
+/* ------------------------------------------------------- 分阶段耗时 */
+
+/* 顺序即连接生命周期：DNS → TCP → TLS → 发出请求 → 等首字节 → 下载 */
+const TIMING_ROWS = [
+  ['dns', 'DNS 解析', 'dns'],
+  ['tcp', 'TCP 连接', 'tcp'],
+  ['tls', 'TLS 握手', 'tls'],
+  ['wait', '等待首字节', 'wait'],
+  ['download', '内容下载', 'download'],
+];
+
+/** 把 timings 摊成「耗时 + 偏移」的段，列表微条与详情瀑布图共用 */
+function timingSpans(f) {
+  const t = f && f.timings;
+  if (!t) return [];
+  const out = [];
+  let off = 0;
+  for (const [key, label, cls] of TIMING_ROWS) {
+    // 明文 HTTP 没有 TLS 握手，列一个 0ms 的 TLS 行只会让人以为「握手不用时间」
+    if (key === 'tls' && f.scheme !== 'https') continue;
+    const v = t[key];
+    if (v === null || v === undefined) continue;
+    out.push({ key, label, cls, ms: v, offset: off });
+    off += v;
+  }
+  // 各段之和与总耗时的差额：连接建立前的排队、时钟粒度等，统一显示为「其他」，
+  // 否则瀑布图会缺一块，看着像少统计了
+  const total = Number(t.total || f.duration || 0);
+  const rest = total - off;
+  if (out.length && rest > 1) out.push({ key: 'other', label: '其他', cls: 'other', ms: rest, offset: off });
+  return out;
+}
+
+/** 列表「耗时」列里的分段微条：一眼看出慢在握手还是慢在等响应 */
+function timingBar(f) {
+  const spans = timingSpans(f);
+  if (!spans.length) return '';
+  const total = spans.reduce((a, s) => a + s.ms, 0) || 1;
+  const seg = spans
+    .filter((s) => s.ms > 0)
+    .map(
+      (s) =>
+        `<i class="${s.cls}" style="flex:${Math.max(s.ms, total * 0.02)}" title="${esc(
+          s.label
+        )} ${fmtTime(s.ms)}"></i>`
+    )
+    .join('');
+  return seg ? `<span class="tbar" aria-hidden="true">${seg}</span>` : '';
+}
+
+function tabTiming(f) {
+  const spans = timingSpans(f);
+  if (!spans.length) {
+    return `<div class="notice">这条请求没有分阶段计时。</div>
+      <div class="sec">${kv([['总耗时', fmtTime(f.duration)]])}</div>
+      <p class="hint">Mock 本地返回、HAR 导入的记录、以及旧版本抓到的流量都没有分段计时；真实转发一次之后就有。</p>`;
+  }
+  const total = spans.reduce((a, s) => a + s.ms, 0) || 1;
+  const head = spans
+    .map(
+      (s) =>
+        `<i class="${s.cls}" style="flex:${Math.max(s.ms, total * 0.01)}" title="${esc(
+          s.label
+        )} ${fmtTime(s.ms)}"></i>`
+    )
+    .join('');
+  const rows = spans
+    .map((s) => {
+      const pct = Math.max(0, Math.min(100, (s.ms / total) * 100));
+      const left = Math.max(0, Math.min(100, (s.offset / total) * 100));
+      return `<div class="wf-row">
+        <span class="wf-label">${esc(s.label)}</span>
+        <span class="wf-track"><i class="${s.cls}" style="left:${left}%;width:${pct}%"></i></span>
+        <span class="wf-ms">${fmtTime(s.ms)}</span>
+        <span class="wf-pct">${pct.toFixed(0)}%</span>
+      </div>`;
+    })
+    .join('');
+  const reused =
+    f.timings && f.timings.reused
+      ? '<p class="hint">复用了已有连接（keep-alive），所以 DNS / TCP / TLS 都是 0ms —— 这是正常的。</p>'
+      : '';
+  // 目标是 IP 时 Node 不做域名解析，DNS 段本来就没有；不解释一句会被当成漏统计
+  const noDns =
+    f.timings && (f.timings.dns === null || f.timings.dns === undefined) && !f.timings.reused
+      ? '<p class="hint">目标是 IP，没有 DNS 解析这一步。</p>'
+      : '';
+  const waitMs = f.timings.wait;
+  return `<div class="sec">
+      <div class="sec-head">分段耗时<span class="fill"></span><span class="hint">条宽按总耗时归一</span></div>
+      <div class="wf-sum">${head}</div>
+      ${reused}${noDns}
+      <div class="wf">${rows}</div>
+    </div>
+    <div class="sec">${kv([
+      ['总耗时', fmtTime(f.duration)],
+      ['等待首字节', waitMs === null || waitMs === undefined ? '—' : fmtTime(waitMs)],
+      ['连接复用', f.timings.reused ? '是（keep-alive）' : '否'],
+    ])}</div>`;
+}
+
+/** 从 base64 头部嗅探真实类型（Content-Type 可能缺失或撒谎） */function sniffMime(b64) {
   let head = '';
   try {
     head = atob(b64.slice(0, 24));
@@ -3227,6 +3334,190 @@ function pickHarFile() {
     importHarText(text, String(fileName || '').replace(/\.(har|json)$/i, ''));
   });
 }
+
+/* ------------------------------------------------------------ 性能视图 */
+
+/* 抓了几千条之后的真问题不是「这条慢」，而是「哪些接口在拖后腿」。
+ * 聚合在服务端（/api/perf），这里只负责把同一份筛选条件下的结果画出来。 */
+S.perf = { by: 'route', sort: 'p95', data: null, loading: false };
+
+function perfQuery() {
+  const p = flowFilterParams();
+  // 排序只影响实时列表，聚合结果按统计口径自己排
+  p.delete('sort');
+  p.delete('dir');
+  p.set('by', S.perf.by);
+  p.set('slowest', '8');
+  return p;
+}
+
+async function openPerf() {
+  if (S.historyView) {
+    toast('先回到实时再看性能视图');
+    return;
+  }
+  syncPerfBy();
+  const sel = $('#perfSort');
+  if (sel) sel.value = S.perf.sort;
+  openModal('#modalPerf');
+  await loadPerf();
+}
+
+function syncPerfBy() {
+  $$('#perfBy button').forEach((b) => b.classList.toggle('on', b.dataset.perfBy === S.perf.by));
+}
+
+async function loadPerf() {
+  const box = $('#perfRows');
+  if (box) box.innerHTML = `<tr><td colspan="8" class="hint">统计中…</td></tr>`;
+  try {
+    S.perf.data = await api('/api/perf?' + perfQuery().toString());
+  } catch (err) {
+    S.perf.data = null;
+    toast('统计失败：' + (err.message || '连不上服务'));
+  }
+  renderPerf();
+}
+
+function perfSortedGroups() {
+  const d = S.perf.data;
+  if (!d || !d.groups) return [];
+  const key = S.perf.sort;
+  const num = (g) => (g[key] === null || g[key] === undefined ? -1 : Number(g[key]));
+  return d.groups.slice().sort((a, b) => num(b) - num(a) || b.count - a.count);
+}
+
+function perfBar(p95, max) {
+  if (!p95 || !max) return '';
+  const w = Math.max(2, Math.round((p95 / max) * 100));
+  return `<span class="pbar" aria-hidden="true"><i style="width:${w}%"></i></span>`;
+}
+
+function renderPerf() {
+  const d = S.perf.data;
+  const empty = $('#perfEmpty');
+  const rows = $('#perfRows');
+  const sum = $('#perfSum');
+  const scope = $('#perfScope');
+  if (!rows || !sum) return;
+
+  if (!d) {
+    rows.innerHTML = '';
+    if (empty) empty.hidden = false;
+    sum.innerHTML = '';
+    if (scope) scope.textContent = '';
+    return;
+  }
+
+  const t = d.totals || {};
+  const groups = perfSortedGroups();
+  if (scope) {
+    scope.textContent = `按${S.perf.by === 'host' ? '域名' : '接口'} · 内存 ${d.inMemory || 0} 条`;
+  }
+  const stat = (label, value) =>
+    `<span class="perf-stat"><span class="k">${esc(label)}</span><b>${esc(value)}</b></span>`;
+  const time = (v) => (v === null || v === undefined ? '—' : fmtTime(v));
+  sum.innerHTML = [
+    stat('已统计', String(t.count || 0)),
+    stat('P50', time(t.p50)),
+    stat('P95', time(t.p95)),
+    stat('平均', time(t.avg)),
+    stat('错误率', (t.errorRate || 0).toFixed(1) + '%'),
+    t.pending ? `<span class="hint">另有 ${t.pending} 条进行中，未计入</span>` : '',
+    d.truncated ? `<span class="hint">只显示前 ${groups.length} 个，其余 ${d.truncated} 个略</span>` : '',
+  ]
+    .filter(Boolean)
+    .join('');
+
+  if (!groups.length) {
+    rows.innerHTML = '';
+    if (empty) empty.hidden = false;
+    renderPerfSlow(d);
+    return;
+  }
+  if (empty) empty.hidden = true;
+
+  const maxP95 = Math.max(...groups.map((g) => Number(g.p95) || 0), 1);
+  rows.innerHTML = groups
+    .map((g) => {
+      const rate = Number(g.errorRate) || 0;
+      const errCls = rate >= 10 ? 'bad' : rate > 0 ? 'warn' : '';
+      const title = `${g.key} · ${g.count} 条${g.clientErrors ? ` · 4xx ${g.clientErrors} 次` : ''}`;
+      return `<tr data-perf-key="${esc(g.key)}" title="${esc(title)}">
+        <td class="pt-key">${esc(g.key)}</td>
+        <td class="pt-num pt-count">${g.count}</td>
+        <td class="pt-num">${g.p50 === null ? '—' : fmtTime(g.p50)}</td>
+        <td class="pt-num">${g.p95 === null ? '—' : fmtTime(g.p95)}${perfBar(g.p95, maxP95)}</td>
+        <td class="pt-num pt-err ${errCls}">${rate.toFixed(1)}%</td>
+        <td class="pt-num">${g.avg === null ? '—' : fmtTime(g.avg)}</td>
+        <td class="pt-num">${g.max === null ? '—' : fmtTime(g.max)}</td>
+        <td class="pt-num">${fmtSize(g.bytes)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  renderPerfSlow(d);
+}
+
+function renderPerfSlow(d) {
+  const box = $('#perfSlow');
+  if (!box) return;
+  const items = (d && d.slowest) || [];
+  box.innerHTML = items.length
+    ? items
+        .map(
+          (s) => `<div class="perf-slow-row" data-perf-flow="${esc(s.id)}" title="${esc(s.url || s.path || '')}">
+            <span class="psl-ms">${fmtTime(s.duration)}</span>
+            <span>${esc(s.method || '')}</span>
+            <span class="psl-url">${esc(s.path || s.url || '')}</span>
+            <span class="hint">${esc(s.status || 'ERR')} · ${esc(s.host || '')}</span>
+          </div>`
+        )
+        .join('')
+    : '<p class="hint">没有可比的请求。</p>';
+}
+
+/** 点性能表一行：把列表筛到这个接口 / 域名，直接看原始请求 */
+function applyPerfFilter(key) {
+  if (!key) return;
+  if (S.perf.by === 'host') {
+    S.filter.host = key;
+    delete S.filter.route;
+  } else {
+    S.filter.route = key;
+    delete S.filter.host;
+  }
+  closeModals();
+  syncFilters();
+  toast('已筛选到 ' + key);
+}
+
+function bindPerf() {
+  $('#btnPerf').addEventListener('click', openPerf);
+  $('#perfBy').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-perf-by]');
+    if (!b || b.dataset.perfBy === S.perf.by) return;
+    S.perf.by = b.dataset.perfBy;
+    syncPerfBy();
+    loadPerf();
+  });
+  $('#perfSort').addEventListener('change', () => {
+    S.perf.sort = $('#perfSort').value;
+    renderPerf();
+  });
+  $('#perfRefresh').addEventListener('click', () => loadPerf());
+  $('#perfRows').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-perf-key]');
+    if (tr) applyPerfFilter(tr.dataset.perfKey);
+  });
+  $('#perfSlow').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-perf-flow]');
+    if (!row) return;
+    closeModals();
+    selectFlow(row.dataset.perfFlow);
+  });
+}
+
 
 /** 拖文件进来也能导入：只在拖的是文件时接管，不影响规则树内部的拖拽排序 */
 function bindHarDrop() {
@@ -6331,6 +6622,7 @@ function bind() {
   bindNetwork();
   bindBreak();
   bindMap();
+  bindPerf();
   // 映射是落盘配置：启动时同步一次，徽标不用等用户点开面板才准
   api('/api/hostmap')
     .then((cfg) => {
@@ -7221,6 +7513,10 @@ const CMD_ITEMS = [
   },
   {
     label: '网络模拟', keys: 'network 网络 断网 弱网 超时', run: () => openNetwork(),
+  },
+  {
+    label: '性能视图', hint: '按接口聚合 P50 / P95', keys: 'perf performance 性能 聚合 慢 接口 p95',
+    run: () => openPerf(),
   },
   { label: '导出 HAR', keys: 'export har 导出', run: () => exportFlows('har') },
   {

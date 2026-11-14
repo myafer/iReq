@@ -45,6 +45,13 @@ GET    /api/history/:id/export?format=har|json  Export a whole snapshot (HAR by 
 GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/perf?by=route|host&same filters as /api/flows    Performance aggregation (per endpoint / host)
+                               → { by, groups: [{ key, count, p50, p95, avg, max, errorRate, noResponse,
+                                 serverErrors, clientErrors, bytes, methods, slowest }], groupCount, truncated,
+                                 slowest: [{ id, method, path, status, duration }], totals, inMemory }
+                               errorRate = (no response + 5xx) / completed flows; 4xx counted separately;
+                               in-flight requests are excluded. groups sorted by P95 desc,
+                               limit via groups= (default 200, max 500), slowest via slowest= (default 8)
 GET    /api/app-icons?names=A,B   Batch-find real icons by app name → { "A": {url, bundle}, "B": null }
 GET    /app-icon/<hash>.png      Icon file (only hash filenames inside data/app-icons/)
 GET    /api/diagnostics         { tlsFailures: [{host, count, error, reason, detail}], tunneled, stats, passthrough }
@@ -61,7 +68,9 @@ GET    /api/ca/archive           CA archive metadata (fingerprint / path / sourc
 GET    /api/ca/p12               Export .p12 backup (with private key; password in x-ireq-p12-password header)
 POST   /api/ca/import            { p12: "<base64>", password? } import .p12 and re-check trust
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows/:id
+GET    /api/flows/:id         One full flow, including timings: { total, dns, tcp, tls, wait, download, reused }
+                              (milliseconds; unavailable phases are null; reused connections report 0 for
+                               DNS/TCP/TLS with reused=true)
 DELETE /api/flows
 POST   /api/flows/:id/replay      { method, url, headers, body }
 GET    /api/rules

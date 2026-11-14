@@ -10,6 +10,7 @@ const https = require('https');
 const { URL } = require('url');
 const { randomUUID } = require('crypto');
 const { decompress, isTextual } = require('./proxy');
+const { createCollector } = require('./timing');
 
 const SKIP_REQ_HEADERS = [
   'host',
@@ -54,6 +55,8 @@ function replay({ store, flow, overrides = {} }) {
 
     const isSecure = target.protocol === 'https:';
     const transport = isSecure ? https : http;
+    // 与代理链路同一套分阶段计时，重放结果才能原样对比
+    const timing = createCollector(startedAt, { secure: isSecure });
 
     const finish = (fields) => {
       const record = {
@@ -70,6 +73,7 @@ function replay({ store, flow, overrides = {} }) {
         reqBodyTruncated: false,
         reqSize: body.length,
         duration: Number((process.hrtime.bigint() - startedAt) / 1000000n),
+        timings: timing.finish(),
         replayOf: flow.id,
         ...fields,
       };
@@ -86,6 +90,7 @@ function replay({ store, flow, overrides = {} }) {
         port: Number(target.port) || (isSecure ? 443 : 80),
         path: (target.pathname || '/') + (target.search || ''),
         headers,
+        lookup: timing.lookup,
         rejectUnauthorized: false,
         servername: isSecure && !/^\d+\.\d+\.\d+\.\d+$/.test(target.hostname) ? target.hostname : undefined,
       });
@@ -95,6 +100,7 @@ function replay({ store, flow, overrides = {} }) {
     }
 
     upstream.setTimeout(120000, () => upstream.destroy(new Error('上游响应超时（120s）')));
+    timing.attach(upstream);
 
     upstream.on('response', (res) => {
       const chunks = [];

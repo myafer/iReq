@@ -27,6 +27,13 @@
   --ic-def-bg: #e9e6e0;
   --ic-def-fg: #6d675e;
   --ic-device: #9a938a;
+  /* 耗时分解各段配色：列表微条与详情瀑布图共用一套，同一段永远同一个颜色 */
+  --ph-dns: #8b5cf6;
+  --ph-tcp: #0ea5e9;
+  --ph-tls: #dd8a0b;
+  --ph-wait: #2f5fe0;
+  --ph-dl: #16794a;
+  --ph-other: #b9b2a6;
 }
 
 [data-theme="dark"] {
@@ -49,6 +56,13 @@
   --ic-def-bg: #2b2e34;
   --ic-def-fg: #a2a8b3;
   --ic-device: #4d545e;
+  /* 深色下同样按色相区分，但提亮一档保证在深底上看得清 */
+  --ph-dns: #b18cff;
+  --ph-tcp: #56c8f5;
+  --ph-tls: #e0a33a;
+  --ph-wait: #6b93ff;
+  --ph-dl: #4ac28a;
+  --ph-other: #545b64;
 }
 
 * {
@@ -1273,7 +1287,7 @@ body.resizing * {
 
 .listhead {
   display: grid;
-  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(62px * var(--ui-scale));
+  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale));
   gap: 8px;
   padding: calc(7px * var(--ui-scale)) 12px;
   font-size: calc(12px * var(--ui-scale));
@@ -1328,7 +1342,7 @@ body.resizing * {
 
 .row {
   display: grid;
-  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(62px * var(--ui-scale));
+  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale));
   gap: 8px;
   align-items: center;
   padding: calc(8px * var(--ui-scale)) 12px;
@@ -5609,4 +5623,327 @@ body.dragging-file::after {
   background: rgba(47, 95, 224, 0.07);
   border: 2px dashed var(--accent);
   pointer-events: none;
+}
+
+/* ---------------- 耗时分解：列表微条 / 详情瀑布图 / 性能视图 ---------------- */
+
+/* 耗时列：微条 + 数字。列表里就能看出「慢在握手」还是「慢在等响应」 */
+.row .tm {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.row .tm .tmv {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tbar {
+  display: inline-flex;
+  flex: none;
+  width: calc(34px * var(--ui-scale));
+  height: calc(8px * var(--ui-scale));
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.tbar i {
+  display: block;
+  height: 100%;
+  min-width: 1px;
+}
+
+/* 每个阶段固定一种颜色：微条、瀑布图、汇总条三处必须同色，否则对照起来要重新认 */
+.tbar i.dns,
+.wf-sum i.dns,
+.wf-track i.dns {
+  background: var(--ph-dns);
+}
+.tbar i.tcp,
+.wf-sum i.tcp,
+.wf-track i.tcp {
+  background: var(--ph-tcp);
+}
+.tbar i.tls,
+.wf-sum i.tls,
+.wf-track i.tls {
+  background: var(--ph-tls);
+}
+.tbar i.wait,
+.wf-sum i.wait,
+.wf-track i.wait {
+  background: var(--ph-wait);
+}
+.tbar i.download,
+.wf-sum i.download,
+.wf-track i.download {
+  background: var(--ph-dl);
+}
+.tbar i.other,
+.wf-sum i.other,
+.wf-track i.other {
+  background: var(--ph-other);
+}
+
+.wf-sum {
+  display: flex;
+  height: calc(14px * var(--ui-scale));
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 4px 0 10px;
+  background: color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.wf-sum i {
+  display: block;
+  height: 100%;
+  min-width: 1px;
+}
+
+.wf {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wf-row {
+  display: grid;
+  grid-template-columns: calc(92px * var(--ui-scale)) minmax(0, 1fr) calc(64px * var(--ui-scale)) calc(42px * var(--ui-scale));
+  align-items: center;
+  gap: 8px;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.wf-label {
+  color: var(--text-2);
+}
+
+.wf-track {
+  position: relative;
+  height: calc(10px * var(--ui-scale));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+  overflow: hidden;
+}
+
+.wf-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  min-width: 1px;
+}
+
+.wf-ms {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-pct {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 性能视图 */
+.perf-dialog {
+  width: min(960px, 94vw);
+}
+
+.perf-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.perf-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.perf-seg button {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  padding: 5px 12px;
+  font-size: calc(12px * var(--ui-scale));
+  cursor: pointer;
+}
+
+.perf-seg button + button {
+  border-left: 1px solid var(--border);
+}
+
+.perf-seg button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.perf-sum {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.perf-sum b {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.perf-table-wrap {
+  max-height: 44vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.perf-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.perf-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.perf-table tbody tr {
+  cursor: pointer;
+}
+
+.perf-table tbody tr:hover {
+  background: var(--panel-2);
+}
+
+.perf-table .pt-num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.perf-table .pt-key {
+  max-width: calc(340px * var(--ui-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.perf-table .pt-err.bad {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.perf-table .pt-err.warn {
+  color: var(--warn);
+}
+
+.perf-table .pt-count {
+  color: var(--muted);
+}
+
+.perf-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-2);
+  line-height: 1.9;
+}
+
+.perf-slow {
+  margin-top: 14px;
+}
+
+.perf-sub {
+  color: var(--text-2);
+  font-size: calc(12px * var(--ui-scale));
+  margin-bottom: 6px;
+}
+
+.perf-slow-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.perf-slow-row:hover {
+  background: var(--panel-2);
+}
+
+.perf-slow-row .psl-ms {
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+}
+
+.perf-slow-row .psl-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 性能表里 P95 的小横条：一眼看出谁比谁慢一档，不必逐个读数字 */
+.perf-table .pbar {
+  display: inline-block;
+  width: calc(36px * var(--ui-scale));
+  height: 3px;
+  margin-left: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  overflow: hidden;
+}
+
+.perf-table .pbar i {
+  display: block;
+  height: 100%;
+  background: var(--ph-tls);
+}
+
+.perf-sum .perf-stat .k {
+  color: var(--muted);
+  margin-right: 5px;
+}
+
+.perf-stat b {
+  margin-left: 4px;
 }

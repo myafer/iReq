@@ -601,6 +601,8 @@ function summary(f) {
     statusText: f.statusText,
     pending: !!f.pending,
     duration: f.duration,
+    // 分阶段耗时（dns/tcp/tls/wait/download）：列表微条与详情瀑布图都读它
+    timings: f.timings,
     reqSize: f.reqSize,
     resSize: f.resSize,
     resContentType: f.resContentType,

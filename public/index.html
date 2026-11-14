@@ -67,6 +67,7 @@
             <button class="more-item" id="btnNetwork">网络模拟 <b id="netCount" hidden>0</b></button>
             <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
             <button class="more-item" id="btnMap">域名映射 <b id="mapCount" hidden>0</b></button>
+            <button class="more-item" id="btnPerf">性能视图</button>
             <button class="more-item" id="btnImportHar">导入 HAR…</button>
             <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
             <button class="more-item" id="btnCa">证书与连接</button>
@@ -979,6 +980,68 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <li>只映射端口也照样能用：换的只是我们跟上游之间的连接，客户端看到的还是 443。</li>
             </ul>
           </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- 性能视图：抓了几千条之后回答「哪些接口在拖后腿」 -->
+    <div class="modal" id="modalPerf" hidden>
+      <div class="modal-card perf-dialog">
+        <div class="modal-head">
+          <h2>性能视图</h2>
+          <span class="hint" id="perfScope"></span>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="perf-top">
+            <div class="perf-seg" id="perfBy">
+              <button type="button" data-perf-by="route" class="on">按接口</button>
+              <button type="button" data-perf-by="host">按域名</button>
+            </div>
+            <label class="inline-field">
+              <span>排序</span>
+              <select id="perfSort" class="input">
+                <option value="p95">P95 最慢</option>
+                <option value="max">单次最慢</option>
+                <option value="errorRate">错误率最高</option>
+                <option value="count">请求数最多</option>
+              </select>
+            </label>
+            <span class="spacer"></span>
+            <button class="btn ghost" id="perfRefresh">刷新</button>
+          </div>
+          <div class="perf-sum" id="perfSum"></div>
+          <div class="perf-table-wrap">
+            <table class="perf-table">
+              <thead>
+                <tr>
+                  <th class="pt-key">接口</th>
+                  <th class="pt-num">请求</th>
+                  <th class="pt-num">P50</th>
+                  <th class="pt-num">P95</th>
+                  <th class="pt-num">错误率</th>
+                  <th class="pt-num">平均</th>
+                  <th class="pt-num">最大</th>
+                  <th class="pt-num">传输</th>
+                </tr>
+              </thead>
+              <tbody id="perfRows"></tbody>
+            </table>
+            <div class="perf-empty" id="perfEmpty" hidden>
+              当前筛选下还没有已完成的请求。<br />
+              <span class="hint">抓一批流量再打开这里，或者先清掉上面的筛选条件。</span>
+            </div>
+          </div>
+          <div class="perf-slow">
+            <div class="perf-sub">最慢的几次 <span class="hint">点一行直接跳到那条请求</span></div>
+            <div id="perfSlow"></div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">点一行把列表筛到该接口；错误率只算「连不上 + 5xx」，4xx 是调用方问题，单独计数</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" data-close>关闭</button>
         </div>
       </div>
     </div>

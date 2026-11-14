@@ -18,6 +18,7 @@ const { normalize: normalizeNetworkSim } = require('./network-sim');
 const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
 const { McpAuth } = require('./mcp-auth');
 const { importHar } = require('./har-import');
+const { aggregate: aggregatePerf } = require('./perf');
 const mcp = require('./mcp');
 
 const VERSION = require('../package.json').version;
@@ -505,7 +506,33 @@ class ConsoleServer {
     /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
     if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
 
-  /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ---------------- */
+    /* ---------------- 性能视图：按接口 / 域名聚合耗时与错误率 ---------------- */
+    if (parts[1] === 'perf' && method === 'GET') {
+      const sp = url.searchParams;
+      const by = sp.get('by') === 'host' ? 'host' : 'route';
+      const flows = this.store.list({
+        query: sp.get('q') || '',
+        method: sp.get('method') || '',
+        status: sp.get('status') || '',
+        onlyMocked: sp.get('mocked') === '1',
+        host: sp.get('host') || '',
+        ip: sp.get('ip') || '',
+        app: sp.get('app') || '',
+        route: sp.get('route') || '',
+        limit: Math.min(Number(sp.get('limit')) || 2000, 5000),
+      });
+      return this._json(res, 200, {
+        ...aggregatePerf(flows, {
+          by,
+          limit: Math.min(Number(sp.get('groups')) || 200, 500),
+          slowest: Math.min(Number(sp.get('slowest')) || 8, 50),
+        }),
+        // 内存里的总条数（含进行中）：让界面能提示「统计的是筛出来的这 N 条里的多少」
+        inMemory: this.store.flows.length,
+      });
+    }
+
+    /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ---------------- */
     if (parts[1] === 'history') return this._apiHistory(req, res, parts, method, url);
 
     /* ---------------- 断点：命中规则时挂起请求 / 响应，等人放行 ---------------- */
