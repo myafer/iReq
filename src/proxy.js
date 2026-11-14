@@ -254,7 +254,7 @@ class BodyCapture {
 }
 
 class ProxyServer extends EventEmitter {
-  constructor({ port = 9090, host = '0.0.0.0', ca, store, rules, config = {}, processMap, breakpoints } = {}) {
+  constructor({ port = 9090, host = '0.0.0.0', ca, store, rules, config = {}, processMap, breakpoints, hostmap } = {}) {
     super();
     this.port = port;
     this.host = host;
@@ -263,6 +263,8 @@ class ProxyServer extends EventEmitter {
     this.rules = rules;
     // 断点：命中规则时把连接停下来等人操作，不传就是没有断点功能
     this.breakpoints = breakpoints || null;
+    // 域名映射：配置一次就一直生效，不用人守着
+    this.hostmap = hostmap || null;
     // 本机流量可以按「源端口 → 进程」拿到真实应用名；远程设备拿不到，走 UA。
     this.processMap = processMap || new ProcessMap();
     // 注意：必须复用传入的 config 引用（控制台改设置时是直接改这个对象），
@@ -1337,7 +1339,24 @@ class ProxyServer extends EventEmitter {
       }
     }
     const method = ov.method || req.method;
-    const isSecure = target.protocol === 'https:';
+    // 域名映射：把「连哪台机器」和「请求长什么样」分开 —— URL / Host / SNI 仍是原域名，
+    // 只有实际连接的 host:port 换成映射目标。这样本地服务按虚拟主机路由也不会懵。
+    let isSecure = target.protocol === 'https:';
+    let connProtocol = target.protocol;
+    let connHost = target.hostname;
+    let connPort = Number(target.port) || (isSecure ? 443 : 80);
+    let connPath = (target.pathname || '/') + (target.search || '');
+    const mapped = this.hostmap ? this.hostmap.apply(target) : null;
+    if (mapped) {
+      isSecure = mapped.scheme === 'https';
+      connProtocol = `${mapped.scheme}:`;
+      connHost = mapped.host;
+      connPort = mapped.port;
+      connPath = mapped.path;
+      // 列表 / 详情里标一下，否则「为什么响应不是这台机器的」会让人 debug 半天
+      meta.mapped = mapped.label;
+      meta.mappedRule = mapped.ruleId;
+    }
     const transport = isSecure ? https : http;
 
     const headers = {};
@@ -1366,13 +1385,15 @@ class ProxyServer extends EventEmitter {
     try {
       upstream = transport.request({
         method,
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: Number(target.port) || (isSecure ? 443 : 80),
-        path: (target.pathname || '/') + (target.search || ''),
+        protocol: connProtocol,
+        hostname: connHost,
+        port: connPort,
+        path: connPath,
         headers,
         // 调试工具：上游证书异常（企业代理、自签名）不应阻断排查
         rejectUnauthorized: false,
+        // SNI 用原域名而不是映射目标：换了 host 之后仍按原域名握手，
+        // 否则映射到同一台机器上的多个虚拟主机就分不开了
         servername: isSecure && !net.isIP(target.hostname) ? target.hostname : undefined,
       });
     } catch (err) {

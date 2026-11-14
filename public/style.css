@@ -717,6 +717,13 @@ pre {
   font-weight: 500;
 }
 
+/* 尚未实现的能力：按钮留位置但必须看得出点不动，别让人以为功能坏了 */
+.fbar > button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
 .fbar-sep {
   width: 1px;
   height: 14px;
@@ -1461,6 +1468,11 @@ body.resizing * {
 
 .tag.replay {
   color: var(--accent);
+}
+
+/* 域名映射：这条请求实际发去了别的地方，得让人一眼看见 */
+.tag.mapped {
+  color: var(--warn, #d98324);
 }
 
 .empty {
@@ -4142,6 +4154,18 @@ html[data-electron-titlebar="hidden"] .topbar :is(
   padding: 0 4px;
 }
 
+/* 域名映射规则行：原域名 → 目标 + 删除，中间那个箭头只是视觉路标 */
+.map-rule {
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1.1fr) 32px;
+}
+
+.map-rule .map-arrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: calc(12px * var(--ui-scale));
+  user-select: none;
+}
+
 /* ---------------- 断点：拦下来之后的编辑弹窗 ---------------- */
 
 .hold-dialog {
@@ -5567,3 +5591,22 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
 .mcp-tool-row code { font-family: var(--mono); color: var(--text); }
 .mcp-tool-title { color: var(--muted); flex: 1 1 auto; }
 .mcp-tools-details { margin-top: 2px; }
+
+/* ---------------- 导入 HAR：拖文件进窗口的提示层 ---------------- */
+
+body.dragging-file::after {
+  content: '松开即可导入 HAR';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans);
+  font-size: calc(15px * var(--ui-scale));
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  background: rgba(47, 95, 224, 0.07);
+  border: 2px dashed var(--accent);
+  pointer-events: none;
+}

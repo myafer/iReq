@@ -12,6 +12,7 @@ const { RuleEngine } = require('./rules');
 const { BookmarkStore } = require('./bookmarks');
 const { ProxyServer } = require('./proxy');
 const { Breakpoints } = require('./breakpoint');
+const { HostMap } = require('./hostmap');
 const { ConsoleServer } = require('./server');
 const { SystemProxy } = require('./system-proxy');
 const { CaTrust } = require('./ca-trust');
@@ -88,6 +89,8 @@ async function createApp({
 
   // 断点：会话级，不落盘。上次没放行的断点不该在下次启动时继续拦人。
   const breakpoints = new Breakpoints();
+  // 域名映射：属于配置，要落盘 —— 「把线上域名指到测试机」不该每次启动重配一遍
+  const hostmap = new HostMap(runtimeConfig.hostMap);
 
   const proxy = new ProxyServer({
     port: proxyPort,
@@ -96,6 +99,7 @@ async function createApp({
     store,
     rules,
     breakpoints,
+    hostmap,
     config: runtimeConfig,
   });
   const updater = new UpdateChecker({
@@ -120,6 +124,7 @@ async function createApp({
     updater,
     dataDir,
     breakpoints,
+    hostmap,
     publicDir: path.join(__dirname, '..', 'public'),
   });
 
@@ -129,6 +134,7 @@ async function createApp({
     store,
     rules,
     bookmarks,
+    hostmap,
     proxy,
     systemProxy,
     caTrust,

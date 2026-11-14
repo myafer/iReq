@@ -159,6 +159,9 @@ node tools/check-mcp.js         # MCP: 403 when off / hashed tokens / handshake 
 node tools/check-history.js     # history & paging: cursor paging / disk fallback / clear leaves an entry / replay / rename / export / delete (50 items)
 node tools/check-search.js      # body search & sorting: body off by default / body: prefix / case / regex metachars / four columns asc-desc / nulls last (22 items)
 node tools/check-breakpoint.js  # breakpoints: hold request & response / edit body-url-method-status / length recompute / timeout release / skip large / SSE (32 items)
+node tools/check-hostmap.js     # domain mapping: three target forms / wildcards and path prefixes / really changes upstream / Host and SNI untouched / list badge (35 items)
+node tools/check-har.js         # HAR import: becomes a snapshot / fields survive / base64 bodies / error branches / cleanup (25 items)
+node tools/check-body.js        # raw body bytes: inline images + sniffed types / text download / request body / works inside snapshots (18 items)
 ```
 
 `check-proxy.js` temporarily changes `passthrough` / `mitmPorts` and restores them itself; `check-empty-state.js` performs one clear;
@@ -171,6 +174,8 @@ node tools/check-breakpoint.js  # breakpoints: hold request & response / edit bo
 Mock hits with a real proxy request; in a finally block it deletes the test rule, restores the original rule order, and clears test traffic (archive kept).
 The unit part of `check-app-icon.js` generates icons in a temp dir and deletes them at the end; the API / UI parts only generate and clear test traffic,
 and the real service's `data/app-icons/` cache is kept (generated on first resolution of an app, reused afterwards).
+`check-hostmap.js` temporarily writes a domain-mapping rule (persisted to config.json) and clears it in a finally block;
+`check-har.js` deletes the history entry its import creates; `check-body.js` clears traffic, produces a set of binary responses, then clears again.
 ⚠️ `check-local-proxy.js` / `check-local-ui.js` **require the system proxy to be off before running** (they turn it on and restore it exactly themselves);
 if the console is currently "Taking over local", first release with `POST /api/system-proxy {"enabled":false}`, then re-take over with
 `POST /api/system-proxy {"enabled":true}` after the run, otherwise it'll be judged as a wrong precondition.

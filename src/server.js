@@ -17,6 +17,7 @@ const { savePersistedConfig } = require('./user-config');
 const { normalize: normalizeNetworkSim } = require('./network-sim');
 const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
 const { McpAuth } = require('./mcp-auth');
+const { importHar } = require('./har-import');
 const mcp = require('./mcp');
 
 const VERSION = require('../package.json').version;
@@ -82,8 +83,62 @@ function harContent(flow, isRequest) {
   return content;
 }
 
-/* 导出文件名用记录名（下载下来一看就知道是哪次抓的）；中文走 RFC 5987，老客户端用 ASCII 兜底 */
-function exportDisposition(item, format) {
+/** 头部类型缺失（或只给了 octet-stream）时按魔数认一下，图片预览才不会因为上游乱写头就废掉 */
+function sniffImageType(buf) {
+  if (!buf || buf.length < 12) return '';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  const head = buf.subarray(0, 12).toString('latin1');
+  if (head.startsWith('GIF87a') || head.startsWith('GIF89a')) return 'image/gif';
+  if (head.startsWith('RIFF') && head.slice(8, 12) === 'WEBP') return 'image/webp';
+  if (head.startsWith('BM')) return 'image/bmp';
+  return '';
+}
+
+/* 能安全直接用 <img>/<video> 内联展示的类型。刻意不含 svg 与 html：
+ * 控制台是本地服务的同源页面，内联一个带脚本的 SVG 等于给抓到的流量开了个 XSS 口子。 */
+const INLINE_BODY_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/avif',
+  'audio/mpeg',
+  'audio/wav',
+  'video/mp4',
+  'video/webm',
+]);
+
+/** 从 URL 末段猜一个像样的文件名，猜不到就按类型补扩展名 */
+function bodyFileName(flow, contentType, isRequest) {
+  const extByType = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'application/json': 'json',
+    'text/plain': 'txt',
+    'text/html': 'html',
+    'application/pdf': 'pdf',
+  };
+  let base = '';
+  try {
+    const last = new URL(String(flow.url || '')).pathname.split('/').filter(Boolean).pop() || '';
+    base = decodeURIComponent(last);
+  } catch (_) {
+    /* URL 不合法就用兜底名 */
+  }
+  base = base.replace(/[\\/:*?"<>|\r\n\t]+/g, '-').slice(0, 60);
+  if (!base) base = `${String(flow.method || 'GET').toLowerCase()}-${isRequest ? 'request' : 'response'}`;
+  if (!/\.[a-z0-9]{1,5}$/i.test(base)) {
+    const ext = extByType[contentType];
+    if (ext) base = `${base}.${ext}`;
+  }
+  return base;
+}
+
+/* 导出文件名用记录名（下载下来一看就知道是哪次抓的）；中文走 RFC 5987，老客户端用 ASCII 兜底 */function exportDisposition(item, format) {
   const ext = format === 'json' ? 'json' : 'har';
   const stamp = new Date((item && item.createdAt) || Date.now())
     .toISOString()
@@ -159,7 +214,7 @@ function toHar(flows, version) {
 }
 
 class ConsoleServer {
-  constructor({ port = 9091, host = '127.0.0.1', store, rules, bookmarks, proxy, ca, config, systemProxy, caTrust, appIcons, updater, dataDir, publicDir, breakpoints }) {
+  constructor({ port = 9091, host = '127.0.0.1', store, rules, bookmarks, proxy, ca, config, systemProxy, caTrust, appIcons, updater, dataDir, publicDir, breakpoints, hostmap }) {
     this.port = port;
     this.host = host;
     this.store = store;
@@ -173,6 +228,7 @@ class ConsoleServer {
     this.appIcons = appIcons || null;
     this.updater = updater || null;
     this.breakpoints = breakpoints || (proxy && proxy.breakpoints) || null;
+    this.hostmap = hostmap || (proxy && proxy.hostmap) || null;
     this.dataDir = dataDir || null;
     this.publicDir = publicDir || path.join(__dirname, '..', 'public');
     this.clients = new Set();
@@ -455,6 +511,11 @@ class ConsoleServer {
     /* ---------------- 断点：命中规则时挂起请求 / 响应，等人放行 ---------------- */
     if (parts[1] === 'breakpoints') return this._apiBreak(req, res, parts, method);
 
+    /* ---------------- 域名映射：把某个域名的请求实际发到另一台机器 ---------------- */
+    if (parts[1] === 'hostmap') return this._apiHostMap(req, res, method);
+
+    /* ---------------- 导入 HAR：别人的抓包文件变成这里的一份历史记录 ---------------- */
+    if (parts[1] === 'har' && method === 'POST') return this._apiHarImport(req, res, url);
     /** 前端批量问图标：本机 .app 直接给 URL，取不到的由前端用内置 / 默认图标 */
     if (parts[1] === 'app-icons' && method === 'GET') {
       const names = (url.searchParams.get('names') || '')
@@ -525,6 +586,12 @@ class ConsoleServer {
         const flow = this.store.get(parts[2]);
         if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
         return this._json(res, 200, flow);
+      }
+      // 原始字节：图片直接当 <img src> 用，其它类型给「保存为文件」
+      if (method === 'GET' && parts.length === 4 && parts[3] === 'body') {
+        const flow = this.store.get(parts[2]);
+        if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
+        return this._sendFlowBody(res, flow, url.searchParams);
       }
       if (method === 'DELETE' && parts.length === 2) {
         this.store.clear();
@@ -988,8 +1055,55 @@ class ConsoleServer {
     return this._json(res, 405, { error: '方法不允许' });
   }
 
-  async _apiHistory(req, res, parts, method, url) {
-    const h = this.history;
+  /**
+   * 域名映射：GET 拿配置，PUT 整体替换（开关 + 规则）。
+   * 规则格式 { from, to }：from 是域名（可含 `*`，可带路径前缀），to 是 `host:port` 或完整 URL。
+   * 保存后立刻落盘，并广播给所有窗口 —— 映射是全局面板，不该只对当前标签页生效。
+   */
+  async _apiHostMap(req, res, method) {
+    const hm = this.hostmap;
+    if (!hm) return this._json(res, 400, { error: '域名映射未启用' });
+
+    if (method === 'GET') return this._json(res, 200, hm.state());
+    if (method === 'PUT' || method === 'POST') {
+      const body = (await this._body(req)) || {};
+      const out = hm.setState({ enabled: body.enabled, rules: body.rules });
+      // 顺手记进 config，重启后还在：这是配置，不是一次性的会话状态
+      this.config.hostMap = out;
+      if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+      this._broadcast({ type: 'hostmap', state: out });
+      return this._json(res, 200, out);
+    }
+    return this._json(res, 405, { error: '方法不允许' });
+  }
+
+  /**
+   * 导入 HAR：请求体是文件原文（不是 JSON 包装），`?name=` 可指定记录名。
+   * 解析后落成一条历史记录，侧栏点开就能回看 / 重放 / 对比。
+   */
+  async _apiHarImport(req, res, url) {
+    if (!this.history) return this._json(res, 400, { error: '未启用落盘，无法导入' });
+    let text;
+    try {
+      text = await this._rawText(req);
+    } catch (err) {
+      return this._json(res, 413, { error: `文件太大，最多 64MB（${err.message}）` });
+    }
+    if (!text || !text.trim()) return this._json(res, 400, { error: '空文件' });
+
+    const out = importHar({
+      text,
+      dir: path.join(this.dataDir, 'flows'),
+      name: url.searchParams.get('name') || '',
+      history: this.history,
+    });
+    if (!out.ok) return this._json(res, 400, { error: out.error });
+
+    this._broadcast({ type: 'history-changed' });
+    return this._json(res, 200, out);
+  }
+
+  async _apiHistory(req, res, parts, method, url) {    const h = this.history;
     if (!h) return this._json(res, 400, { error: '未启用落盘，没有历史记录' });
 
     /* 导出这条历史：HAR（默认，能直接拖进浏览器 DevTools）或原始 JSONL 行 */
@@ -1030,6 +1144,8 @@ class ConsoleServer {
           error: gone ? '文件已被删除' : '这条流量不在该记录里',
         });
       }
+      // 归档里的原始字节：导入的 HAR 里常有图片，回看时也要能看 / 能存
+      if (parts[5] === 'body') return this._sendFlowBody(res, out.flow, url.searchParams);
       return this._json(res, 200, out.flow);
     }
 
@@ -1249,13 +1365,13 @@ class ConsoleServer {
     res.end(pem);
   }
 
-  _body(req) {
+  _body(req, limit = 8 * 1024 * 1024) {
     return new Promise((resolve, reject) => {
       const chunks = [];
       let size = 0;
       req.on('data', (c) => {
         size += c.length;
-        if (size > 8 * 1024 * 1024) {
+        if (size > limit) {
           reject(new Error('请求体过大'));
           req.destroy();
           return;
@@ -1275,8 +1391,61 @@ class ConsoleServer {
     });
   }
 
-  _json(res, code, payload) {
-    const data = Buffer.from(JSON.stringify(payload));
+  /** 原始文本（不按 JSON 解析）：导入 HAR 时直接吃文件内容，省一次转义膨胀 */
+  _rawText(req, limit = 64 * 1024 * 1024) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      let size = 0;
+      req.on('data', (c) => {
+        size += c.length;
+        if (size > limit) {
+          reject(new Error('文件太大'));
+          req.destroy();
+          return;
+        }
+        chunks.push(c);
+      });
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      req.on('error', reject);
+    });
+  }
+
+  /**
+   * 正文原始字节：`?side=req|res`（默认响应），`?dl=1` 强制下载。
+   * 图片 / 音视频内联（可直接当 <img src> 用），其余一律 attachment ——
+   * 抓到的内容是不可信数据，不能让它以 html / svg 的身份在控制台同源里跑起来。
+   */
+  _sendFlowBody(res, flow, sp) {
+    const isReq = sp.get('side') === 'req';
+    const b64 = isReq ? flow.reqBodyBase64 : flow.resBodyBase64;
+    const text = isReq ? flow.reqBody : flow.resBody;
+    if (!b64 && (text == null || text === '')) {
+      return this._json(res, 404, { error: '这条流量没有正文' });
+    }
+    const buf = b64 ? Buffer.from(String(b64), 'base64') : Buffer.from(String(text), 'utf8');
+    const heads = (isReq ? flow.reqHeaders : flow.resHeaders) || {};
+    const rawType = heads['content-type'];
+    const type = String(Array.isArray(rawType) ? rawType[0] : rawType || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    // 上游经常把图片写成 application/octet-stream 甚至不写，按魔数补一下才认得出是图
+    const sniffed = sniffImageType(buf);
+    const contentType = (!type || type === 'application/octet-stream') && sniffed ? sniffed : type || 'application/octet-stream';
+    const name = bodyFileName(flow, contentType, isReq);
+    const inline = !sp.get('dl') && INLINE_BODY_TYPES.has(contentType);
+    res.writeHead(200, {
+      'content-type': contentType,
+      'content-length': buf.length,
+      'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'no-store',
+      'x-body-truncated': (isReq ? flow.reqBodyTruncated : flow.resBodyTruncated) ? '1' : '0',
+    });
+    return res.end(buf);
+  }
+
+  _json(res, code, payload) {    const data = Buffer.from(JSON.stringify(payload));
     res.writeHead(code, {
       'content-type': 'application/json; charset=utf-8',
       'content-length': data.length,

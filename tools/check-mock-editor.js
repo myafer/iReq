@@ -581,8 +581,10 @@ function proxyGet(path) {
         holder.innerHTML = bodySection('响应体', '1 B', '', 'application/octet-stream', 'response', bin);
         document.getElementById('detail').appendChild(holder);
         const img = holder.querySelector('.bin-preview img');
-        previewOk = !!img && img.src.startsWith('data:image/png;base64,');
-        dlOk = holder.querySelector('a.body-tool')?.getAttribute('download') === 'test.png';
+        // 图片不再走 data URI：几十 MB 的 base64 塞进 DOM 会卡死，改成服务端原始字节直出
+        previewOk = !!img && /\/api\/(flows|history)\/[^/?]+\/body\?side=res$/.test(img.getAttribute('src') || '');
+        const dl = holder.querySelector('a.body-tool[download]');
+        dlOk = !!dl && /side=res&dl=1$/.test(dl.getAttribute('href') || '');
         // 直接用 hex 模式再渲染一次验证 dump 内容（不走点击，避免触发真实 renderDetail 冲掉注入节点）
         const saved = S.bodyView.response;
         S.bodyView.response = { ...saved, mode: 'hex' };
@@ -595,8 +597,8 @@ function proxyGet(path) {
       return { sniff, binMime: bin && bin.mime, isImage: bin && bin.isImage, name: bin && bin.name, previewOk, hexOk, dlOk };
     });
     ok('base64 头部嗅探出 image/png', binR.sniff === 'image/png' && binR.binMime === 'image/png', JSON.stringify(binR));
-    ok('二进制默认图片预览（data URL）+ 自动补扩展名', binR.isImage && binR.name === 'test.png' && binR.previewOk, JSON.stringify(binR));
-    ok('Hex 视图输出 PNG 魔数 dump + 下载文件名正确', binR.hexOk && binR.dlOk, JSON.stringify(binR));
+    ok('二进制默认图片预览（服务端字节直出）+ 自动补扩展名', binR.isImage && binR.name === 'test.png' && binR.previewOk, JSON.stringify(binR));
+    ok('Hex 视图输出 PNG 魔数 dump + 下载走原始字节', binR.hexOk && binR.dlOk, JSON.stringify(binR));
 
     /* ------------------------------------------------- 头区块复制 / 原文行复制 */
     const hdrR = await page.evaluate(() => {

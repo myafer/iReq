@@ -161,6 +161,9 @@ node tools/check-mcp.js         # MCP：未开启 403 / 令牌只存哈希 / 协
 node tools/check-history.js     # 历史记录与分页：游标翻页 / 内存见底续读磁盘 / 清空留档 / 回看 / 改名 / 导出 / 删除（50 项）
 node tools/check-search.js      # 正文搜索与排序：默认不搜 body / body: 前缀 / 大小写 / 正则元字符 / 四列升降序 / 缺值沉底（22 项）
 node tools/check-breakpoint.js  # 断点拦截：请求与响应挂起 / 改体改址改码 / 长度重算 / 超时放行 / 大包放弃 / SSE（32 项）
+node tools/check-hostmap.js     # 域名映射：三种目标写法 / 通配与路径前缀 / 真改上游地址 / Host 与 SNI 不变 / 记录标记（35 项）
+node tools/check-har.js         # 导入 HAR：解析成历史记录 / 回看字段 / base64 二进制 / 错误分支 / 清理（25 项）
+node tools/check-body.js        # 正文原始字节：图片 inline 与嗅探纠正 / 文本下载 / 请求体 / 归档里也能取（18 项）
 ```
 
 `check-proxy.js` 会临时改 `passthrough` / `mitmPorts` 并自行还原；`check-empty-state.js` 会执行一次清空；
@@ -173,6 +176,8 @@ node tools/check-breakpoint.js  # 断点拦截：请求与响应挂起 / 改体�
 Mock 命中；finally 里删除测试规则、恢复原有规则顺序、清空测试流量（归档保留）。
 `check-app-icon.js` 的单元部分在临时目录里生成图标、结束时删掉；API / UI 部分只造测试流量并清空，
 真实服务的 `data/app-icons/` 缓存会保留（首次解析某个 App 时生成，之后直接复用）。
+`check-hostmap.js` 会临时写一份域名映射规则（会落盘到 config.json），finally 里清空并关开关；
+`check-har.js` 导入的 HAR 生成一条历史记录，跑完删掉；`check-body.js` 会清空流量并造一批带二进制响应的测试数据，结束时再清一次。
 ⚠️ `check-local-proxy.js` / `check-local-ui.js` **要求运行前系统代理是关闭态**（它们自己开启再精确还原）；
 如果控制台正在「接管本机」，先 `POST /api/system-proxy {"enabled":false}` 释放，跑完再
 `POST /api/system-proxy {"enabled":true}` 接管，否则会被判为前置状态不符。

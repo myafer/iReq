@@ -43,6 +43,12 @@ const SUITES = [
   ['正文搜索与排序', 'check-search.js'],
   // 断点会真的把连接挂起来，跑完把开关关掉、队列清空
   ['断点拦截', 'check-breakpoint.js'],
+  // 自己起一个上游服务，验证映射真的改了目标地址；跑完关开关、清规则
+  ['域名映射', 'check-hostmap.js'],
+  // 导入 HAR 会生成一条历史记录，跑完删掉
+  ['导入 HAR', 'check-har.js'],
+  // 会清空流量并造一批带二进制响应的流量，跑完再清一次
+  ['正文下载与图片预览', 'check-body.js'],
   ['应用图标', 'check-app-icon.js'],
   ['证书信任', 'check-ca-trust.js'],
   ['控制坞', 'check-dock.js'],

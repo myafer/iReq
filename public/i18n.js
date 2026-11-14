@@ -51,6 +51,26 @@
     [/^(请求|响应)阶段 · (.+) · (\d+) 秒不处理会自动放行$/, function (m, a, b, c) {
       return (a === '响应' ? 'Response' : 'Request') + ' phase · ' + b + ' · auto-releases in ' + c + 's';
     }],
+    // 任意两条对比：基准是「方法 + 路径」，动态
+    [/^已把 (.+) 设为对比基准$/, function (m, a) {
+      return 'Compare base set to ' + a;
+    }],
+    // 导入 HAR：条数 / 截断 / 跳过都是动态的
+    [/^已导入 (\d+) 条$/, function (m, a) {
+      return 'Imported ' + a + (a === '1' ? ' flow' : ' flows');
+    }],
+    [/^已导入 (\d+) 条 · 只取了前 (\d+) 条$/, function (m, a, b) {
+      return 'Imported ' + a + ' flows · first ' + b + ' only';
+    }],
+    [/^已导入 (\d+) 条 · (\d+) 条解析不了已跳过$/, function (m, a, b) {
+      return 'Imported ' + a + ' flows · skipped ' + b + ' unparsable';
+    }],
+    // 对比页签顶部说明：基准是谁、是重放还是手动选的，都是变量
+    [/^左边是(你选的对比基准|原请求)（#(\d+)），右边是(当前这条|这次重放的结果)。$/, function (m, a, b, c) {
+      const left = a === '原请求' ? 'the original request' : 'the base you picked';
+      const right = c === '当前这条' ? 'this request' : 'this replay';
+      return 'Left is ' + left + ' (#' + b + '), right is ' + right + '.';
+    }],
     // 排序状态提示：字段名与条数都是动态的
     [/^已按(耗时|大小|状态)排序 · 共 (\d+) 条$/, function (m, a, b) {
       var en = { '耗时': 'duration', '大小': 'size', '状态': 'status' }[a] || a;

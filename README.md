@@ -24,6 +24,10 @@ Going deeper: [API and SSE events](docs/api.md) · [MCP access](docs/mcp.md) · 
 | Mock | Matches by method + URL (contains / wildcard / regex) + domain, returns custom status code, headers, body; add delay to simulate a slow network |
 | Replay | Edit method / URL / header / body and resend; the result is enqueued as a new request and linked to the original |
 | Replay diff | Replayed requests get a "Compare" tab: status / duration / size / response headers / body side by side. JSON is compared structurally (`list[2].id: 3 → 4`), plain text line by line |
+| Compare any two | No replay relationship needed: set any request as the compare base and every other request can diff against it (handy for "same endpoint before/after login"). The base sits above the list and can be cleared anytime |
+| Domain mapping | Point a whole domain somewhere else: `api.example.com → 127.0.0.1:8080`, with no client or hosts changes. URL, Host header and certificate stay on the original domain; supports `*` wildcards and path-prefix rewriting, and persists across restarts |
+| Import HAR | Drop a HAR onto the window (or "⋯ More → Import HAR") and it becomes a snapshot in the sidebar — replay, export and diff it like your own traffic |
+| Body download | Save request/response bodies as raw bytes; images render inline, and a wrong upstream content-type is corrected by sniffing the magic bytes |
 | Breakpoints | Hold a request or response by URL, edit method / URL / headers / body / status, then release — or "Return now" without touching upstream. Auto-releases after 60s; bodies over 2MB can only be passed through unchanged |
 | Search bodies | Flip the `body` switch next to the search box to scan request and response bodies too (or type `body:keyword`). Off by default — each body can be 2MB and scanning all of them slows the live list |
 | Sort | Click the Status / Time column headers to sort (descending → ascending → back to newest first); "Sort" under the ⋯ menu also offers response size. Live list only |

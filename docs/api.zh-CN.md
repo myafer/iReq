@@ -24,6 +24,17 @@ POST   /api/breakpoints/:id     放行：{ type:"resume", method?, url?, headers
                                 或直接返回：{ type:"abort", status, statusText?, headers?, body? }
                                 已经放行过的 id 回 404
 POST   /api/breakpoints/release-all   全部原样放行
+GET    /api/hostmap             域名映射 { enabled, rules: [{ id, from, to, enabled }] }
+PUT    /api/hostmap             { enabled, rules } 整体替换并落盘（重启保留）
+                                from 是原域名，可含 * 通配、可带路径前缀；to 是 host:port 或完整 URL
+                                （写了 http:// 会把 https 降成明文，写了路径会替换前缀）
+POST   /api/har?name=xxx        导入 HAR：请求体是文件原文（不是 JSON 包装），最多 64MB / 5000 条
+                                回 { id, file, count, bytes, skipped, total, truncated, name }
+                                导入结果直接成为一条历史记录（/api/history/:id 可回看 / 重放 / 导出）
+GET    /api/flows/:id/body      正文原始字节：side=req|res（默认 res），dl=1 强制下载
+                                图片 / 音视频内联（content-disposition: inline），其余一律 attachment；
+                                content-type 缺失或写成 octet-stream 时按魔数纠正
+GET    /api/history/:id/flows/:flowId/body   同上，读归档里的那条
 GET    /api/history             历史记录列表 { items: [{id, name, file, count, bytes, createdAt}], stats }
 PATCH  /api/history/:id         { name } 改名（去空白，最长 60 字）
 DELETE /api/history/:id         删掉一条（文件也删）

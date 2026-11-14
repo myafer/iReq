@@ -44,6 +44,23 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 域名映射是配置而不是会话状态：「把线上域名指到测试机」配一次该一直有效。
+  if (cfg.hostMap && typeof cfg.hostMap === 'object') {
+    out.hostMap = {
+      enabled: cfg.hostMap.enabled === true,
+      rules: Array.isArray(cfg.hostMap.rules)
+        ? cfg.hostMap.rules
+            .filter((r) => r && r.from && r.to)
+            .slice(0, 60)
+            .map((r, i) => ({
+              id: String(r.id || `hm${i + 1}`),
+              from: String(r.from).slice(0, 200),
+              to: String(r.to).slice(0, 200),
+              enabled: r.enabled !== false,
+            }))
+        : [],
+    };
+  }
   try {
     fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(out, null, 2) + '\n');
   } catch {

@@ -66,6 +66,8 @@
             <div class="more-head">工具</div>
             <button class="more-item" id="btnNetwork">网络模拟 <b id="netCount" hidden>0</b></button>
             <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
+            <button class="more-item" id="btnMap">域名映射 <b id="mapCount" hidden>0</b></button>
+            <button class="more-item" id="btnImportHar">导入 HAR…</button>
             <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
             <button class="more-item" id="btnCa">证书与连接</button>
             <button class="more-item" id="btnSettings">设置</button>
@@ -123,7 +125,7 @@
       <span class="fbar-sep" aria-hidden="true"></span>
       <button data-status="http">HTTP</button>
       <button data-status="https">HTTPS</button>
-      <button data-status="ws">WebSocket</button>
+      <button data-status="ws" disabled title="正在做：抓到的 WebSocket 帧会在这里按消息列出，现在点了也是空的">WebSocket</button>
       <span class="fbar-sep" aria-hidden="true"></span>
       <button data-status="2xx">2xx</button>
       <button data-status="3xx">3xx</button>
@@ -183,6 +185,12 @@
           <span class="hist-bar-meta" id="histBarMeta"></span>
           <button class="btn ghost" id="histExport" title="导出 HAR（按住 Shift 导出原始 JSON）">导出</button>
           <button class="btn ghost" id="histBack">回到实时</button>
+        </div>
+        <div class="hist-bar" id="cmpBar" hidden>
+          <span class="hist-dot" aria-hidden="true"></span>
+          <span class="hist-bar-title">对比基准 · <b id="cmpBarName"></b></span>
+          <span class="hist-bar-meta" id="cmpBarMeta"></span>
+          <button class="btn ghost" id="cmpBarClear">取消基准</button>
         </div>
         <div class="listhead">
           <span class="c-method">方法</span>
@@ -938,6 +946,43 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       </div>
     </div>
 
+    <div class="modal" id="modalMap" hidden>
+      <div class="modal-card net-dialog">
+        <div class="modal-head">
+          <h2>域名映射</h2>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="net-top">
+            <label class="switch" title="关掉后所有规则暂停，请求回到真实地址">
+              <input type="checkbox" id="mapEnabled" data-autofocus />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">启用</span>
+            </label>
+            <span class="hint">命中的请求改发到右边那台机器；地址栏、Host 头、证书都还是原来的域名</span>
+          </div>
+          <div class="net-sub">
+            规则 <span class="hint">左边是原域名（可写 * 通配、可带路径前缀），右边是 127.0.0.1:8080 或 http://host:port/前缀</span>
+          </div>
+          <div class="net-rules" id="mapRules"></div>
+          <div class="net-actions">
+            <button class="btn ghost" id="mapAdd">+ 添加规则</button>
+            <button class="btn ghost" id="mapClear">清空规则</button>
+          </div>
+          <details class="lp-details">
+            <summary>常见用法</summary>
+            <ul class="steps">
+              <li>把线上域名指到本机：左边写 api.example.com，右边写 127.0.0.1:8080，路径原样带过去。</li>
+              <li>顺便换协议：右边写 http://test.example.com，本地服务没证书也不会握手失败。</li>
+              <li>顺带换路径前缀：左边 api.example.com/v1、右边 http://127.0.0.1:3000/mock，那 /v1/user 会变成 /mock/user。</li>
+              <li>和断点的区别：断点要人守着改一次，映射配好就一直生效。</li>
+              <li>只映射端口也照样能用：换的只是我们跟上游之间的连接，客户端看到的还是 443。</li>
+            </ul>
+          </details>
+        </div>
+      </div>
+    </div>
+
     <div class="modal" id="modalHold" hidden>
       <div class="modal-card hold-dialog">
         <div class="modal-head">
@@ -1178,7 +1223,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
     <div class="ctx-menu" id="ctxMenu" hidden></div>
 
     <div class="toast" id="toast" hidden></div>
-    <input type="file" id="fileInput" accept=".json,.txt,application/json" hidden />
+    <input type="file" id="fileInput" accept=".json,.txt,.har,application/json" hidden />
     <script src="/i18n-en.js"></script>
     <script src="/i18n.js"></script>
     <script src="/app-icons.js"></script>

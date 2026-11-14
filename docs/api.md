@@ -24,6 +24,17 @@ POST   /api/breakpoints/:id     Release: { type:"resume", method?, url?, headers
                                 Or answer directly: { type:"abort", status, statusText?, headers?, body? }
                                 Already-released ids return 404
 POST   /api/breakpoints/release-all   Release everything unchanged
+GET    /api/hostmap            Domain mapping { enabled, rules: [{ id, from, to, enabled }] }
+PUT    /api/hostmap            { enabled, rules } replaced wholesale and persisted across restarts
+                               from is the original domain (* wildcard and a path prefix allowed);
+                               to is host:port or a full URL (http:// downgrades TLS, a path replaces the prefix)
+POST   /api/har?name=xxx       Import a HAR: raw file body (not JSON-wrapped), 64MB / 5000 entries max
+                               → { id, file, count, bytes, skipped, total, truncated, name }
+                               The import becomes one history snapshot (view / replay / export via /api/history/:id)
+GET    /api/flows/:id/body     Raw body bytes: side=req|res (default res), dl=1 forces download
+                               Images and A/V are inlined (content-disposition: inline), everything else is an
+                               attachment; a missing or octet-stream content-type is corrected by magic-byte sniffing
+GET    /api/history/:id/flows/:flowId/body   Same, for a snapshot entry
 GET    /api/history             History list { items: [{id, name, file, count, bytes, createdAt}], stats }
 PATCH  /api/history/:id         { name } rename (trimmed, max 60 chars)
 DELETE /api/history/:id         Delete one entry (file goes too)

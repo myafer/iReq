@@ -605,6 +605,10 @@ function summary(f) {
     resSize: f.resSize,
     resContentType: f.resContentType,
     mocked: f.mocked,
+    // 域名映射命中的目标：列表 / 详情要标出来，否则「响应怎么不是这台机器的」很难查
+    mapped: f.mapped,
+    // 从 HAR 文件导进来的（不是本机抓的），列表面板要能区分
+    imported: f.imported,
     replayOf: f.replayOf,
     error: f.error,
     ws: f.ws,

@@ -53,6 +53,9 @@ const S = {
   /* 待处理队列 + 当前正在编辑的那条 */
   holdQueue: [],
   holdCurrent: null,
+  /* 域名映射（配置级，服务端落盘）：命中的请求改发到别的机器 */
+  mapEnabled: false,
+  mapRules: [],
   /* Mock 总开关（会话级）：false 时所有规则整体旁路 */
   mockEnabled: true,
   editingRule: null,
@@ -836,6 +839,9 @@ function rowHtml(f) {
     f.mocked ? '<span class="tag mock">MOCK</span>' : '',
     f.replayOf ? '<span class="tag replay">REPLAY</span>' : '',
     f.ws ? '<span class="tag">WS</span>' : '',
+    // 映射过的请求：目标地址放 title，列表里只占一个字
+    f.mapped ? `<span class="tag mapped" title="这条请求被改发到 ${esc(f.mapped)}">映射</span>` : '',
+    f.imported ? '<span class="tag" title="从 HAR 文件导入，不是本机抓的">HAR</span>' : '',
     f.tunneled ? '<span class="tag tunnel">透传</span>' : '',
     f.simMode
       ? `<span class="tag sim ${esc(f.simMode)}">${esc(trSim(NET_MODES[f.simMode] || f.simMode))}</span>`
@@ -845,7 +851,8 @@ function rowHtml(f) {
     .join(' ');
   // 请求刚发出、上游还没回：状态列显示「…」而不是 0/—，行带 pending 呼吸态
   const stText = f.error ? 'ERR' : f.pending ? '…' : f.status || '—';
-  const appName = f.app && f.app !== f.host ? f.app : '';
+  // 导入的流量来源固定是「HAR 导入」，每行都写一遍很吵，用 HAR 徽标代替
+  const appName = f.imported ? '' : f.app && f.app !== f.host ? f.app : '';
   const hostPart = esc(f.host);
   const appPart = appName ? ` · ${ICONS().iconHtml(appName, 'xs')}${esc(appName)}` : '';
   const sub = `<span class="hl">${hostPart}${appPart}</span>`;
@@ -1324,6 +1331,12 @@ function clearFlowsUi({ resetDetail = false } = {}) {
   S.flows = [];
   S.pageCursor = '';
   S.pageHasMore = false;
+  // 清空之后基准那条也没了，留着只会让对比页签一直报「已删除」
+  if (S.cmpBaseId) {
+    S.cmpBaseId = '';
+    S.cmpBaseMeta = null;
+  }
+  renderCmpBar();
   renderList();
   if (resetDetail) {
     S.selectedId = null;
@@ -2117,6 +2130,7 @@ function renderDetail() {
   const pane = $('#detail');
   if (!f) return;
   if (f.kind === 'tls') return renderTlsDetail(pane, f);
+  renderCmpBar();
 
   const tabs = [
     ['overview', '概览'],
@@ -2124,8 +2138,9 @@ function renderDetail() {
     ['response', '响应'],
     ['raw', '原始'],
   ];
-  // 重放出来的请求才有对照物：原请求可能已被清空，取不到就退化成「找不到」
-  if (f.replayOf) tabs.push(['diff', '对比原请求']);
+  // 有对照物才给对比页签：手选的基准优先，其次重放关系里的原请求
+  const cmpId = compareBaseIdFor(f);
+  if (cmpId) tabs.push(['diff', S.cmpBaseId && S.cmpBaseId === cmpId ? '与基准对比' : '对比原请求']);
 
   const bodyHtml =
     S.detailTab === 'overview'
@@ -2135,7 +2150,7 @@ function renderDetail() {
       : S.detailTab === 'response'
       ? tabResponse(f)
       : S.detailTab === 'diff'
-      ? tabDiff(f)
+      ? tabDiff(f, cmpId)
       : tabRaw(f);
 
   pane.innerHTML = `
@@ -2151,10 +2166,15 @@ function renderDetail() {
         <span>${fmtClock(f.ts)}</span>
         ${f.mocked ? '<span class="tag mock">MOCK</span>' : ''}
         ${f.replayOf ? '<span class="tag replay">REPLAY</span>' : ''}
+        ${f.mapped ? `<span class="tag mapped" title="这条请求被域名映射改发到 ${esc(f.mapped)}">→ ${esc(f.mapped)}</span>` : ''}
         <span class="dactions">
           <button class="btn" id="actReplay">重放</button>
           <button class="btn" id="actMock">Mock 此请求</button>
           <button class="btn ghost" id="actBreak" title="给这个路径加一条断点规则：下次命中时停下来让你改">断点</button>
+          <button class="btn ghost" id="actMap" title="把这个域名映射到别的机器：配一次就一直生效">映射</button>
+          <button class="btn ghost" id="actBase" title="把它设为对比基准：别的请求详情里就能跟它比，再点一次取消">${
+            S.cmpBaseId === f.id ? '取消基准' : '对比基准'
+          }</button>
           <button class="btn ghost" id="actNet">网络 ▾</button>
           <button class="btn ghost" id="actStar">☆ 收藏</button>
           <button class="btn ghost" id="actCurl">复制 cURL</button>
@@ -2190,6 +2210,8 @@ function renderDetail() {
   $('#actReplay')?.addEventListener('click', openReplay);
   $('#actMock')?.addEventListener('click', () => openQuickMock(f));
   $('#actBreak')?.addEventListener('click', () => breakThisFlow(f));
+  $('#actMap')?.addEventListener('click', () => openMapPanel(f.host));
+  $('#actBase')?.addEventListener('click', () => (S.cmpBaseId === f.id ? clearCompareBase() : setCompareBase(f)));
   $('#actNet')?.addEventListener('click', (e) => openFlowNetMenu(e, f));
   $('#actStar')?.addEventListener('click', () => bookmarkFlow(f));
   $('#actCurl')?.addEventListener('click', () => {
@@ -2336,6 +2358,17 @@ function hexDump(b64, limit = 4096) {
 }
 
 /** 详情面板的请求/响应体：结构化（格式化 + 可折叠树 + 行号）/ 原始 / 二进制（预览/Base64/Hex）/ 全屏 / 复制 */
+/** 正文原始字节的地址：实时走 /api/flows，回看走 /api/history（同一个文件里两边都有） */
+function bodyUrlOf(f, kind, dl) {
+  if (!f || !f.id) return '';
+  const side = kind === 'request' ? 'req' : 'res';
+  const q = `side=${side}${dl ? '&dl=1' : ''}`;
+  if (S.historyView) {
+    return `/api/history/${encodeURIComponent(S.historyView.id)}/flows/${encodeURIComponent(f.id)}/body?${q}`;
+  }
+  return `/api/flows/${encodeURIComponent(f.id)}/body?${q}`;
+}
+
 function bodySection(title, sizeLabel, body, contentType, kind, bin) {
   const raw = String(body == null ? '' : body);
   const prettyText = pretty(raw, contentType);
@@ -2357,8 +2390,10 @@ function bodySection(title, sizeLabel, body, contentType, kind, bin) {
   const binBtns = bin
     ? `${bin.isImage ? btn('preview', '预览', '渲染图片预览') : ''}${btn('base64', 'Base64', '完整 base64 文本')}${btn('hex', 'Hex', '十六进制 dump（前 4KB）')}`
     : '';
-  const dlBtn = bin
-    ? `<a class="body-tool" href="data:${bin.mime};base64,${bin.base64}" download="${esc(bin.name)}" title="保存为本地文件">下载</a>`
+  const dlUrl = bodyUrlOf(S.selected, kind, true);
+  // 走服务端原始字节，不再把 base64 塞进 data URI：几十 MB 的响应塞进 DOM 会直接卡死
+  const dlBtn = dlUrl
+    ? `<a class="body-tool" href="${esc(dlUrl)}" download title="保存为本地文件（原始字节，不经过 base64）">下载</a>`
     : '';
   const tools = `<span class="body-tools">
     ${bin ? binBtns : `${btn('pretty', '结构化', '格式化 JSON，每层可折叠')}${btn('raw', '原始', '未经处理的原文')}`}
@@ -2370,7 +2405,7 @@ function bodySection(title, sizeLabel, body, contentType, kind, bin) {
   let view;
   if (bin) {
     if (mode === 'preview') {
-      view = `<div class="body-view bin-preview"><img src="data:${bin.mime};base64,${bin.base64}" alt="${esc(bin.name)}" draggable="false"></div>`;
+      view = `<div class="body-view bin-preview"><img src="${esc(bodyUrlOf(S.selected, kind, false))}" alt="${esc(bin.name)}" draggable="false"></div>`;
     } else if (mode === 'hex') {
       const dump = hexDump(bin.base64);
       view = `<pre class="code-block body-view hex-view" data-json="0">${esc(dump)}</pre>${
@@ -2435,6 +2470,57 @@ function tabRaw(f) {
 /* 原请求缓存：重放产生的记录只带 replayOf（原请求 id），原请求可能已经被清空。
  * 一次详情会话里只拉一次，取不到记成 'missing' 免得反复请求。 */
 S.diffBase = {};
+
+/* 手动挑的对比基准（列表里任意一条）。重放关系的对比是「自动基准」，
+ * 手动基准一旦设了就优先 —— 常见场景是「登录前那次 / 登录后这次」本来就没有重放关系。 */
+S.cmpBaseId = '';
+S.cmpBaseMeta = null;
+
+/** 当前这条该跟谁比：手选基准 > 重放原请求；自己跟自己不比 */
+function compareBaseIdFor(f) {
+  if (!f) return '';
+  if (S.cmpBaseId && S.cmpBaseId !== f.id) return S.cmpBaseId;
+  if (!S.cmpBaseId && f.replayOf && f.replayOf !== f.id) return f.replayOf;
+  return '';
+}
+
+function renderCmpBar() {
+  const bar = $('#cmpBar');
+  if (!bar) return;
+  const m = S.cmpBaseMeta;
+  bar.hidden = !(S.cmpBaseId && m);
+  if (bar.hidden) return;
+  $('#cmpBarName').textContent = `${m.method || ''} ${m.path || m.url || ''}`.trim();
+  $('#cmpBarMeta').textContent = [m.host, m.status ? `${m.status}` : '进行中', fmtTime(m.duration)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** 把某条设为对比基准：只记摘要用于顶部提示条，正文等真要比时再拉 */
+function setCompareBase(f) {
+  if (!f) return;
+  S.cmpBaseId = f.id;
+  S.cmpBaseMeta = {
+    id: f.id,
+    method: f.method,
+    path: f.path || f.url,
+    url: f.url,
+    host: f.host,
+    status: f.status,
+    duration: f.duration,
+  };
+  renderCmpBar();
+  renderDetail();
+  toast(`已把 ${f.method} ${f.path || f.url} 设为对比基准`);
+}
+
+function clearCompareBase() {
+  S.cmpBaseId = '';
+  S.cmpBaseMeta = null;
+  renderCmpBar();
+  if (S.detailTab === 'diff' && S.selected && !S.selected.replayOf) S.detailTab = 'overview';
+  renderDetail();
+}
 
 function ensureDiffBase(id) {
   if (!id) return Promise.resolve();
@@ -2552,16 +2638,17 @@ function headerDiff(oldH, newH) {
   return rows.sort((x, y) => weight[x.type] - weight[y.type] || x.key.localeCompare(y.key));
 }
 
-function tabDiff(f) {
-  const base = S.diffBase[f.replayOf];
+function tabDiff(f, baseId) {
+  const id = baseId || compareBaseIdFor(f);
+  const base = S.diffBase[id];
   if (!base) {
-    ensureDiffBase(f.replayOf).then(() => {
+    ensureDiffBase(id).then(() => {
       if (S.selected && S.selected.id === f.id && S.detailTab === 'diff') renderDetail();
     });
-    return '<div class="dsec-hint">正在取原请求…</div>';
+    return '<div class="dsec-hint">正在取对比基准…</div>';
   }
   if (base === 'missing') {
-    return '<div class="dsec-hint">原请求已经被清空或删除，没有可对比的对象。</div>';
+    return '<div class="dsec-hint">对比基准已经被清空或删除，没有可对比的对象。</div>';
   }
 
   const stat = (label, oldV, newV, cls) => {
@@ -2636,9 +2723,12 @@ function tabDiff(f) {
     }
   }
 
+  const manual = !!S.cmpBaseId && S.cmpBaseId === id;
   return `
-    <div class="dsec-hint diff-head">左边是原请求（#${esc(String(f.replayOf))}），右边是这次重放的结果。
-      <button class="btn ghost" data-goto="${esc(String(f.replayOf))}">打开原请求</button></div>
+    <div class="dsec-hint diff-head">左边是${manual ? '你选的对比基准' : '原请求'}（#${esc(String(id))}），右边是${
+    manual ? '当前这条' : '这次重放的结果'
+  }。
+      <button class="btn ghost" data-goto="${esc(String(id))}">打开左边那条</button></div>
     <div class="sec"><div class="sec-head">概要</div><div class="dstats">${stats}</div></div>
     ${headerHtml}
     ${bodyHtml}`;
@@ -3004,6 +3094,178 @@ function bindNetwork() {
   });
 }
 
+/* ------------------------------------------------------------ 域名映射 */
+
+let mapTimer = null;
+
+function mapRuleHtml(r) {
+  return `<div class="net-rule map-rule" data-id="${esc(r.id)}">
+    <input class="input mono map-from" value="${esc(r.from || '')}" placeholder="api.example.com 或 api.example.com/v1" spellcheck="false" title="要拦的域名：可写 * 通配，可带路径前缀" />
+    <span class="map-arrow" aria-hidden="true">→</span>
+    <input class="input mono map-to" value="${esc(r.to || '')}" placeholder="127.0.0.1:8080 或 http://host:port/前缀" spellcheck="false" title="实际发到哪：只写 host:port 会沿用原协议；写 http:// 会改协议；带路径会换前缀" />
+    <button class="btn icon ghost" data-map-del="${esc(r.id)}" title="删除这条规则" aria-label="删除这条规则">✕</button>
+  </div>`;
+}
+
+function renderMapPanel() {
+  const box = $('#mapRules');
+  if (!box) return;
+  box.innerHTML = S.mapRules.length
+    ? S.mapRules.map(mapRuleHtml).join('')
+    : '<div class="net-empty">还没有规则。点「+ 添加规则」，或者在某条请求的详情里点「映射此域名」。</div>';
+}
+
+function mapFromPanel() {
+  const rules = $$('#mapRules .map-rule').map((row, i) => ({
+    id: row.dataset.id || 'hm' + i,
+    from: row.querySelector('.map-from').value.trim(),
+    to: row.querySelector('.map-to').value.trim(),
+    enabled: true,
+  }));
+  return { enabled: $('#mapEnabled').checked, rules };
+}
+
+function syncMapBadge() {
+  const badge = $('#mapCount');
+  if (!badge) return;
+  const n = S.mapEnabled ? S.mapRules.length : 0;
+  badge.hidden = n === 0;
+  badge.textContent = String(n);
+}
+
+async function putMap() {
+  const cfg = mapFromPanel();
+  S.mapEnabled = cfg.enabled;
+  S.mapRules = cfg.rules;
+  syncMapBadge();
+  try {
+    const out = await api('/api/hostmap', { method: 'PUT', body: cfg });
+    if (out) {
+      S.mapRules = out.rules || S.mapRules;
+      syncMapBadge();
+    }
+  } catch (_) {
+    /* 输入过程中网络抖动不打扰，下次输入还会再存 */
+  }
+}
+
+function queueMapSave() {
+  clearTimeout(mapTimer);
+  mapTimer = setTimeout(putMap, 250);
+}
+
+/** prefillFrom：从某条请求点进来时，把它的域名先填好 */
+async function openMapPanel(prefillFrom) {
+  try {
+    const cfg = await api('/api/hostmap');
+    S.mapEnabled = !!cfg.enabled;
+    S.mapRules = cfg.rules || [];
+  } catch (_) {
+    /* 用本地状态顶上 */
+  }
+  if (prefillFrom) {
+    const hit = S.mapRules.find((r) => String(r.from || '').toLowerCase() === String(prefillFrom).toLowerCase());
+    if (!hit) {
+      S.mapRules = S.mapRules.concat({ id: 'hm' + Date.now(), from: prefillFrom, to: '', enabled: true });
+      // 新增的空规则要落盘，否则关掉面板就丢了
+      setTimeout(putMap, 0);
+    }
+  }
+  const sw = $('#mapEnabled');
+  if (sw) sw.checked = !!S.mapEnabled;
+  syncMapBadge();
+  renderMapPanel();
+  openModal('#modalMap');
+  if (prefillFrom) {
+    const last = $('#mapRules .map-rule:last-child .map-to');
+    if (last) last.focus();
+  }
+}
+
+/* ------------------------------------------------------------ 导入 HAR */
+
+const HAR_MAX_ENTRIES = 5000;
+
+/**
+ * 把 HAR 文本变成侧栏里的一条历史记录。
+ * 走的是原始文本上传（不套 JSON），省一次转义膨胀 —— 几十 MB 的 HAR 差别很明显。
+ */
+async function importHarText(text, name) {
+  toast('正在导入…');
+  let res;
+  let out = {};
+  try {
+    res = await fetch('/api/har' + (name ? `?name=${encodeURIComponent(name)}` : ''), {
+      method: 'POST',
+      headers: { 'content-type': 'application/har+json' },
+      body: text,
+    });
+    out = await res.json().catch(() => ({}));
+  } catch (_) {
+    toast('导入失败：连不上服务');
+    return null;
+  }
+  if (!res.ok || out.error) {
+    toast(String(out.error || '导入失败'));
+    return null;
+  }
+  const notes = [`已导入 ${out.count} 条`];
+  if (out.truncated) notes.push(`只取了前 ${HAR_MAX_ENTRIES} 条`);
+  if (out.skipped) notes.push(`${out.skipped} 条解析不了已跳过`);
+  toast(notes.join(' · '));
+  await loadHistory();
+  const item = (S.history || []).find((x) => x.id === out.id);
+  // 导入完直接打开回看：用户拖进来的目的就是「看这份文件」，不该让他再去侧栏点一次
+  if (item) openHistory(item);
+  return out;
+}
+
+function pickHarFile() {
+  pickFile((text, fileName) => {
+    if (!text || !text.trim()) return toast('文件是空的');
+    // 文件名就是最自然的记录名（侧栏双击还能改）
+    importHarText(text, String(fileName || '').replace(/\.(har|json)$/i, ''));
+  });
+}
+
+/** 拖文件进来也能导入：只在拖的是文件时接管，不影响规则树内部的拖拽排序 */
+function bindHarDrop() {
+  const hasFiles = (e) => {
+    const dt = e.dataTransfer;
+    return !!dt && Array.from(dt.types || []).includes('Files');
+  };
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.add('dragging-file');
+  });
+  document.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget) return;
+    document.body.classList.remove('dragging-file');
+  });
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.remove('dragging-file');
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    const name = String(file.name || '').toLowerCase();
+    if (!/\.(har|json)$/.test(name)) {
+      toast('只认 .har 或 .json 文件');
+      return;
+    }
+    if (file.size > 64 * 1024 * 1024) {
+      toast('文件太大，最多 64MB');
+      return;
+    }
+    // 记录名先用文件名，用户可以在侧栏双击改
+    file
+      .text()
+      .then((text) => importHarText(text, name.replace(/\.(har|json)$/, '')))
+      .catch(() => toast('读取文件失败'));
+  });
+}
+
 /* ------------------------------------------------------------ 断点 */
 
 const BP_PHASES = [['request', '请求'], ['response', '响应'], ['both', '两者']];
@@ -3217,6 +3479,32 @@ async function breakThisFlow(f) {
   }
 }
 
+function bindMap() {
+  $('#btnMap').addEventListener('click', () => openMapPanel());
+  $('#modalMap').addEventListener('input', () => queueMapSave());
+  $('#modalMap').addEventListener('change', () => queueMapSave());
+  $('#mapRules').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-map-del]');
+    if (!del) return;
+    S.mapRules = S.mapRules.filter((r) => r.id !== del.dataset.mapDel);
+    renderMapPanel();
+    putMap();
+  });
+  $('#mapAdd').addEventListener('click', () => {
+    const cfg = mapFromPanel();
+    cfg.rules.push({ id: 'hm' + Date.now().toString(36), from: '', to: '', enabled: true });
+    S.mapRules = cfg.rules;
+    renderMapPanel();
+    const last = $('#mapRules .map-rule:last-child .map-from');
+    if (last) last.focus();
+  });
+  $('#mapClear').addEventListener('click', () => {
+    S.mapRules = [];
+    renderMapPanel();
+    putMap();
+  });
+}
+
 function bindBreak() {
   $('#btnBreak').addEventListener('click', openBreakPanel);
   $('#modalBreak').addEventListener('input', () => {
@@ -3427,7 +3715,7 @@ function pickFile(cb) {
     const f = input.files && input.files[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => cb(String(reader.result || ''));
+    reader.onload = () => cb(String(reader.result || ''), f.name);
     reader.readAsText(f);
   };
   input.click();
@@ -6042,6 +6330,18 @@ function bind() {
   if (wlFeedback) wlFeedback.addEventListener('click', () => closeModals());
   bindNetwork();
   bindBreak();
+  bindMap();
+  // 映射是落盘配置：启动时同步一次，徽标不用等用户点开面板才准
+  api('/api/hostmap')
+    .then((cfg) => {
+      S.mapEnabled = !!cfg.enabled;
+      S.mapRules = cfg.rules || [];
+      syncMapBadge();
+    })
+    .catch(() => {});
+  $('#cmpBarClear')?.addEventListener('click', () => clearCompareBase());
+  $('#btnImportHar')?.addEventListener('click', pickHarFile);
+  bindHarDrop();
   $('#updAuto').addEventListener('change', async (e) => {
     const on = e.target.checked;
     try {
@@ -6686,6 +6986,15 @@ function bind() {
         const next = S.holdQueue[0];
         if (next) showHold(next);
         else closeModals();
+      }
+    } else if (msg.type === 'hostmap') {
+      // 别的窗口改了映射：同步开关与规则（不打断正在编辑的输入框）
+      if (msg.state) {
+        S.mapEnabled = !!msg.state.enabled;
+        S.mapRules = msg.state.rules || [];
+        syncMapBadge();
+        const panel = $('#modalMap');
+        if (panel && !panel.hidden && !panel.querySelector('input:focus, select:focus')) renderMapPanel();
       }
     } else if (msg.type === 'breakpoints') {
       // 别的窗口改了断点配置：同步面板与开关
