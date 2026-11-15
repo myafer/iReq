@@ -194,3 +194,19 @@ Mock 命中；finally 里删除测试规则、恢复原有规则顺序、清空�
 `POST /api/system-proxy {"enabled":true}` 接管，否则会被判为前置状态不符。
 三个 `check-local-*.js` 会**短暂把系统代理切到 9090**（约 1–3 秒）并在 finally 里精确还原，
 跑之前确保 iReq 服务在监听，别中途强杀脚本。
+
+## README 截图
+
+README 里的图由 `tools/shots.js` 生成，不要手工截图覆盖：
+
+```bash
+# 起一个只绑回环、不落盘的临时实例，避免任何真实环境信息进画面
+node bin/ireq.js start -p 9393 -u 9394 -b 127.0.0.1 -d /tmp/ireq-shots --no-persist
+curl -X PUT http://127.0.0.1:9394/api/config -H 'content-type: application/json' -d '{"processMap":false}'
+node tools/shots.js          # 产物写到 docs/shots/
+```
+
+- 流量全部是脚本现造的假数据，域名统一 `*.demo.example`（靠域名映射指到本地假上游）
+- 关掉进程名识别：否则详情里的「进程 / 可执行文件」会带出 `/Users/<用户名>` 路径
+- 顶栏地址先切到 `127.0.0.1`，避免把局域网 IP 拍进去
+- 截图前脚本会断言页面上没有局域网 IP、`/Users/` 路径、用户名、真实邮箱，命中就中止

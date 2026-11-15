@@ -9,6 +9,10 @@
 > 定位：不想为了调一个接口去开全家桶工具时用的东西。跨 macOS / Windows / Linux，
 > 内核纯 Node 实现、无原生依赖；可选桌面版用 Electron 把同一内核装进窗口。
 
+<p align="center">
+  <img src="docs/shots/main.png" alt="iReq 主界面：左侧请求列表，右侧请求详情" width="900">
+</p>
+
 深入文档：[API 与 SSE 事件](docs/api.zh-CN.md) · [MCP 接入](docs/mcp.zh-CN.md) · [开发与实现细节](docs/development.zh-CN.md)
 
 **遇到问题或有想法？** [提个 issue](https://github.com/myafer/iReq/issues/new/choose) —— bug、想要的功能够用着别扭的地方都可以，不用写得很正式。应用内「更多 ⋯ → 反馈与建议」是同一个入口。
@@ -55,6 +59,23 @@
 | VSCode 式规则工作区 | 活动栏 + 资源管理器 + 多标签编辑区 + 面包屑 + 状态栏；点规则在右侧开标签而不是弹窗，多条规则可同时编辑，未保存内容切标签不丢，⌘S / ⌘W / ⌘1..9 齐备 |
 | MCP 接入（AI 客户端） | 可选：把 iReq 当 **MCP 服务**，让 AI 客户端读流量、造 Mock、改弱网。**默认关闭 + 令牌认证**（只存哈希、只显示一次、可撤销、分只读 / 读写）。[用法](docs/mcp.zh-CN.md) |
 | 历史记录 | 每次「清空」都留一条，侧栏点开就能回看那批请求（可双击改名、可删）。列表往下滑会**无感继续加载**：内存只留设置里的条数，更早的从当天落盘文件接着读 |
+
+## 界面
+
+| 会话总览 | 脱敏（导出前打码） |
+| --- | --- |
+| <img src="docs/shots/overview.png" width="440" alt="会话总览：六张概览卡 + 状态分布 + 最慢接口"> | <img src="docs/shots/redact.png" width="440" alt="脱敏面板：原值与导出内容两栏对照"> |
+| **WebSocket 消息** | **耗时分解** |
+| <img src="docs/shots/messages.png" width="440" alt="WebSocket 帧时间线"> | <img src="docs/shots/timing.png" width="440" alt="DNS / TCP / TLS / 等待 / 下载 五段瀑布"> |
+
+深色主题：
+
+<p align="center">
+  <img src="docs/shots/main-dark.png" alt="深色主题" width="900">
+</p>
+
+> 截图里的域名（`api.demo.example`）、令牌、账号、订单号全部是演示脚本现造的假数据，
+> 不含任何真实主机、内网地址或凭据。脱敏那张图展示的正是「导出前把凭据换成 `[REDACTED]`」的效果。
 
 ## 快速开始
 

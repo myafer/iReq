@@ -192,3 +192,20 @@ if the console is currently "Taking over local", first release with `POST /api/s
 `POST /api/system-proxy {"enabled":true}` after the run, otherwise it'll be judged as a wrong precondition.
 The three `check-local-*.js` will **briefly switch the system proxy to 9090** (about 1–3 seconds) and restore it exactly in a finally block;
 make sure the iReq service is listening before running, and don't kill the script midway.
+
+## README screenshots
+
+Images in the README come from `tools/shots.js` — do not replace them with hand-made crops:
+
+```bash
+# throwaway instance: loopback only, nothing persisted
+node bin/ireq.js start -p 9393 -u 9394 -b 127.0.0.1 -d /tmp/ireq-shots --no-persist
+curl -X PUT http://127.0.0.1:9394/api/config -H 'content-type: application/json' -d '{"processMap":false}'
+node tools/shots.js          # writes into docs/shots/
+```
+
+- All traffic is fabricated; hostnames are `*.demo.example` mapped to a local fake upstream
+- Process-name resolution is turned off — otherwise the detail pane shows `/Users/<name>` paths
+- The top bar is switched to `127.0.0.1` so no LAN IP ends up in the picture
+- Before each shot the script asserts the page has no LAN IP, `/Users/` path, username or real email,
+  and aborts if it finds one
