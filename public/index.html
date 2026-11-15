@@ -60,6 +60,10 @@
         </label>
         <button class="btn" id="btnRules">规则 <b id="ruleCount">0</b></button>
         <button class="btn ghost" id="btnClear">清空</button>
+        <button class="btn icon ghost al-btn" id="btnAlerts" title="条件告警：命中规则时提醒">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2.2a3.6 3.6 0 0 0-3.6 3.6v2.4L3.2 10.6h9.6L11.6 8.2V5.8A3.6 3.6 0 0 0 8 2.2Z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6.6 12.4a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+          <b class="al-badge" id="alertCount" hidden>0</b>
+        </button>
         <div class="more-wrap" id="moreWrap">
           <button class="btn icon more-trigger" id="btnMore" aria-label="更多" aria-expanded="false" title="更多">⋯</button>
           <div class="more-menu" id="moreMenu" hidden>
@@ -68,6 +72,8 @@
             <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
             <button class="more-item" id="btnMap">域名映射 <b id="mapCount" hidden>0</b></button>
             <button class="more-item" id="btnPerf">性能视图</button>
+            <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
+            <button class="more-item" id="btnScripts">脚本 <b id="scriptCount" hidden>0</b></button>
             <button class="more-item" id="btnImportHar">导入 HAR…</button>
             <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
             <button class="more-item" id="btnCa">证书与连接</button>
@@ -1042,6 +1048,100 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <span class="hint">点一行把列表筛到该接口；错误率只算「连不上 + 5xx」，4xx 是调用方问题，单独计数</span>
           <span class="spacer"></span>
           <button class="btn ghost" data-close>关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 派生列：把响应 JSON 里的字段提成列表里的一列 -->
+    <div class="modal" id="modalCols" hidden>
+      <div class="modal-card net-dialog">
+        <div class="modal-head">
+          <h2>派生列</h2>
+          <span class="hint">最多 4 列 · 保存后立即按已有流量重算</span>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="net-rules" id="colRules"></div>
+          <div class="net-actions">
+            <button class="btn ghost" id="colAdd">+ 添加一列</button>
+            <button class="btn primary" id="colSave">保存</button>
+          </div>
+          <details class="lp-details">
+            <summary>路径怎么写</summary>
+            <ul class="steps">
+              <li><code>data.items[0].id</code>：点号取字段，<code>[0]</code> 取数组第几项（写 <code>.0</code> 也行）。</li>
+              <li><code>result.traceId</code> 或 <code>$.result.traceId</code> 都可以，<code>$</code> 前缀可省。</li>
+              <li><code>req.body.userId</code>：取请求体里的字段（默认取响应体）。</li>
+              <li><code>h:content-type</code>：取响应头。</li>
+              <li>取不到就留空，不会在列表里写报错信息。</li>
+            </ul>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- 条件告警：命中规则时提醒；规则与最近触发都在这里 -->
+    <div class="modal" id="modalAlerts" hidden>
+      <div class="modal-card al-dialog">
+        <div class="modal-head">
+          <h2>条件告警</h2>
+          <label class="switch" title="总开关：关掉后规则保留，但不再提醒">
+            <input type="checkbox" id="alEnabled" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">启用</span>
+          </label>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="alMute">静音 5 分钟</button>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint">规则之间是「且」的关系：留空的字段表示不限。每条规则自带冷却，同一问题不会连着刷屏；全局每分钟最多 20 条。</p>
+          <div class="al-rules" id="alRules"></div>
+          <div class="net-actions">
+            <button class="btn ghost" id="alAdd">+ 添加规则</button>
+            <button class="btn primary" id="alSave">保存规则</button>
+          </div>
+          <div class="al-recent">
+            <div class="al-recent-head">最近触发 <span class="hint">最多留 50 条，关掉窗口就清空</span></div>
+            <div id="alList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 脚本规则：用 JS 钩子改请求 / 响应 -->
+    <div class="modal" id="modalScripts" hidden>
+      <div class="modal-card sc-dialog">
+        <div class="modal-head">
+          <h2>脚本</h2>
+          <label class="switch" title="总开关：关掉后规则保留，但不再执行">
+            <input type="checkbox" id="scEnabled" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">启用</span>
+          </label>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint">
+            只给两个同步钩子：<code>onRequest(req)</code> 改 method / url / headers，
+            <code>onResponse(res)</code> 改 status / headers / body。沙箱里没有网络、文件和 require，
+            每次调用最多 50ms。响应阶段需要先收全响应体，命中规则的请求上限 4MB。
+          </p>
+          <div class="sc-rules" id="scRules"></div>
+          <div class="net-actions">
+            <button class="btn ghost" id="scAdd">+ 添加规则</button>
+            <button class="btn primary" id="scSave">保存并生效</button>
+          </div>
+          <details class="lp-details">
+            <summary>例子</summary>
+            <ul class="steps">
+              <li>给请求加头：<code>onRequest(req =&gt; { req.headers['x-debug'] = '1'; })</code></li>
+              <li>改响应状态与 body：<code>onResponse(res =&gt; { res.status = 200; res.body = '{"ok":true}'; })</code></li>
+              <li>按内容判断：<code>onResponse(res =&gt; { if (res.body.includes('redis')) res.headers['x-hit'] = '1'; })</code></li>
+            </ul>
+          </details>
         </div>
       </div>
     </div>

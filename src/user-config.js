@@ -44,6 +44,22 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 脚本规则：用户写的钩子，属于配置，必须落盘
+  if (cfg.scripts && typeof cfg.scripts === 'object') {
+    out.scripts = {
+      enabled: cfg.scripts.enabled !== false,
+      rules: Array.isArray(cfg.scripts.rules) ? cfg.scripts.rules : [],
+    };
+  }
+  // 条件告警：规则是工作习惯（等某个 5xx / 某个字段），落盘
+  if (cfg.alerts && typeof cfg.alerts === 'object') {
+    out.alerts = {
+      enabled: cfg.alerts.enabled !== false,
+      rules: Array.isArray(cfg.alerts.rules) ? cfg.alerts.rules : [],
+    };
+  }
+  // 派生列：用户配的「把这个字段提成一列」属于工作习惯，必须留下来
+  if (Array.isArray(cfg.derivedColumns)) out.derivedColumns = cfg.derivedColumns;
   // 域名映射是配置而不是会话状态：「把线上域名指到测试机」配一次该一直有效。
   if (cfg.hostMap && typeof cfg.hostMap === 'object') {
     out.hostMap = {

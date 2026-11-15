@@ -53,6 +53,15 @@ GET    /api/history/:id/export?format=har|json  Export a whole snapshot (HAR by 
 GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/columns             Derived columns { columns: [{id, name, path}] }
+PUT    /api/columns             { columns } full replace (max 4; existing traffic is recomputed immediately)
+                                path syntax: a.b[0].c / $.a.b / req.body.x / h:header-name
+GET    /api/alerts              Conditional alerts { enabled, rules: [...], muted, mutedUntil }
+PUT    /api/alerts              { enabled, rules } full replace (max 20 rules)
+POST   /api/alerts/mute         { minutes } mute for a while (0 cancels)
+GET    /api/scripts             Script rules { enabled, rules: [{id, name, enabled, phase, host, url, method, code, timeoutMs}] }
+PUT    /api/scripts             { enabled, rules } full replace; compiles first and returns 400 + errors on syntax errors
+POST   /api/scripts/check       { code } compile only → { ok, error, logs, hooks }
 GET    /api/perf?by=route|host&same filters as /api/flows    Performance aggregation (per endpoint / host)
                                → { by, groups: [{ key, count, p50, p95, avg, max, errorRate, noResponse,
                                  serverErrors, clientErrors, bytes, methods, slowest }], groupCount, truncated,
@@ -90,7 +99,8 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthr
                                         processMap: true, uaAppMapText: "okhttp=MyApp",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE: flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough / rules-changed / history-changed
+                                  network-sim / passthrough / rules-changed / history-changed /
+                                  columns-changed / alerts-changed / alert / scripts-changed
                                   (flow = in-flight placeholder emitted when the request starts; flow-update = response
                                    completion in place, plus async local process name backfill; clear = list + sidebar reset;
                                    tls-remove = resolved handshake failures after allowlisting / a successful handshake;

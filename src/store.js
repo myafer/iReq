@@ -603,6 +603,10 @@ function summary(f) {
     duration: f.duration,
     // 分阶段耗时（dns/tcp/tls/wait/download）：列表微条与详情瀑布图都读它
     timings: f.timings,
+    // 派生列（用户在设置里配的 JSON 字段），键是列 id
+    derived: f.derived,
+    // 脚本规则命中记录（含耗时与错误），列表用它打 SCRIPT 角标
+    scripted: f.scripted,
     reqSize: f.reqSize,
     resSize: f.resSize,
     resContentType: f.resContentType,

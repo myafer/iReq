@@ -68,6 +68,12 @@ const SUITES = [
   ['HTTP/2 解密', 'check-http2.js'],
   // 会清空流量 / 诊断数据 + 自己起慢上游，必须最后跑
   ['发起即见与清空同步', 'check-instant.js'],
+  // 会改派生列 / 告警 / 脚本配置并清空流量，结束时恢复现场
+  ['派生列', 'check-columns.js'],
+  // 会改告警规则、挂 SSE 收 alert，结束时恢复配置
+  ['条件告警', 'check-alerts.js'],
+  // 会改脚本规则并打真实请求，结束时恢复配置
+  ['脚本规则', 'check-scripts.js'],
   // 造流量验证 WebSocket 帧 / SSE 消息，结束时清空流量并删掉自己造的历史
   ['WebSocket 帧', 'check-ws.js'],
   ['SSE 消息', 'check-sse.js'],

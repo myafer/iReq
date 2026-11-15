@@ -26,6 +26,9 @@ const { ProcessMap } = require('./process-map');
 const { deviceKeyOf, deviceLabelOf } = require('./local-address');
 const { normalize: normalizeNetworkSim, resolve: resolveNetworkSim, throttleTransform } = require('./network-sim');
 const { createCollector } = require('./timing');
+const { applyColumns } = require('./columns');
+const { Alerts } = require('./alerts');
+const { ScriptEngine } = require('./scripts');
 const { FrameParser, mergeDirections } = require('./ws-frame');
 const { SseParser } = require('./sse');
 const { Transform } = require('stream');
@@ -294,6 +297,10 @@ class ProxyServer extends EventEmitter {
     this.appHints = { byHost: new Map(), byIp: new Map() };
     // 正在进行的 WebSocket 会话：帧在内存里滚，关闭时才写进 flow
     this.wsSessions = new Map();
+    // 条件告警：规则存在 config.alerts 里，冷却 / 静音 / 限速状态在引擎里
+    this.alerts = new Alerts(cfg);
+    // 脚本规则：沙箱里跑用户代码，只有同步的两个钩子
+    this.scripts = new ScriptEngine(cfg);
   }
 
   start() {
@@ -1492,6 +1499,8 @@ class ProxyServer extends EventEmitter {
   _forward(ctx, override) {
     const { req, res, startedAt, reqCapture, meta, sim } = ctx;
     const ov = override || {};
+    // 脚本（请求阶段）：改动写回 ov，后面 URL 重算 / 域名映射 / 断点都自动吃到
+    this._applyRequestScripts(ctx, ov);
     let target = ctx.target;
     // 断点改了 URL：协议 / 域名 / 端口 / 路径全要重算，列表里显示的地址也要跟着改
     if (ov.url && ov.url !== target.toString()) {
@@ -1610,6 +1619,22 @@ class ProxyServer extends EventEmitter {
         return this._holdResponse(ctx, upRes, resHeaders, resCapture, { method, target });
       }
 
+      // 响应脚本：要能改 body 就必须先收全；SSE 是长连接，不能缓冲，直接跳过脚本
+      if (this.scripts && !sse) {
+        const respHits = this.scripts.match('response', { method, url: target.toString(), host: target.hostname });
+        if (respHits.length) {
+          return this._forwardScriptedResponse(ctx, {
+            upRes,
+            resHeaders,
+            resCapture,
+            rules: respHits,
+            method,
+            target,
+            timing,
+          });
+        }
+      }
+
       try {
         res.writeHead(upRes.statusCode, upRes.statusMessage, resHeaders);
       } catch (_) {
@@ -1664,6 +1689,8 @@ class ProxyServer extends EventEmitter {
           statusText: upRes.statusMessage || '',
           duration: elapsed(startedAt),
           timings: timing.finish(),
+          // 请求阶段脚本命中过也要留痕：列表角标与详情都能看出来
+          ...(ctx.scripted && ctx.scripted.length ? { scripted: ctx.scripted } : {}),
           ...(sse
             ? {
                 sseMessages: sse.messages,
@@ -1693,6 +1720,192 @@ class ProxyServer extends EventEmitter {
     });
 
     upstream.on('error', (err) => this._fail(ctx, err));
+  }
+
+  /** 请求阶段脚本：只改 method / url / headers（改 body 要缓冲上传，这一版不做） */
+  _applyRequestScripts(ctx, ov) {
+    const engine = this.scripts;
+    if (!engine) return;
+    const method0 = ov.method || ctx.req.method;
+    let url0;
+    try {
+      url0 = (ov.url ? new URL(ov.url) : ctx.target).toString();
+    } catch (_) {
+      return;
+    }
+    const host = ctx.target.hostname;
+    const hits = engine.match('request', { method: method0, url: url0, host });
+    if (!hits.length) return;
+
+    const obj = { method: method0, url: url0, headers: { ...(ov.headers || ctx.req.headers) } };
+    const done = [];
+    for (const rule of hits) {
+      const out = engine.run(rule, 'request', obj);
+      if (!out.ok) {
+        done.push({ ruleId: rule.id, name: rule.name, phase: 'request', error: out.error });
+        continue;
+      }
+      if (out.skipped) continue;
+      done.push({ ruleId: rule.id, name: rule.name, phase: 'request', ms: out.ms, logs: (out.logs || []).slice(0, 3) });
+    }
+    if (typeof obj.method === 'string' && /^[A-Za-z]{3,10}$/.test(obj.method) && obj.method.toUpperCase() !== method0) {
+      ov.method = obj.method.toUpperCase();
+    }
+    if (typeof obj.url === 'string' && obj.url !== url0) {
+      try {
+        new URL(obj.url);
+        ov.url = obj.url;
+      } catch (_) {
+        /* 脚本写坏的地址忽略，别把请求弄丢 */
+      }
+    }
+    if (obj.headers && typeof obj.headers === 'object' && !Array.isArray(obj.headers)) {
+      ov.headers = obj.headers;
+    }
+    ctx.scripted = done;
+  }
+
+  /**
+   * 响应阶段脚本：必须先把响应体收全才能让脚本改 status / headers / body。
+   * 只对命中的请求启用缓冲（上限 4MB），其它请求仍然是边收边发。
+   */
+  _forwardScriptedResponse(ctx, o) {
+    const { res, reqCapture, meta, startedAt, sim } = ctx;
+    const { upRes, resHeaders, resCapture, rules, method, target, timing } = o;
+    const MAX = 4 * 1024 * 1024;
+    const chunks = [];
+    let size = 0;
+    let overflow = false;
+    let settled = false;
+    const scripted = (ctx.scripted || []).slice();
+
+    const record = (extra) => {
+      if (!this.config.capture) return;
+      const reqDigest = reqCapture.digest();
+      this._record(
+        {
+          ...meta,
+          reqBody: reqDigest.text,
+          reqBodyBase64: reqDigest.base64,
+          reqBodyTruncated: reqDigest.truncated,
+          reqSize: reqDigest.size,
+          duration: elapsed(startedAt),
+          timings: timing.finish(),
+          scripted,
+          ...extra,
+        },
+        ctx
+      );
+    };
+
+    const flushRaw = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        res.writeHead(upRes.statusCode, resHeaders);
+      } catch (_) {
+        try {
+          res.writeHead(upRes.statusCode);
+        } catch (__) {
+          /* noop */
+        }
+      }
+      for (const c of chunks) res.write(c);
+      chunks.length = 0;
+    };
+
+    upRes.on('data', (chunk) => {
+      this.stats.bytes += chunk.length;
+      if (this.config.capture) resCapture.push(chunk);
+      if (overflow) return;
+      size += chunk.length;
+      if (size > MAX) {
+        // 太大：放弃改写，已经缓冲的原样发出去，剩下继续流
+        overflow = true;
+        scripted.push({ phase: 'response', error: '响应超过 4MB，已跳过脚本改写' });
+        flushRaw();
+        res.write(chunk);
+        upRes.pipe(res);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    upRes.on('end', () => {
+      if (overflow) {
+        record({
+          resHeaders,
+          resBody: null,
+          resBodyBase64: null,
+          resBodyTruncated: true,
+          resSize: resCapture.size,
+          resContentType: resHeaders['content-type'],
+          status: upRes.statusCode,
+          statusText: upRes.statusMessage || '',
+          duration: elapsed(startedAt),
+          timings: timing.finish(),
+          scripted,
+        });
+        return;
+      }
+      const contentType = resHeaders['content-type'];
+      const textual = isTextual(contentType);
+      const raw = Buffer.concat(chunks);
+      let decoded = raw;
+      try {
+        decoded = decompress(raw, resHeaders['content-encoding']);
+      } catch (_) {
+        decoded = raw;
+      }
+      const bodyText = textual ? decoded.toString('utf8') : '';
+      const obj = { status: upRes.statusCode, headers: { ...resHeaders }, body: bodyText };
+
+      for (const rule of rules) {
+        const out = this.scripts.run(rule, 'response', obj);
+        if (!out.ok) {
+          scripted.push({ ruleId: rule.id, name: rule.name, phase: 'response', error: out.error });
+        } else if (!out.skipped) {
+          scripted.push({ ruleId: rule.id, name: rule.name, phase: 'response', ms: out.ms, logs: (out.logs || []).slice(0, 3) });
+        }
+      }
+
+      const outBuf = textual && typeof obj.body === 'string' ? Buffer.from(obj.body, 'utf8') : raw;
+      const headers = obj.headers && typeof obj.headers === 'object' ? { ...obj.headers } : { ...resHeaders };
+      // 已经解压过：编码标记和旧长度都不能留
+      delete headers['content-encoding'];
+      delete headers['transfer-encoding'];
+      headers['content-length'] = String(outBuf.length);
+      let status = Number(obj.status) || upRes.statusCode;
+      if (status < 100 || status > 599) status = upRes.statusCode;
+
+      settled = true;
+      try {
+        res.writeHead(status, headers);
+      } catch (_) {
+        try {
+          res.writeHead(status);
+        } catch (__) {
+          /* noop */
+        }
+      }
+      res.end(outBuf);
+
+      record({
+        resHeaders: headers,
+        resBody: textual ? outBuf.toString('utf8') : null,
+        resBodyBase64: textual ? null : outBuf.toString('base64'),
+        resBodyTruncated: false,
+        resSize: outBuf.length,
+        resContentType: contentType,
+        status,
+        statusText: upRes.statusMessage || '',
+      });
+    });
+
+    upRes.on('error', (err) => {
+      res.destroy();
+      this._fail(ctx, err);
+    });
   }
 
   /**
@@ -2071,12 +2284,36 @@ class ProxyServer extends EventEmitter {
    * 记录收尾。带 ctx 且占位记录还在库里时，走 store.finish 就地更新（同一个 id）；
    * 否则是 CONNECT / WebSocket / 模拟阻断这类一次性记录，按老逻辑新增。
    */
+  /** 派生列：按当前配置从 body / 响应头里取值，算在 flow 上（列表直接读） */
+  _deriveColumns(base, fields) {
+    const cols = this.config.derivedColumns;
+    if (!cols || !cols.length) return null;
+    return applyColumns({ ...base, ...fields }, cols);
+  }
+
+  /** 记录完成后过一遍告警规则；命中就抛事件，由控制台广播给所有窗口 */
+  _checkAlerts(flow) {
+    if (!this.alerts || !flow) return;
+    let hits = [];
+    try {
+      hits = this.alerts.evaluate(flow);
+    } catch (_) {
+      /* 一条规则写错不能影响抓包 */
+      return;
+    }
+    for (const hit of hits) this.emit('alert', hit);
+  }
+
   _record(fields, ctx) {
     if (ctx && ctx.flow) {
       // 主链路一定已有占位记录。它可能刚被「清空」或被挤出环形队列：
       // 这时只丢弃，绝不退化成新增——否则点完清空，在途请求的收尾会把行带回来。
       if (this.store.index.get(ctx.flow.id) !== ctx.flow) return null;
-      return this.store.finish(ctx.flow, fields) || ctx.flow;
+      const derived = this._deriveColumns(ctx.flow, fields);
+      if (derived) fields = { ...fields, derived };
+      const saved = this.store.finish(ctx.flow, fields) || ctx.flow;
+      this._checkAlerts(saved);
+      return saved;
     }
     this.stats.total += 1;
     const flow = {
@@ -2085,8 +2322,11 @@ class ProxyServer extends EventEmitter {
       ...fields,
     };
     this._prepare(flow);
+    const derived = this._deriveColumns(flow, {});
+    if (derived) flow.derived = derived;
     const saved = this.store.add(flow);
     this._afterAdd(saved);
+    this._checkAlerts(saved);
     return saved;
   }
 }

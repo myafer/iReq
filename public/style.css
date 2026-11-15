@@ -6083,3 +6083,197 @@ body.dragging-file::after {
   max-height: 320px;
   overflow: auto;
 }
+
+/* ---------------- 派生列：列表右侧多出来的几列 ---------------- */
+
+/* 列数由 JS 写在 :root 上；0 时 repeat(0, …) 不产生任何轨道，布局与之前一致 */
+.listhead,
+.row {
+  grid-template-columns:
+    calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale))
+    repeat(var(--dcols, 0), calc(104px * var(--ui-scale)));
+}
+
+.c-dcol {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.listhead .c-dcol {
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.col-rule {
+  display: grid;
+  grid-template-columns: minmax(80px, 150px) minmax(0, 1fr) 30px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.col-rule .col-del {
+  justify-self: end;
+}
+
+/* ---------------- 条件告警 ---------------- */
+
+.al-btn {
+  position: relative;
+}
+
+.al-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--err);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  font-family: var(--sans);
+}
+
+.al-btn.on {
+  color: var(--accent);
+}
+
+.al-dialog {
+  width: min(780px, 94vw);
+}
+
+.al-rules {
+  margin: 10px 0 12px;
+}
+
+.al-rule {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.3fr 96px 28px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--panel-2);
+}
+
+.al-rule .al-body {
+  grid-column: 1 / span 2;
+}
+
+.al-rule .al-on {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.al-recent {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.al-recent-head {
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.al-row {
+  display: grid;
+  grid-template-columns: calc(64px * var(--ui-scale)) minmax(80px, 170px) minmax(0, 1fr) calc(52px * var(--ui-scale));
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.al-row:hover {
+  background: var(--panel-2);
+}
+
+.al-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.al-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.al-url {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.al-status {
+  text-align: right;
+}
+
+/* ---------------- 脚本规则 ---------------- */
+
+.sc-dialog {
+  width: min(820px, 94vw);
+}
+
+.sc-rule {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--panel-2);
+}
+
+.sc-line {
+  display: grid;
+  grid-template-columns: 1.3fr 110px 64px minmax(0, 1fr) minmax(0, 1.2fr) 28px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sc-code {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.sc-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.sc-foot .sc-state {
+  color: var(--ok);
+}
+
+.sc-foot .sc-state.bad {
+  color: var(--err);
+}
+
+.tag.script {
+  color: var(--mock);
+}

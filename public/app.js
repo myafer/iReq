@@ -56,6 +56,17 @@ const S = {
   /* 域名映射（配置级，服务端落盘）：命中的请求改发到别的机器 */
   mapEnabled: false,
   mapRules: [],
+  /* 派生列（配置级，服务端落盘）：列表右侧多出来的列 */
+  columns: [],
+  colDraft: [],
+  /* 脚本规则（配置级，服务端落盘）：命中时在沙箱里跑用户代码 */
+  scripts: { enabled: true, rules: [] },
+  scriptDraft: [],
+  /* 条件告警：规则在服务端，最近触发只在本地（关窗口就没） */
+  alertCfg: { enabled: true, rules: [], mutedUntil: 0 },
+  alertDraft: [],
+  alertList: [],
+  alertUnread: 0,
   /* Mock 总开关（会话级）：false 时所有规则整体旁路 */
   mockEnabled: true,
   editingRule: null,
@@ -842,6 +853,11 @@ function rowHtml(f) {
     // 映射过的请求：目标地址放 title，列表里只占一个字
     f.mapped ? `<span class="tag mapped" title="这条请求被改发到 ${esc(f.mapped)}">映射</span>` : '',
     f.imported ? '<span class="tag" title="从 HAR 文件导入，不是本机抓的">HAR</span>' : '',
+    f.scripted && f.scripted.length
+      ? `<span class="tag script" title="${esc(
+          f.scripted.map((s) => `${s.name || '脚本'}${s.error ? '：' + s.error : ''}`).join('\n')
+        )}">SCRIPT</span>`
+      : '',
     f.tunneled ? '<span class="tag tunnel">透传</span>' : '',
     f.simMode
       ? `<span class="tag sim ${esc(f.simMode)}">${esc(trSim(NET_MODES[f.simMode] || f.simMode))}</span>`
@@ -868,6 +884,9 @@ function rowHtml(f) {
         ? ''
         : timingBar(f) + `<span class="tmv">${fmtTime(f.duration)}</span>`
     }</span>
+    ${(S.columns || [])
+      .map((c) => `<span class="c-dcol" title="${esc(c.name)}">${esc((f.derived || {})[c.id] || '')}</span>`)
+      .join('')}
   </div>`;
 }
 
@@ -3561,6 +3580,429 @@ function pickHarFile() {
     if (!text || !text.trim()) return toast('文件是空的');
     // 文件名就是最自然的记录名（侧栏双击还能改）
     importHarText(text, String(fileName || '').replace(/\.(har|json)$/i, ''));
+  });
+}
+
+/* -------------------------------------------------------------- 脚本规则 */
+
+/* 代码在服务端沙箱里跑。这里只负责编辑：保存前服务端会先编译一遍，
+ * 语法错 / 死循环的规则不会存下去。 */
+async function loadScripts() {
+  try {
+    S.scripts = await api('/api/scripts');
+  } catch (_) {
+    /* 老实例没有这个接口时静默 */
+  }
+  syncScriptBadge();
+}
+
+function syncScriptBadge() {
+  const b = $('#scriptCount');
+  if (!b) return;
+  const n = ((S.scripts && S.scripts.rules) || []).length;
+  b.hidden = n === 0;
+  b.textContent = String(n);
+}
+
+async function openScriptsPanel() {
+  await loadScripts();
+  S.scriptDraft = ((S.scripts && S.scripts.rules) || []).map((r) => ({ ...r }));
+  renderScriptPanel();
+  openModal('#modalScripts');
+}
+
+function scriptRuleHtml(r, i) {
+  const phases = [
+    ['both', '请求 + 响应'],
+    ['request', '只请求'],
+    ['response', '只响应'],
+  ];
+  return `<div class="sc-rule" data-i="${i}">
+    <div class="sc-line">
+      <input class="input sc-name" value="${esc(r.name || '')}" placeholder="规则名（必填）" maxlength="40" spellcheck="false" />
+      <select class="input sc-phase">${phases
+        .map(([v, label]) => `<option value="${v}"${(r.phase || 'both') === v ? ' selected' : ''}>${label}</option>`)
+        .join('')}</select>
+      <input class="input mono sc-method" value="${esc(r.method || '')}" placeholder="方法" maxlength="8" spellcheck="false" />
+      <input class="input mono sc-host" value="${esc(r.host || '')}" placeholder="域名（可空，* 通配）" spellcheck="false" />
+      <input class="input mono sc-url" value="${esc(r.url || '')}" placeholder="URL 包含（可空）" spellcheck="false" />
+      <button class="btn icon ghost sc-del" data-sc-del="${i}" title="删除这条规则">✕</button>
+    </div>
+    <textarea class="input mono sc-code" rows="7" spellcheck="false" placeholder="onResponse(res => { res.headers['x-debug'] = '1'; })">${esc(
+      r.code || ''
+    )}</textarea>
+    <div class="sc-foot">
+      <label class="al-on"><input type="checkbox" class="sc-on"${r.enabled !== false ? ' checked' : ''} /> 启用</label>
+      <span class="hint sc-state"></span>
+      <span class="fill"></span>
+      <button class="btn ghost sc-check" data-sc-check="${i}">检查语法</button>
+    </div>
+  </div>`;
+}
+
+function renderScriptPanel() {
+  const en = $('#scEnabled');
+  if (en) en.checked = !!(S.scripts && S.scripts.enabled);
+  const box = $('#scRules');
+  if (!box) return;
+  const rows = S.scriptDraft || [];
+  box.innerHTML = rows.length
+    ? rows.map(scriptRuleHtml).join('')
+    : '<p class="hint">还没有脚本。加一条「响应头里带个标记」试试。</p>';
+}
+
+function scriptDraftFromPanel() {
+  return $$('#scRules .sc-rule').map((row) => ({
+    name: row.querySelector('.sc-name').value.trim(),
+    phase: row.querySelector('.sc-phase').value,
+    method: row.querySelector('.sc-method').value.trim(),
+    host: row.querySelector('.sc-host').value.trim(),
+    url: row.querySelector('.sc-url').value.trim(),
+    code: row.querySelector('.sc-code').value,
+    enabled: row.querySelector('.sc-on').checked,
+  }));
+}
+
+async function saveScripts() {
+  const rules = scriptDraftFromPanel();
+  try {
+    S.scripts = await api('/api/scripts', {
+      method: 'PUT',
+      body: { enabled: $('#scEnabled').checked, rules },
+    });
+    syncScriptBadge();
+    S.scriptDraft = (S.scripts.rules || []).map((r) => ({ ...r }));
+    renderScriptPanel();
+    toast(`已保存 ${S.scripts.rules.length} 条脚本规则`);
+  } catch (err) {
+    // 服务端会回具体哪条写错了
+    let detail = err.message || '';
+    try {
+      const parsed = JSON.parse(detail);
+      if (parsed && parsed.errors) detail = parsed.errors.map((e) => `${e.name}: ${e.error}`).join('；');
+    } catch (_) {
+      /* 直接显示原文 */
+    }
+    toast('保存失败：' + detail);
+  }
+}
+
+async function checkScript(idx) {
+  const row = $$('#scRules .sc-rule')[idx];
+  if (!row) return;
+  const code = row.querySelector('.sc-code').value;
+  const state = row.querySelector('.sc-state');
+  try {
+    const out = await api('/api/scripts/check', { method: 'POST', body: { code } });
+    if (state) {
+      state.textContent = out.ok
+        ? `语法通过${out.hooks && out.hooks.request ? ' · 有 onRequest' : ''}${out.hooks && out.hooks.response ? ' · 有 onResponse' : ''}`
+        : '语法错误：' + out.error;
+      state.classList.toggle('bad', !out.ok);
+    }
+  } catch (err) {
+    if (state) state.textContent = '检查失败：' + (err.message || '');
+  }
+}
+
+function bindScripts() {
+  $('#btnScripts').addEventListener('click', openScriptsPanel);
+  $('#scEnabled').addEventListener('change', saveScripts);
+  $('#scAdd').addEventListener('click', () => {
+    S.scriptDraft = scriptDraftFromPanel();
+    S.scriptDraft.push({ name: '', phase: 'both', enabled: true, code: '' });
+    renderScriptPanel();
+    const names = $$('#scRules .sc-name');
+    if (names.length) names[names.length - 1].focus();
+  });
+  $('#scRules').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-sc-del]');
+    if (del) {
+      S.scriptDraft = scriptDraftFromPanel();
+      S.scriptDraft.splice(Number(del.dataset.scDel), 1);
+      renderScriptPanel();
+      return;
+    }
+    const chk = e.target.closest('[data-sc-check]');
+    if (chk) checkScript(Number(chk.dataset.scCheck));
+  });
+  $('#scRules').addEventListener('input', (e) => {
+    S.scriptDraft = scriptDraftFromPanel();
+    const state = e.target.closest('.sc-rule') && e.target.closest('.sc-rule').querySelector('.sc-state');
+    if (state) state.textContent = '';
+  });
+  $('#scSave').addEventListener('click', saveScripts);
+}
+
+/* -------------------------------------------------------------- 条件告警 */
+
+/* 规则在服务端，命中后通过 SSE 推过来；这里只负责提示与「最近触发」列表。
+ * 最近触发不落盘：它回答的是「刚才有没有事」，不是历史记录。 */
+async function loadAlerts() {
+  try {
+    S.alertCfg = await api('/api/alerts');
+  } catch (_) {
+    /* 老实例没有这个接口时静默 */
+  }
+  syncAlertBadge();
+}
+
+function syncAlertBadge() {
+  const b = $('#alertCount');
+  if (!b) return;
+  b.hidden = S.alertUnread <= 0;
+  b.textContent = S.alertUnread > 99 ? '99+' : String(S.alertUnread);
+  const btn = $('#btnAlerts');
+  if (btn) btn.classList.toggle('on', !!(S.alertCfg && S.alertCfg.enabled));
+}
+
+function openAlertsPanel() {
+  S.alertDraft = ((S.alertCfg && S.alertCfg.rules) || []).map((r) => ({ ...r }));
+  S.alertUnread = 0;
+  syncAlertBadge();
+  renderAlertPanel();
+  openModal('#modalAlerts');
+}
+
+function alertRuleHtml(r, i) {
+  const statusOpts = [
+    ['', '状态不限'],
+    ['4xx', '4xx'],
+    ['5xx', '5xx'],
+    ['error', '连不上'],
+    ['200', '200'],
+    ['401', '401'],
+    ['404', '404'],
+    ['500', '500'],
+  ];
+  return `<div class="al-rule" data-i="${i}">
+    <input class="input al-name" value="${esc(r.name || '')}" placeholder="规则名（必填）" maxlength="40" spellcheck="false" />
+    <input class="input mono al-host" value="${esc(r.host || '')}" placeholder="域名（可空，* 通配）" spellcheck="false" />
+    <input class="input mono al-url" value="${esc(r.url || '')}" placeholder="URL 包含（可空）" spellcheck="false" />
+    <select class="input al-status">${statusOpts
+      .map(([v, label]) => `<option value="${v}"${(r.status || '') === v ? ' selected' : ''}>${label}</option>`)
+      .join('')}</select>
+    <button class="btn icon ghost al-del" data-al-del="${i}" title="删除这条规则">✕</button>
+    <input class="input mono al-body" value="${esc(r.body || '')}" placeholder="响应 / 请求体包含（可空）" spellcheck="false" />
+    <input class="input mono al-dur" type="number" min="0" value="${r.minDuration || ''}" placeholder="耗时 ≥ ms" />
+    <input class="input mono al-cd" type="number" min="1" value="${Math.round((r.cooldownMs || 15000) / 1000)}" placeholder="冷却 秒" />
+    <label class="al-on"><input type="checkbox"${r.enabled !== false ? ' checked' : ''} /> 启用</label>
+  </div>`;
+}
+
+function renderAlertPanel() {
+  const en = $('#alEnabled');
+  if (en) en.checked = !!(S.alertCfg && S.alertCfg.enabled);
+  const mute = $('#alMute');
+  if (mute) {
+    const left = S.alertCfg && S.alertCfg.mutedUntil ? S.alertCfg.mutedUntil - Date.now() : 0;
+    mute.textContent = left > 0 ? `已静音 · ${Math.ceil(left / 60000)} 分钟后恢复` : '静音 5 分钟';
+  }
+  const box = $('#alRules');
+  if (box) {
+    const rows = S.alertDraft || [];
+    box.innerHTML = rows.length
+      ? rows.map(alertRuleHtml).join('')
+      : '<p class="hint">还没有规则。加一条「5xx 就提醒」或「响应体包含 error 就提醒」试试。</p>';
+  }
+  renderAlertList();
+}
+
+function renderAlertList() {
+  const box = $('#alList');
+  if (!box) return;
+  box.innerHTML = S.alertList.length
+    ? S.alertList
+        .map(
+          (a) => `<div class="al-row" data-al-flow="${esc(a.flow.id)}" title="点击跳到这条请求">
+            <span class="al-time">${fmtClock(a.at)}</span>
+            <span class="al-name">${esc(a.name)}</span>
+            <span class="al-url">${esc(a.flow.method || '')} ${esc(a.flow.path || a.flow.url || '')}</span>
+            <span class="al-status ${statusClass(a.flow.status)}">${esc(a.flow.status || 'ERR')}</span>
+          </div>`
+        )
+        .join('')
+    : '<p class="hint">还没有触发过。</p>';
+}
+
+function alertDraftFromPanel() {
+  return $$('#alRules .al-rule').map((row) => ({
+    name: row.querySelector('.al-name').value.trim(),
+    host: row.querySelector('.al-host').value.trim(),
+    url: row.querySelector('.al-url').value.trim(),
+    status: row.querySelector('.al-status').value,
+    body: row.querySelector('.al-body').value.trim(),
+    minDuration: Number(row.querySelector('.al-dur').value) || 0,
+    cooldownMs: Math.max(1, Number(row.querySelector('.al-cd').value) || 15) * 1000,
+    enabled: row.querySelector('.al-on input').checked,
+  }));
+}
+
+async function saveAlerts() {
+  try {
+    S.alertCfg = await api('/api/alerts', {
+      method: 'PUT',
+      body: { enabled: $('#alEnabled').checked, rules: alertDraftFromPanel() },
+    });
+    renderAlertPanel();
+    syncAlertBadge();
+    toast(`已保存 ${S.alertCfg.rules.length} 条告警规则`);
+  } catch (err) {
+    toast('保存失败：' + (err.message || ''));
+  }
+}
+
+async function muteAlerts() {
+  try {
+    S.alertCfg = { ...S.alertCfg, ...(await api('/api/alerts/mute', { method: 'POST', body: { minutes: 5 } })) };
+    renderAlertPanel();
+    toast('告警已静音 5 分钟');
+  } catch (err) {
+    toast('静音失败：' + (err.message || ''));
+  }
+}
+
+function bindAlerts() {
+  $('#btnAlerts').addEventListener('click', openAlertsPanel);
+  $('#alEnabled').addEventListener('change', saveAlerts);
+  $('#alMute').addEventListener('click', muteAlerts);
+  $('#alAdd').addEventListener('click', () => {
+    S.alertDraft = alertDraftFromPanel();
+    S.alertDraft.push({ name: '', enabled: true, cooldownMs: 15000 });
+    renderAlertPanel();
+    const names = $$('#alRules .al-name');
+    if (names.length) names[names.length - 1].focus();
+  });
+  $('#alRules').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-al-del]');
+    if (!del) return;
+    S.alertDraft = alertDraftFromPanel();
+    S.alertDraft.splice(Number(del.dataset.alDel), 1);
+    renderAlertPanel();
+  });
+  $('#alRules').addEventListener('input', () => {
+    S.alertDraft = alertDraftFromPanel();
+  });
+  $('#alSave').addEventListener('click', saveAlerts);
+  $('#alList').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-al-flow]');
+    if (!row) return;
+    closeModals();
+    selectFlow(row.dataset.alFlow);
+  });
+}
+
+/* -------------------------------------------------------------- 派生列 */
+
+/* 列表右侧那几列。配置在服务端，改完由服务端把已有流量重算一遍再广播，
+ * 所以这里不需要自己遍历 S.flows 重算。 */
+const COL_MAX = 4;
+
+async function loadColumns() {
+  try {
+    const r = await api('/api/columns');
+    S.columns = (r && r.columns) || [];
+  } catch (_) {
+    S.columns = [];
+  }
+  applyColumnLayout();
+}
+
+/** 只改表头与 CSS 变量；数据行在下一次渲染时带上值 */
+function applyColumnLayout() {
+  const n = (S.columns || []).length;
+  document.documentElement.style.setProperty('--dcols', String(n));
+  // 表头列直接追加在「耗时」后面：多包一层容器会让「表头与行对齐」的检查多算一个子元素
+  const head = $('.listhead');
+  if (head) {
+    head.querySelectorAll('.c-dcol').forEach((el) => el.remove());
+    for (const c of S.columns || []) {
+      const span = document.createElement('span');
+      span.className = 'c-dcol';
+      span.title = c.path || '';
+      span.textContent = c.name;
+      head.appendChild(span);
+    }
+  }
+  const badge = $('#colCount');
+  if (badge) {
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+  }
+}
+
+async function openColsPanel() {
+  try {
+    const r = await api('/api/columns');
+    S.colDraft = (r && r.columns ? r.columns : []).map((c) => ({ ...c }));
+  } catch (_) {
+    S.colDraft = (S.columns || []).map((c) => ({ ...c }));
+  }
+  renderColsPanel();
+  openModal('#modalCols');
+}
+
+function renderColsPanel() {
+  const box = $('#colRules');
+  if (!box) return;
+  const rows = S.colDraft || [];
+  box.innerHTML = rows.length
+    ? rows
+        .map(
+          (c, i) => `<div class="col-rule" data-col-i="${i}">
+            <input class="input col-name" value="${esc(c.name || '')}" placeholder="列名" maxlength="24" spellcheck="false" />
+            <input class="input mono col-path" value="${esc(c.path || '')}" placeholder="data.items[0].id" spellcheck="false" />
+            <button class="btn icon ghost col-del" data-col-del="${i}" title="删除这一列">✕</button>
+          </div>`
+        )
+        .join('')
+    : '<p class="hint">还没有派生列。加一列试试 <code>data.items[0].id</code>。</p>';
+  const add = $('#colAdd');
+  if (add) add.disabled = rows.length >= COL_MAX;
+}
+
+function colDraftFromPanel() {
+  return $$('#colRules .col-rule').map((row) => ({
+    name: row.querySelector('.col-name').value.trim(),
+    path: row.querySelector('.col-path').value.trim(),
+  }));
+}
+
+async function saveColumns() {
+  const draft = colDraftFromPanel();
+  try {
+    const out = await api('/api/columns', { method: 'PUT', body: { columns: draft } });
+    S.columns = out.columns || [];
+    applyColumnLayout();
+    loadFlows();
+    toast(S.columns.length ? `已保存 ${S.columns.length} 个派生列` : '已清空派生列');
+    closeModals();
+  } catch (err) {
+    toast('保存失败：' + (err.message || ''));
+  }
+}
+
+function bindCols() {
+  $('#btnCols').addEventListener('click', openColsPanel);
+  $('#colAdd').addEventListener('click', () => {
+    S.colDraft = colDraftFromPanel();
+    if (S.colDraft.length >= COL_MAX) return;
+    S.colDraft.push({ name: '', path: '' });
+    renderColsPanel();
+    const rows = $$('#colRules .col-name');
+    if (rows.length) rows[rows.length - 1].focus();
+  });
+  $('#colRules').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-col-del]');
+    if (!del) return;
+    S.colDraft = colDraftFromPanel();
+    S.colDraft.splice(Number(del.dataset.colDel), 1);
+    renderColsPanel();
+  });
+  $('#colSave').addEventListener('click', saveColumns);
+  // 输入即改草稿，避免「删了一行再保存」把改动吞掉
+  $('#colRules').addEventListener('input', () => {
+    S.colDraft = colDraftFromPanel();
   });
 }
 
@@ -6852,6 +7294,12 @@ function bind() {
   bindBreak();
   bindMap();
   bindPerf();
+  bindCols();
+  loadColumns();
+  bindAlerts();
+  loadAlerts();
+  bindScripts();
+  loadScripts();
   // 映射是落盘配置：启动时同步一次，徽标不用等用户点开面板才准
   api('/api/hostmap')
     .then((cfg) => {
@@ -7383,6 +7831,10 @@ function bind() {
         replayOf: f.replayOf,
         error: f.error,
         ws: f.ws,
+        wsFrameCount: f.wsFrameCount,
+        sseCount: f.sseCount,
+        timings: f.timings,
+        derived: f.derived,
         tunneled: f.tunneled,
         simMode: f.simMode,
         simRule: f.simRule,
@@ -7421,6 +7873,30 @@ function bind() {
         if (S.filter.status !== 'tls') scheduleFlowAdd(m);
         scheduleFacets();
       }
+    } else if (msg.type === 'scripts-changed') {
+      S.scripts = { enabled: msg.scripts.enabled !== false, rules: msg.scripts.rules || [] };
+      syncScriptBadge();
+      if (!$('#modalScripts').hidden) {
+        S.scriptDraft = (S.scripts.rules || []).map((r) => ({ ...r }));
+        renderScriptPanel();
+      }
+    } else if (msg.type === 'alert') {
+      const a = msg.alert;
+      S.alertList.unshift(a);
+      if (S.alertList.length > 50) S.alertList.pop();
+      S.alertUnread += 1;
+      syncAlertBadge();
+      toast('告警：' + a.name);
+      if (!$('#modalAlerts').hidden) renderAlertList();
+    } else if (msg.type === 'alerts-changed') {
+      S.alertCfg = { ...S.alertCfg, ...(msg.alerts || {}) };
+      syncAlertBadge();
+      if (!$('#modalAlerts').hidden) renderAlertPanel();
+    } else if (msg.type === 'columns-changed') {
+      S.columns = msg.columns || [];
+      applyColumnLayout();
+      // 行里的单元格数量变了，重新取一次列表（服务端已经重算过派生列）
+      loadFlows();
     } else if (msg.type === 'flow-update') {
       // 两种来源：① 请求完成（占位记录就地补上状态码 / 耗时 / 响应类型）；
       // ② 本机进程名是 lsof 异步查到的。都推的是完整 summary，整行合并即可。
@@ -7746,6 +8222,18 @@ const CMD_ITEMS = [
   {
     label: '性能视图', hint: '按接口聚合 P50 / P95', keys: 'perf performance 性能 聚合 慢 接口 p95',
     run: () => openPerf(),
+  },
+  {
+    label: '派生列', hint: '把 JSON 字段提成一列', keys: 'column derived 派生 列 jsonpath 字段',
+    run: () => openColsPanel(),
+  },
+  {
+    label: '条件告警', hint: '命中规则时提醒', keys: 'alert 告警 提醒 5xx 错误 监控',
+    run: () => openAlertsPanel(),
+  },
+  {
+    label: '脚本', hint: '用 JS 改请求 / 响应', keys: 'script 脚本 js hook 钩子 改写',
+    run: () => openScriptsPanel(),
   },
   { label: '导出 HAR', keys: 'export har 导出', run: () => exportFlows('har') },
   {

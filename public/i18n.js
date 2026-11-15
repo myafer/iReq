@@ -25,6 +25,24 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 脚本规则：保存结果与语法检查是动态句
+    [/^已保存 (\d+) 条脚本规则$/, function (m, a) {
+      return 'Saved ' + a + (a === '1' ? ' script rule' : ' script rules');
+    }],
+    [/^语法通过(.*)$/, function (m, a) { return 'Syntax OK' + a; }],
+    [/^语法错误：(.+)$/, function (m, a) { return 'Syntax error: ' + a; }],
+    [/^检查失败：(.+)$/, function (m, a) { return 'Check failed: ' + a; }],
+    // 条件告警：条数、静音倒计时与命中提示都是动态句
+    [/^已保存 (\d+) 条告警规则$/, function (m, a) {
+      return 'Saved ' + a + (a === '1' ? ' alert rule' : ' alert rules');
+    }],
+    [/^已静音 · (\d+) 分钟后恢复$/, function (m, a) { return 'Muted · back in ' + a + ' min'; }],
+    [/^告警：(.+)$/, function (m, a) { return 'Alert: ' + a; }],
+    // 派生列：保存反馈带条数
+    [/^已保存 (\d+) 个派生列$/, function (m, a) {
+      return 'Saved ' + a + (a === '1' ? ' derived column' : ' derived columns');
+    }],
+    [/^保存失败：(.+)$/, function (m, a) { return 'Save failed: ' + a; }],
     // WebSocket 帧 / SSE 消息：条数与状态是动态句
     [/^(实时|已结束) · (\d+) (帧|条)$/, function (m, a, b, c) {
       return (a === '实时' ? 'Live' : 'Ended') + ' · ' + b + (c === '帧' ? (b === '1' ? ' frame' : ' frames') : b === '1' ? ' message' : ' messages');

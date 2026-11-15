@@ -51,7 +51,8 @@ const { seedFlows } = require('./_seed');
   const checks = [];
   checks.push(['列表有数据', r.rows > 0]);
   checks.push(['有流量时空状态隐藏', r.emptyHiddenAttr === true && r.emptyDisplay === 'none' && !r.emptyVisible]);
-  checks.push(['表头与首行列数一致', r.headX.length === r.cellX.length && r.headX.length === 4]);
+  // 派生成列会让列数变化，这里只要求表头与行一致、且至少是基础四列
+  checks.push(['表头与首行列数一致', r.headX.length === r.cellX.length && r.headX.length >= 4]);
   checks.push(['表头与首行列位置对齐', r.headX.every((x, i) => Math.abs(x - r.cellX[i]) <= 2)]);
   checks.push(['列表字号已生效', Object.values(r.fonts).every((v) => v && parseFloat(v) > 0)]);
   checks.push(['无横向溢出', r.overflowX <= 0]);

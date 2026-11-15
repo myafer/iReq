@@ -52,6 +52,15 @@ GET    /api/history/:id/export?format=har|json  导出整条历史（默认 HAR�
 GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/columns             派生列 { columns: [{id, name, path}] }
+PUT    /api/columns             { columns } 全量替换（最多 4 列；保存后立即按已有流量重算并广播）
+                                路径写法：a.b[0].c / $.a.b / req.body.x / h:header-name
+GET    /api/alerts              条件告警 { enabled, rules: [{id, name, enabled, host, url, method, status, body, minDuration, cooldownMs}], muted, mutedUntil }
+PUT    /api/alerts              { enabled, rules } 全量替换（最多 20 条；错误率口径与筛选条一致）
+POST   /api/alerts/mute         { minutes } 静音一段时间（0 = 取消）
+GET    /api/scripts             脚本规则 { enabled, rules: [{id, name, enabled, phase, host, url, method, code, timeoutMs}] }
+PUT    /api/scripts             { enabled, rules } 全量替换；保存前会先编译，语法错回 400 + errors
+POST   /api/scripts/check       { code } 只编译不保存 → { ok, error, logs, hooks }
 GET    /api/perf?by=route|host&参数同 /api/flows    性能聚合（按接口 / 域名）
                                回 { by, groups: [{ key, count, p50, p95, avg, max, errorRate, noResponse,
                                   serverErrors, clientErrors, bytes, methods, slowest }], groupCount, truncated,
@@ -95,7 +104,8 @@ GET    /api/config  PUT /api/config   { capture, mockEnabled, h2Enabled, passthr
                                         processMap: true, uaAppMapText: "okhttp=我的App",
                                         networkSim: { enabled, latencyMs, kbps, timeoutMs, rules: [{match, mode}] } }
 GET    /api/events                SSE：flow / flow-update / clear / tls-failure / tls-remove / tls-clear /
-                                  network-sim / passthrough / rules-changed / history-changed
+                                  network-sim / passthrough / rules-changed / history-changed /
+                                  columns-changed / alerts-changed / alert / scripts-changed
                                   （flow = 请求发起时的进行中占位记录；flow-update = 响应完成就地补完，
                                    以及本机进程名异步回填；clear = 列表与侧栏同步清空；
                                    tls-remove = 加入跳过解密 / 握手成功后撤掉已解决的诊断行；

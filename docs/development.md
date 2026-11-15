@@ -164,6 +164,9 @@ node tools/check-har.js         # HAR import: becomes a snapshot / fields surviv
 node tools/check-body.js        # raw body bytes: inline images + sniffed types / text download / request body / works inside snapshots (18 items)
 node tools/check-ws.js          # WebSocket frames: opcodes / masking / fragmentation / compression / caps, ws + wss end to end, messages tab (55 items)
 node tools/check-sse.js         # SSE messages: framing / multi-line data / heartbeats / three EOLs, end to end, messages tab (35 items)
+node tools/check-columns.js     # derived columns: path parsing / value formatting / caps / immediate recompute / UI (34 items)
+node tools/check-alerts.js      # conditional alerts: match semantics / cooldown / mute / per-minute cap / SSE push / UI (35 items)
+node tools/check-scripts.js     # script rules: sandbox isolation / timeout / request + response rewrites / save validation / UI (37 items)
 node tools/check-timing.js      # timing breakdown: DNS/TCP/TLS/wait/download marks, reused connections report 0, missing phases stay null, proxy + replay carry timings (27 items)
 node tools/check-perf.js        # performance view: percentile definition, per-endpoint/per-host grouping, error rate counts failures + 5xx only, sorting/truncation, filter passthrough (38 items)
 ```

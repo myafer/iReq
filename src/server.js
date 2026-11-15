@@ -19,6 +19,8 @@ const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
 const { McpAuth } = require('./mcp-auth');
 const { importHar } = require('./har-import');
 const { aggregate: aggregatePerf } = require('./perf');
+const { applyColumns, normalizeColumns } = require('./columns');
+const { normalizeScripts } = require('./scripts');
 const mcp = require('./mcp');
 
 const VERSION = require('../package.json').version;
@@ -386,6 +388,8 @@ class ConsoleServer {
       this.proxy.on('tls-remove', ({ hosts }) =>
         this._broadcast({ type: 'tls-remove', hosts })
       );
+      // 条件告警：规则命中时广播，所有打开的窗口都会弹提示
+      this.proxy.on('alert', (alert) => this._broadcast({ type: 'alert', alert }));
     }
     // 断点挂起 / 放行：所有窗口同步弹窗与角标（开两个标签页时两边都能操作同一条）
     if (this.breakpoints) {
@@ -505,6 +509,89 @@ class ConsoleServer {
 
     /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
     if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
+
+    /* ---------------- 脚本规则：JS 钩子改请求 / 响应 ---------------- */
+    if (parts[1] === 'scripts') {
+      const engine = this.proxy && this.proxy.scripts;
+      if (!engine) return this._json(res, 404, { error: '脚本模块未启用' });
+      if (method === 'GET' && parts.length === 2) {
+        return this._json(res, 200, engine.settings());
+      }
+      if (method === 'POST' && parts[2] === 'check') {
+        const body = (await this._body(req)) || {};
+        const out = engine.compile(String(body.code || ''), Number(body.timeoutMs) || undefined);
+        return this._json(res, 200, {
+          ok: out.ok,
+          error: out.error || '',
+          logs: (out.logs || []).slice(0, 20),
+          hooks: out.hooks || null,
+        });
+      }
+      if (method === 'PUT' && parts.length === 2) {
+        const body = (await this._body(req)) || {};
+        const next = normalizeScripts({
+          enabled: body.enabled !== undefined ? body.enabled : engine.settings().enabled,
+          rules: Array.isArray(body.rules) ? body.rules : engine.settings().rules,
+        });
+        // 保存前先编译：语法错、死循环的规则不该悄悄存下去
+        const errors = [];
+        for (const rule of next.rules) {
+          const c = engine.compile(rule.code, rule.timeoutMs);
+          if (!c.ok) errors.push({ id: rule.id, name: rule.name, error: c.error });
+        }
+        if (errors.length) {
+          return this._json(res, 400, { error: '脚本有错，未保存', errors });
+        }
+        engine.set(next);
+        if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+        this._broadcast({ type: 'scripts-changed', scripts: next });
+        return this._json(res, 200, next);
+      }
+    }
+
+    /* ---------------- 条件告警：命中规则就提醒，可静音 ---------------- */
+    if (parts[1] === 'alerts') {
+      const engine = this.proxy && this.proxy.alerts;
+      if (!engine) return this._json(res, 404, { error: '告警模块未启用' });
+      if (method === 'GET') return this._json(res, 200, engine.status());
+      if (method === 'PUT') {
+        const body = (await this._body(req)) || {};
+        const saved = engine.set({
+          enabled: body.enabled !== undefined ? body.enabled : engine.settings().enabled,
+          rules: Array.isArray(body.rules) ? body.rules : engine.settings().rules,
+        });
+        if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+        this._broadcast({ type: 'alerts-changed', alerts: saved });
+        return this._json(res, 200, engine.status());
+      }
+      if (method === 'POST' && parts[2] === 'mute') {
+        const body = (await this._body(req)) || {};
+        const until = engine.mute(body.minutes);
+        this._broadcast({ type: 'alerts-changed', alerts: engine.settings() });
+        return this._json(res, 200, { ...engine.status(), mutedUntil: until });
+      }
+    }
+
+    /* ---------------- 派生列：把响应 JSON 字段提成列表里的一列 ---------------- */
+    if (parts[1] === 'columns') {
+      if (method === 'GET') {
+        return this._json(res, 200, { columns: this.config.derivedColumns || [] });
+      }
+      if (method === 'PUT') {
+        const body = (await this._body(req)) || {};
+        const columns = normalizeColumns(body.columns);
+        this.config.derivedColumns = columns;
+        // 立刻重算已有流量：改列配置不该只对新抓的请求生效
+        for (const f of this.store.flows) {
+          const d = applyColumns(f, columns);
+          if (d) f.derived = d;
+          else delete f.derived;
+        }
+        if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+        this._broadcast({ type: 'columns-changed', columns });
+        return this._json(res, 200, { ok: true, columns });
+      }
+    }
 
     /* ---------------- 性能视图：按接口 / 域名聚合耗时与错误率 ---------------- */
     if (parts[1] === 'perf' && method === 'GET') {
@@ -668,6 +755,14 @@ class ConsoleServer {
         if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
         const body = await this._body(req);
         const result = await replay({ store: this.store, flow, overrides: body || {} });
+        // 重放出来的记录也要按当前配置补派生列，否则列表里那一格是空的
+        if (result && result.flow) {
+          const derived = applyColumns(result.flow, this.config.derivedColumns);
+          if (derived) {
+            result.flow.derived = derived;
+            this.store.emit('flow-update', result.flow);
+          }
+        }
         return this._json(res, 200, result);
       }
     }
