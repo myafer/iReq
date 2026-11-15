@@ -65,6 +65,7 @@ function build(flows, opts = {}) {
   const slowest = [];
   const largest = [];
   const errors = [];
+  const notes = [];
   let pending = 0;
   let noResponse = 0;
   let server = 0;
@@ -112,6 +113,19 @@ function build(flows, opts = {}) {
 
     // 首次见到这个接口就登记，做「按接口」的统计时不用再回头补
     if (!routes.has(route)) routes.set(route, r);
+
+    // 标了重点 / 写了备注的请求：报告里单独列一段，别让结论只靠数字
+    if (f.note || f.pinned || f.color) {
+      notes.push({
+        id: f.id,
+        ts,
+        method: f.method,
+        url: scrubUrl(f.url || f.path || ''),
+        note: scrubText(f.note || ''),
+        color: f.color || '',
+        pinned: f.pinned === true,
+      });
+    }
 
     if (f.pending) {
       pending += 1;
@@ -209,6 +223,7 @@ function build(flows, opts = {}) {
     slowest: slowest.sort((a, b) => b.duration - a.duration).slice(0, TOP_SLOW),
     largest: largest.sort((a, b) => b.size - a.size).slice(0, TOP_LARGEST),
     errors: errors.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, TOP_ERRORS),
+    notes: notes.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 20),
     contentTypes: [...types.entries()].map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count).slice(0, 6),
     redactions: redactedUrls.size,
     truncated: routes.size > TOP_ROUTES,
@@ -307,6 +322,15 @@ function toMarkdown(ov, opts = {}) {
     lines.push('## 最慢的请求', '', '| 耗时 | 请求 | 状态 |', '| --- | --- | --- |');
     for (const s of ov.slowest) {
       lines.push(`| ${fmtMs(s.duration)} | \`${s.method || ''} ${cell(s.url)}\` | ${s.status || 'ERR'} |`);
+    }
+    lines.push('');
+  }
+
+  if (ov.notes.length) {
+    lines.push('## 标注过的请求', '', '| 时间 | 请求 | 备注 |', '| --- | --- | --- |');
+    for (const n of ov.notes) {
+      const tag = n.pinned ? '★ ' : '';
+      lines.push(`| ${fmtClock(n.ts)} | ${tag}\`${n.method || ''} ${cell(n.url)}\` | ${cell(n.note) || '—'} |`);
     }
     lines.push('');
   }

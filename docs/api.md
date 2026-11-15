@@ -56,6 +56,13 @@ GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Dispo
                                 x-ireq-redacted response header carries the number
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/annotations         Annotation stats { total, pinned, noted, colors }
+PUT    /api/flows/:id/annotation  { note, color, pinned } merge update (only the fields sent);
+                                color is red/orange/yellow/green/blue/purple, empty string clears it
+DELETE /api/flows/:id/annotation Remove the annotation
+GET    /api/reverse             Reverse proxy status { enabled, port, target, ready, running, url, error }
+PUT    /api/reverse             { enabled, port, target } full replace; 400 + error when the port is taken
+GET    /api/scripts/templates   Script templates [{ id, name, nameEn, phase, desc, code }]
 GET    /api/redact              Redaction { enabled, headers, query, body, pii, extraHeaders, extraFields,
                                  parts, placeholder, effective: {headers, fields, query}, defaults }
 PUT    /api/redact              { enabled, headers, query, body, pii, extraHeaderText, extraFieldText } full replace

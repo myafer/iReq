@@ -168,7 +168,9 @@ node tools/check-ws.js          # WebSocket 帧：opcode / 掩码 / 分片 / 压
 node tools/check-sse.js         # SSE 消息：分帧 / 多行 data / 心跳 / 三种行尾 + 端到端 + 消息页签（35 项）
 node tools/check-columns.js     # 派生列：路径解析 / 取值与格式化 / 配置上限 / 立即重算 / 界面（34 项）
 node tools/check-alerts.js      # 条件告警：匹配语义 / 冷却 / 静音 / 每分钟上限 / SSE 推送 / 界面（35 项）
-node tools/check-scripts.js     # 脚本规则：沙箱隔离 / 超时 / 请求与响应改写 / 保存校验 / 界面（37 项）
+node tools/check-scripts.js     # 脚本规则：沙箱隔离 / 超时 / 请求与响应改写 / 模板 / WebSocket 钩子 / 界面（54 项）
+node tools/check-annotations.js # 请求标注：合并语义 / 落盘 / 导出与报告 / 界面色条与星标（40 项）
+node tools/check-reverse.js     # 反向代理：配置归一 / 转发与记录 / 端口占用 / 界面（39 项）
 node tools/check-redact.js      # 脱敏：头 / 查询 / 正文 / 派生列 / 开关 / 导出与 MCP 出口 / 界面预览（73 项）
 node tools/check-overview.js    # 会话总览：口径与百分位同源 / 分组排序 / Markdown 报告 / 脱敏 / 界面（52 项）
 node tools/check-timing.js      # 耗时分解：DNS/TCP/TLS/等待/下载四段时间点 / 连接复用记 0 / 拿不到的段留 null / 代理链路与重放都带 timings（27 项）

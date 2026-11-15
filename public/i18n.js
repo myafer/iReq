@@ -25,6 +25,13 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 脚本模板：插入反馈带模板名
+    [/^已添加模板「(.+)」，改完点保存生效$/, function (m, a) { return 'Template "' + a + '" added — edit it, then save'; }],
+    // 反向代理：监听地址回显与保存反馈
+    [/^反向代理已监听 (.+)$/, function (m, a) { return 'Reverse proxy listening on ' + a; }],
+    // 请求标注：失败提示
+    [/^删除失败：(.+)$/, function (m, a) { return 'Delete failed: ' + a; }],
+    [/^操作失败：(.+)$/, function (m, a) { return 'Action failed: ' + a; }],
     // 会话总览：汇总条数、卡片副标题、复制反馈都是动态句
     [/^(\d+) 条已汇总$/, function (m, a) { return a + (a === '1' ? ' flow summarised' : ' flows summarised'); }],
     [/^已完成 (\d+) · 进行中 (\d+)$/, function (m, a, b) { return a + ' done · ' + b + ' in flight'; }],

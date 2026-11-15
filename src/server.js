@@ -20,8 +20,9 @@ const { McpAuth } = require('./mcp-auth');
 const { importHar } = require('./har-import');
 const { aggregate: aggregatePerf } = require('./perf');
 const { build: buildOverview, toMarkdown: overviewToMarkdown } = require('./overview');
+const { Annotations, COLORS: ANNOT_COLORS } = require('./annotations');
 const { applyColumns, normalizeColumns } = require('./columns');
-const { normalizeScripts } = require('./scripts');
+const { normalizeScripts, TEMPLATES: SCRIPT_TEMPLATES } = require('./scripts');
 const {
   normalize: normalizeRedact,
   lists: redactLists,
@@ -222,6 +223,10 @@ function toHar(flows, version) {
           clientIp: f.clientIp || null,
           mocked: Boolean(f.mocked),
           error: f.error || null,
+          // 标注跟着导出走：别人打开 HAR 也能看到「这条是关键请求」
+          ...(f.note ? { note: f.note } : {}),
+          ...(f.color ? { color: f.color } : {}),
+          ...(f.pinned ? { pinned: true } : {}),
         },
       };
     });
@@ -252,6 +257,8 @@ class ConsoleServer {
     this.server = null;
     /* MCP 授权：令牌只存哈希，界面里生成与撤销；默认关闭，开了也必须有令牌 */
     this.mcpAuth = new McpAuth({ config: this.config, dataDir: this.dataDir });
+    /* 请求标注：按 flow id 存，落盘一个 json —— flow 被清空 / 挤掉后标注还在 */
+    this.annotations = new Annotations({ file: this.dataDir ? path.join(this.dataDir, 'annotations.json') : '' });
     /* 历史记录（每次清空一条）：列表来自 index，回看按字节游标从文件尾部倒序读 */
     this.history = this.dataDir
       ? new FlowHistory({
@@ -404,6 +411,8 @@ class ConsoleServer {
       );
       // 条件告警：规则命中时广播，所有打开的窗口都会弹提示
       this.proxy.on('alert', (alert) => this._broadcast({ type: 'alert', alert }));
+      // 反代端口启停 / 失败时同步给界面（比如端口被占用）
+      this.proxy.on('reverse', (reverse) => this._broadcast({ type: 'reverse-changed', reverse }));
     }
     // 断点挂起 / 放行：所有窗口同步弹窗与角标（开两个标签页时两边都能操作同一条）
     if (this.breakpoints) {
@@ -524,6 +533,28 @@ class ConsoleServer {
     /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
     if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
 
+    /* ---------------- 反向代理：抓打向本机服务的请求（webhook / 回调） ---------------- */
+    if (parts[1] === 'reverse') {
+      if (!this.proxy) return this._json(res, 400, { error: '代理未启动' });
+      if (method === 'GET') return this._json(res, 200, this.proxy.reverseStatus());
+      if (method === 'PUT') {
+        const body = (await this._body(req)) || {};
+        const status = await this.proxy.setReverseProxy({
+          enabled: body.enabled === true,
+          port: body.port,
+          target: body.target,
+        });
+        if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+        this._broadcast({ type: 'reverse-changed', reverse: status });
+        return this._json(res, status.error ? 400 : 200, status);
+      }
+    }
+
+    /* ---------------- 标注：数量与颜色（界面用来画徽标） ---------------- */
+    if (parts[1] === 'annotations' && method === 'GET') {
+      return this._json(res, 200, { ...this.annotations.stats(), colors: ANNOT_COLORS });
+    }
+
     /* ---------------- 脱敏：导出 / MCP / 带 redact=1 的接口才动手，界面永远原值 ---------------- */
     if (parts[1] === 'redact') {
       if (method === 'GET' && parts[2] === 'preview') {
@@ -553,6 +584,10 @@ class ConsoleServer {
     if (parts[1] === 'scripts') {
       const engine = this.proxy && this.proxy.scripts;
       if (!engine) return this._json(res, 404, { error: '脚本模块未启用' });
+      // 模板是纯数据：界面「从模板开始」直接用，不用在前端再抄一份
+      if (method === 'GET' && parts[2] === 'templates') {
+        return this._json(res, 200, { templates: SCRIPT_TEMPLATES });
+      }
       if (method === 'GET' && parts.length === 2) {
         return this._json(res, 200, engine.settings());
       }
@@ -672,7 +707,7 @@ class ConsoleServer {
         route: sp.get('route') || '',
         limit: Math.min(Number(sp.get('limit')) || 2000, 5000),
       });
-      const ov = buildOverview(flows, {
+      const ov = buildOverview(this.annotations.applyAll(flows), {
         version: VERSION,
         redact: this.config.redact,
         columns: this.config.derivedColumns,
@@ -742,7 +777,11 @@ class ConsoleServer {
         route: sp.get('route') || '',
         limit: Math.min(Number(sp.get('limit')) || 2000, 2000),
       });
-      const red = redactFlows(flows, this.config.redact, this.config.derivedColumns);
+      const red = redactFlows(
+        this.annotations.applyAll(flows),
+        this.config.redact,
+        this.config.derivedColumns
+      );
       const payload = format === 'json' ? red.flows.slice().reverse() : toHar(red.flows, VERSION);
       // HAR 里有 comment 字段：打开的人一眼能看出这份是脱敏过的，不至于拿它去复现 bug
       if (format === 'har' && red.count) {
@@ -778,11 +817,32 @@ class ConsoleServer {
           route: url.searchParams.get('route') || '',
           limit: Math.min(Number(url.searchParams.get('limit')) || 500, 2000),
         });
-        if (url.searchParams.get('redact') !== '1') return this._json(res, 200, list);
-        return this._json(res, 200, redactFlows(list, this.config.redact, this.config.derivedColumns).flows);
+        const annotated = this.annotations.applyAll(list);
+        if (url.searchParams.get('redact') !== '1') return this._json(res, 200, annotated);
+        return this._json(res, 200, redactFlows(annotated, this.config.redact, this.config.derivedColumns).flows);
+      }
+      /* 标注：合并语义，只改传进来的字段；三个字段都空等于删掉标注 */
+      if (parts.length === 4 && parts[3] === 'annotation' && (method === 'PUT' || method === 'DELETE')) {
+        const id = parts[2];
+        if (!this.store.get(id) && !this.annotations.get(id)) {
+          return this._json(res, 404, { error: 'flow 不存在' });
+        }
+        if (method === 'DELETE') {
+          this.annotations.remove(id);
+          this._broadcast({ type: 'annotation', id, annotation: null });
+          return this._json(res, 200, { ok: true, id, annotation: null });
+        }
+        const body = (await this._body(req)) || {};
+        const saved = this.annotations.set(id, {
+          note: body.note,
+          color: body.color === undefined ? undefined : String(body.color || ''),
+          pinned: body.pinned === undefined ? undefined : body.pinned === true,
+        });
+        this._broadcast({ type: 'annotation', id, annotation: saved });
+        return this._json(res, 200, { ok: true, id, annotation: saved });
       }
       if (method === 'GET' && parts.length === 3) {
-        const flow = this.store.get(parts[2]);
+        const flow = this.annotations.apply(this.store.get(parts[2]));
         if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
         if (url.searchParams.get('redact') !== '1') return this._json(res, 200, flow);
         const safe = { ...redactFlow(flow, this.config.redact, this.config.derivedColumns) };
@@ -1181,7 +1241,14 @@ class ConsoleServer {
     };
   }
 
+  /** 分页列表也要带标注：界面拉的是这个接口，漏了就等于标注只在导出的文件里有效 */
   _flowsPage(sp) {
+    const page = this._flowsPageRaw(sp);
+    if (page && Array.isArray(page.flows)) page.flows = this.annotations.applyAll(page.flows);
+    return page;
+  }
+
+  _flowsPageRaw(sp) {
     const limit = Math.min(Math.max(Number(sp.get('limit')) || 200, 1), 500);
     const cursor = sp.get('cursor') || '';
     const filters = this._pageFilters(sp);
@@ -1368,7 +1435,11 @@ class ConsoleServer {
         return this._json(res, gone ? 410 : 404, { error: gone ? '文件已被删除' : '记录不存在' });
       }
       const flows = out.flows;
-      const red = redactFlows(flows, this.config.redact, this.config.derivedColumns);
+      const red = redactFlows(
+        this.annotations.applyAll(flows),
+        this.config.redact,
+        this.config.derivedColumns
+      );
       const payload =
         format === 'json' ? red.flows.slice().reverse() : toHar(red.flows, VERSION);
       if (format === 'har' && red.count) {

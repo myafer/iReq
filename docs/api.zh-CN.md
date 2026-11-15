@@ -54,6 +54,13 @@ GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 C
                                 脱敏开启时内容已打码：HAR 的 log.comment 写明处数，响应头 x-ireq-redacted 给数值
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/annotations         标注统计 { total, pinned, noted, colors }
+PUT    /api/flows/:id/annotation  { note, color, pinned } 合并更新（只改传进来的字段）；
+                                color 取 red/orange/yellow/green/blue/purple，空串表示清除
+DELETE /api/flows/:id/annotation 删掉这条标注
+GET    /api/reverse             反向代理状态 { enabled, port, target, ready, running, url, error }
+PUT    /api/reverse             { enabled, port, target } 全量替换；端口被占用回 400 + error
+GET    /api/scripts/templates   脚本模板 [{ id, name, nameEn, phase, desc, code }]
 GET    /api/redact              脱敏 { enabled, headers, query, body, pii, extraHeaders, extraFields,
                                   parts, placeholder, effective: {headers, fields, query}, defaults }
 PUT    /api/redact              { enabled, headers, query, body, pii, extraHeaderText, extraFieldText } 全量替换
@@ -94,7 +101,8 @@ GET    /api/ca/archive           证书档案元信息（指纹 / 路径 / 来�
 GET    /api/ca/p12               导出 .p12 备份（含私钥，密码在 x-ireq-p12-password 响应头）
 POST   /api/ca/import             { p12: "<base64>", password? } 导入 .p12 并重新检测信任
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows              ?redact=1 时按脱敏配置打码（默认原值 —— 界面要能调试）
+GET    /api/flows              ?redact=1 时按脱敏配置打码（默认原值 —— 界面要能调试）；
+                                返回里带 note / color / pinned（有标注时）
 GET    /api/flows/:id          单条完整记录（?redact=1 同样打码），含 timings:
                               { total, dns, tcp, tls, wait, download, reused }
                               （单位 ms；拿不到的阶段是 null，连接复用时握手三段为 0 且 reused=true）

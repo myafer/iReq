@@ -74,6 +74,10 @@ const SUITES = [
   ['条件告警', 'check-alerts.js'],
   // 会改脚本规则并打真实请求，结束时恢复配置
   ['脚本规则', 'check-scripts.js'],
+  // 会写 / 删自己的标注，结束时清空流量
+  ['请求标注', 'check-annotations.js'],
+  // 会临时占端口起反代，结束时关掉并恢复配置
+  ['反向代理', 'check-reverse.js'],
   // 会改脱敏配置、清空流量，结束时恢复配置并删掉自己造的历史
   ['脱敏', 'check-redact.js'],
   // 造流量验总览与 Markdown 报告，结束时清空流量并删掉自己造的历史

@@ -62,6 +62,9 @@ const S = {
   /* 脚本规则（配置级，服务端落盘）：命中时在沙箱里跑用户代码 */
   scripts: { enabled: true, rules: [] },
   scriptDraft: [],
+  scriptTemplates: [],
+  /* 反向代理（配置级，服务端落盘）：抓打向本机服务的请求 */
+  reverse: { enabled: false, port: 8090, target: '', running: false, error: '' },
   /* 脱敏（配置级，服务端落盘）：只影响导出 / MCP / redact=1 的接口 */
   redact: { enabled: true, headers: true, query: true, body: true, pii: false },
   redactView: null,
@@ -851,12 +854,20 @@ function rowHtml(f) {
   const trSim = (s) =>
     window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? window.ReqLiteI18N.t(s, true) : s;
   const badges = [
+    f.note
+      ? `<span class="tag note" title="${esc(f.note)}">${window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? 'NOTE' : '备注'}</span>`
+      : '',
     f.mocked ? '<span class="tag mock">MOCK</span>' : '',
     f.replayOf ? '<span class="tag replay">REPLAY</span>' : '',
     f.ws ? '<span class="tag">WS</span>' : '',
     // 映射过的请求：目标地址放 title，列表里只占一个字
     f.mapped ? `<span class="tag mapped" title="这条请求被改发到 ${esc(f.mapped)}">映射</span>` : '',
     f.imported ? '<span class="tag" title="从 HAR 文件导入，不是本机抓的">HAR</span>' : '',
+    f.reverse
+      ? `<span class="tag rev" title="${window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? 'Received by reverse proxy' : '反向代理收到的请求（服务端被动接收）'}">${
+          window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? 'REV' : '反向'
+        }</span>`
+      : '',
     f.scripted && f.scripted.length
       ? `<span class="tag script" title="${esc(
           f.scripted.map((s) => `${s.name || '脚本'}${s.error ? '：' + s.error : ''}`).join('\n')
@@ -876,10 +887,14 @@ function rowHtml(f) {
   const hostPart = esc(f.host);
   const appPart = appName ? ` · ${ICONS().iconHtml(appName, 'xs')}${esc(appName)}` : '';
   const sub = `<span class="hl">${hostPart}${appPart}</span>`;
-  return `<div class="row${f.pending ? ' pending' : ''}" data-id="${f.id}">
+  const markCls = f.color ? ` mark-${esc(f.color)}` : '';
+  const pin = f.pinned ? '<span class="pin" title="已标记重点">★</span>' : '';
+  return `<div class="row${f.pending ? ' pending' : ''}${markCls}" data-id="${f.id}"${
+    f.note ? ` title="${esc(f.note)}"` : ''
+  }>
     <span class="m ${esc(f.method)}">${esc(f.method)}</span>
     <span class="cellurl">
-      <div class="p">${esc(p)}</div>
+      <div class="p">${pin}${esc(p)}</div>
       <div class="h">${sub}${badges}</div>
     </span>
     <span class="st ${statusClass(f.status)}">${esc(stText)}</span>
@@ -2322,7 +2337,7 @@ function tabOverview(f) {
     ['响应大小', fmtSize(f.resSize)],
     ['响应类型', f.resContentType],
     ['请求头数量', Object.keys(f.reqHeaders || {}).length],
-    ['来源', f.mocked ? 'Mock 规则：' + (f.mockRule || '') : f.replayOf ? '重放' : '代理转发'],
+    ['来源', f.mocked ? 'Mock 规则：' + (f.mockRule || '') : f.replayOf ? '重放' : f.reverse ? '反向代理（服务端被动接收）' : '代理转发'],
   ];
   let notice = '';
   if (f.error) notice += `<div class="notice err">${esc(f.error)}</div>`;
@@ -3815,8 +3830,43 @@ function syncScriptBadge() {
   b.textContent = String(n);
 }
 
+async function loadScriptTemplates() {
+  const sel = $('#scTemplate');
+  if (!sel || sel.dataset.loaded) return;
+  try {
+    const out = await api('/api/scripts/templates');
+    const list = (out && out.templates) || [];
+    sel.innerHTML =
+      '<option value="">从模板开始…</option>' +
+      list
+        .map((t) => {
+          const en = window.ReqLiteI18N && window.ReqLiteI18N.isEn();
+          return `<option value="${esc(t.id)}">${esc(en && t.nameEn ? t.nameEn : t.name)}</option>`;
+        })
+        .join('');
+    S.scriptTemplates = list;
+    sel.dataset.loaded = '1';
+  } catch (_) {
+    /* 模板拿不到不影响手写 */
+  }
+}
+
+/** 选模板 = 追加一条规则：名字、阶段、代码都填好，改两行就能用 */
+function applyScriptTemplate(id) {
+  const t = (S.scriptTemplates || []).find((x) => x.id === id);
+  if (!t) return;
+  S.scriptDraft = scriptDraftFromPanel();
+  const en = window.ReqLiteI18N && window.ReqLiteI18N.isEn();
+  S.scriptDraft.push({ name: (en && t.nameEn) || t.name, phase: t.phase, enabled: true, code: t.code });
+  renderScriptPanel();
+  const areas = $$('#scRules .sc-code');
+  if (areas.length) areas[areas.length - 1].focus();
+  toast(`已添加模板「${t.name}」，改完点保存生效`);
+}
+
 async function openScriptsPanel() {
   await loadScripts();
+  await loadScriptTemplates();
   S.scriptDraft = ((S.scripts && S.scripts.rules) || []).map((r) => ({ ...r }));
   renderScriptPanel();
   openModal('#modalScripts');
@@ -3827,6 +3877,7 @@ function scriptRuleHtml(r, i) {
     ['both', '请求 + 响应'],
     ['request', '只请求'],
     ['response', '只响应'],
+    ['ws', '只 WebSocket'],
   ];
   return `<div class="sc-rule" data-i="${i}">
     <div class="sc-line">
@@ -3943,6 +3994,11 @@ function bindScripts() {
     if (state) state.textContent = '';
   });
   $('#scSave').addEventListener('click', saveScripts);
+  $('#scTemplate').addEventListener('change', (e) => {
+    const id = e.target.value;
+    e.target.value = '';
+    if (id) applyScriptTemplate(id);
+  });
 }
 
 /* -------------------------------------------------------------- 条件告警 */
@@ -7735,6 +7791,9 @@ function bind() {
   bindCols();
   loadColumns();
   bindOverview();
+  bindNote();
+  bindReverse();
+  loadReverse();
   bindAlerts();
   loadAlerts();
   bindScripts();
@@ -8314,6 +8373,12 @@ function bind() {
         if (S.filter.status !== 'tls') scheduleFlowAdd(m);
         scheduleFacets();
       }
+    } else if (msg.type === 'reverse-changed') {
+      S.reverse = msg.reverse || S.reverse;
+      syncReverseBadge();
+      if (!$('#modalReverse').hidden) renderReverseStatus(S.reverse);
+    } else if (msg.type === 'annotation') {
+      applyAnnotationLocally(msg.id, msg.annotation);
     } else if (msg.type === 'redact-changed') {
       S.redact = { ...S.redact, ...(msg.redact || {}) };
       syncRedactBadge();
@@ -8635,7 +8700,12 @@ function openRowMenu(x, y, id) {
       `<button class="ctx-item" data-cmd="replay" data-id="${esc(id)}">${netTr('重放')}</button>`,
       `<button class="ctx-item" data-cmd="quickmock" data-id="${esc(id)}">${netTr('快速 Mock')}</button>`,
       `<button class="ctx-item" data-cmd="curl" data-id="${esc(id)}">${netTr('复制 cURL')}</button>`,
-      `<button class="ctx-item" data-cmd="star" data-id="${esc(id)}">${netTr('收藏')}</button>`
+      `<button class="ctx-item" data-cmd="star" data-id="${esc(id)}">${netTr('收藏')}</button>`,
+      '<div class="ctx-sep"></div>',
+      `<button class="ctx-item" data-cmd="note" data-id="${esc(id)}">${netTr('备注与颜色…')}</button>`,
+      `<button class="ctx-item" data-cmd="pin" data-id="${esc(id)}">${netTr(
+        f.pinned ? '取消重点' : '标记重点'
+      )}</button>`
     );
   }
   rows.push(
@@ -8644,6 +8714,216 @@ function openRowMenu(x, y, id) {
     `<button class="ctx-item" data-cmd="export">${netTr('导出 HAR')}</button>`
   );
   showCtxMenu(x, y, `<div class="ctx-title">${esc(label)}</div>` + rows.join(''));
+}
+
+/* -------------------------------------------------------------- 反向代理 */
+
+/* 端口在服务端监听，这里只是配置入口 + 状态显示。
+ * 状态必须回显真实监听结果（端口被占用时不能显示「已开启」）。 */
+async function loadReverse() {
+  try {
+    S.reverse = await api('/api/reverse');
+  } catch (_) {
+    /* 老实例没有这个接口时静默 */
+  }
+  syncReverseBadge();
+}
+
+function syncReverseBadge() {
+  const dot = $('#rvDot');
+  if (!dot) return;
+  dot.hidden = !(S.reverse && S.reverse.running);
+}
+
+function openReversePanel() {
+  const c = S.reverse || {};
+  $('#rvEnabled').checked = !!c.enabled;
+  $('#rvPort').value = c.port || 8090;
+  $('#rvTarget').value = c.target || '';
+  renderReverseStatus(c);
+  openModal('#modalReverse');
+}
+
+function renderReverseStatus(c) {
+  const box = $('#rvStatus');
+  if (!box) return;
+  if (c.error) {
+    box.innerHTML = `<span class="rv-bad">${esc(c.error)}</span>`;
+    return;
+  }
+  if (c.running) {
+    box.innerHTML = `<span class="rv-ok">正在监听 <code>${esc(c.url || '')}</code></span>
+      <span class="hint">→ ${esc(c.target || '')}</span>`;
+    return;
+  }
+  if (c.enabled && !c.ready) {
+    box.innerHTML = '<span class="rv-bad">上游地址不合法，填成 http://host:port 这种形式</span>';
+    return;
+  }
+  box.innerHTML = '<span class="hint">未启动</span>';
+}
+
+async function saveReverse() {
+  const body = {
+    enabled: $('#rvEnabled').checked,
+    port: Number($('#rvPort').value) || 8090,
+    target: $('#rvTarget').value.trim(),
+  };
+  try {
+    const st = await api('/api/reverse', { method: 'PUT', body });
+    S.reverse = st;
+    syncReverseBadge();
+    renderReverseStatus(st);
+    toast(st.running ? `反向代理已监听 ${st.url}` : st.error || '反向代理已关闭');
+  } catch (err) {
+    // 端口占用之类：接口回 400，正文里带真实原因，别只弹「保存失败」
+    const detail = err.message || '';
+    $('#rvStatus').innerHTML = `<span class="rv-bad">${esc(detail || '保存失败')}</span>`;
+    toast('保存失败：' + detail);
+    loadReverse();
+  }
+}
+
+function bindReverse() {
+  $('#btnReverse').addEventListener('click', openReversePanel);
+  $('#rvSave').addEventListener('click', saveReverse);
+}
+
+/* ---------------------------------------------------------------- 请求标注 */
+
+/* 标注存服务端（data/annotations.json），按 id 关联。
+ * 这里只负责编辑与把结果贴回 S.flows，刷新不丢。 */
+S.noteTarget = null;
+
+function openNotePanel(id) {
+  const f = (S.flows || []).find((v) => v.id === id) || (S.selected && S.selected.id === id ? S.selected : null);
+  if (!f) return;
+  S.noteTarget = id;
+  $('#ntLabel').textContent = `${f.method || ''} ${f.path || f.url || ''}`.slice(0, 80);
+  $('#ntText').value = f.note || '';
+  $('#ntPinned').checked = !!f.pinned;
+  renderNoteColors(f.color || '');
+  openModal('#modalNote');
+  setTimeout(() => $('#ntText').focus(), 30);
+}
+
+function renderNoteColors(current) {
+  const box = $('#ntColors');
+  if (!box) return;
+  const colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+  box.innerHTML = ['', ...colors]
+    .map(
+      (c) =>
+        `<button type="button" class="nt-sw${c ? ' sw-' + c : ' sw-none'}${
+          c === current ? ' on' : ''
+        }" data-color="${c}" title="${c || '无颜色'}">${c ? '' : '∅'}</button>`
+    )
+    .join('');
+}
+
+function noteColorFromPanel() {
+  const on = $('#ntColors .nt-sw.on');
+  return on ? on.dataset.color || '' : '';
+}
+
+async function saveNote() {
+  const id = S.noteTarget;
+  if (!id) return;
+  const body = {
+    note: $('#ntText').value,
+    color: noteColorFromPanel(),
+    pinned: $('#ntPinned').checked,
+  };
+  try {
+    const out = await api('/api/flows/' + encodeURIComponent(id) + '/annotation', { method: 'PUT', body });
+    applyAnnotationLocally(id, out.annotation);
+    toast(out.annotation ? '已保存标注' : '标注已清空');
+    closeModals();
+  } catch (err) {
+    toast('保存失败：' + (err.message || ''));
+  }
+}
+
+async function removeNote() {
+  const id = S.noteTarget;
+  if (!id) return;
+  try {
+    await api('/api/flows/' + encodeURIComponent(id) + '/annotation', { method: 'DELETE' });
+    applyAnnotationLocally(id, null);
+    toast('标注已删除');
+    closeModals();
+  } catch (err) {
+    toast('删除失败：' + (err.message || ''));
+  }
+}
+
+/** 服务端存了之后同步到本地列表：不整表重绘，避免滚动位置跳掉 */
+function applyAnnotationLocally(id, annotation) {
+  const patch = {
+    note: (annotation && annotation.note) || '',
+    color: (annotation && annotation.color) || '',
+    pinned: !!(annotation && annotation.pinned),
+  };
+  for (const list of [S.flows, S.histFlows]) {
+    const f = (list || []).find((v) => v.id === id);
+    if (f) Object.assign(f, patch);
+  }
+  if (S.selected && S.selected.id === id) Object.assign(S.selected, patch);
+  const row = document.querySelector(`.row[data-id="${id}"]`);
+  if (row) {
+    row.classList.remove('mark-red', 'mark-orange', 'mark-yellow', 'mark-green', 'mark-blue', 'mark-purple');
+    if (patch.color) row.classList.add('mark-' + patch.color);
+    row.title = patch.note || '';
+    const p = row.querySelector('.p');
+    if (p) {
+      const old = p.querySelector('.pin');
+      if (old) old.remove();
+      if (patch.pinned) p.insertAdjacentHTML('afterbegin', '<span class="pin" title="已标记重点">★</span>');
+    }
+    const cell = row.querySelector('.cellurl .h');
+    if (cell) {
+      const oldNote = cell.querySelector('.tag.note');
+      if (oldNote) oldNote.remove();
+      if (patch.note) {
+        cell.insertAdjacentHTML(
+          'afterbegin',
+          `<span class="tag note" title="${esc(patch.note)}">${
+            window.ReqLiteI18N && window.ReqLiteI18N.isEn() ? 'NOTE' : '备注'
+          }</span>`
+        );
+      }
+    }
+  }
+  if (S.selected && S.selected.id === id) renderDetail();
+}
+
+async function togglePin(id) {
+  const f = (S.flows || []).find((v) => v.id === id);
+  if (!f) return;
+  try {
+    const out = await api('/api/flows/' + encodeURIComponent(id) + '/annotation', {
+      method: 'PUT',
+      body: { pinned: !f.pinned },
+    });
+    applyAnnotationLocally(id, out.annotation);
+    toast(out.annotation && out.annotation.pinned ? '已标记重点' : '已取消重点');
+  } catch (err) {
+    toast('操作失败：' + (err.message || ''));
+  }
+}
+
+function bindNote() {
+  $('#ntSave').addEventListener('click', saveNote);
+  $('#ntRemove').addEventListener('click', removeNote);
+  $('#ntColors').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-color]');
+    if (!b) return;
+    $$('#ntColors .nt-sw').forEach((x) => x.classList.toggle('on', x === b));
+  });
+  // ⌘/Ctrl + Enter 保存：写长备注时不用去够按钮
+  $('#ntText').addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveNote();
+  });
 }
 
 /* ---------------------------------------------------------------- 命令面板 */
@@ -8663,6 +8943,14 @@ const CMD_ITEMS = [
   },
   {
     label: '网络模拟', keys: 'network 网络 断网 弱网 超时', run: () => openNetwork(),
+  },
+  {
+    label: '反向代理', hint: '抓 webhook / 回调', keys: 'reverse 反向 回调 webhook 服务端',
+    run: () => openReversePanel(),
+  },
+  {
+    label: '备注当前请求', hint: '写一句结论 + 标颜色', keys: 'note 备注 标注 颜色 重点',
+    run: () => { const f = S.selected; if (f && f.kind !== 'tls') openNotePanel(f.id); else toast('先选一条请求'); },
   },
   {
     label: '会话总览', hint: '一页结论，可复制成 Markdown', keys: 'overview 总览 报告 markdown 汇总 结论',
@@ -8934,6 +9222,8 @@ function bindSimpleUI() {
         star: '#actStar',
       };
       if (map[action]) $(map[action])?.click();
+      else if (action === 'note') openNotePanel(id);
+      else if (action === 'pin') togglePin(id);
       else if (action === 'network') openNetwork();
       else if (action === 'passthrough') openPassthrough();
       else if (action === 'export') exportFlows('har');

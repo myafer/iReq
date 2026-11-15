@@ -214,4 +214,93 @@ function mergeDirections(up, down) {
   return all;
 }
 
-module.exports = { FrameParser, opcodeName, mergeDirections, MAX_PREVIEW, MAX_FRAME_KEEP };
+/* ---------------- 帧读写：给「脚本改帧」用 ---------------- */
+
+/**
+ * 从缓冲区头部切出**一个完整帧**（不改字节，payload 是原缓冲的视图）。
+ * 数据不够一帧时返回 null，调用方继续攒。
+ *
+ * 与 FrameParser 的分工：解析器负责「记录」（容错、有上限、能丢），
+ * 这里负责「改写」（必须精确知道帧边界，才能原样放回或替换）。
+ */
+function readFrame(buf) {
+  if (!buf || buf.length < 2) return null;
+  const b0 = buf[0];
+  const b1 = buf[1];
+  const fin = (b0 & 0x80) !== 0;
+  const compressed = (b0 & 0x40) !== 0;
+  const opcode = b0 & 0x0f;
+  const masked = (b1 & 0x80) !== 0;
+  let len = b1 & 0x7f;
+  let off = 2;
+  if (len === 126) {
+    if (buf.length < off + 2) return null;
+    len = buf.readUInt16BE(off);
+    off += 2;
+  } else if (len === 127) {
+    if (buf.length < off + 8) return null;
+    const big = buf.readBigUInt64BE(off);
+    if (big > BigInt(MAX_FRAME_BAIL)) return null; // 明显不是合法帧，别把内存吃光
+    len = Number(big);
+    off += 8;
+  }
+  let maskKey = null;
+  if (masked) {
+    if (buf.length < off + 4) return null;
+    maskKey = buf.subarray(off, off + 4);
+    off += 4;
+  }
+  if (buf.length < off + len) return null;
+  let payload = buf.subarray(off, off + len);
+  if (masked && len) {
+    const copy = Buffer.from(payload);
+    for (let i = 0; i < copy.length; i++) copy[i] ^= maskKey[i & 3];
+    payload = copy;
+  }
+  return {
+    fin,
+    opcode,
+    op: opcodeName(opcode),
+    masked,
+    compressed,
+    payload,
+    size: len,
+    total: off + len,
+  };
+}
+
+/** 组一个帧。客户端 → 服务端必须带掩码（RFC 6455 5.3），其余方向不能带 */
+function encodeFrame({ opcode = 1, payload = Buffer.alloc(0), mask = false, fin = true, compressed = false } = {}) {
+  const data = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload == null ? '' : payload), 'utf8');
+  const head = [(fin ? 0x80 : 0) | (compressed ? 0x40 : 0) | (opcode & 0x0f)];
+  const maskBit = mask ? 0x80 : 0;
+  if (data.length < 126) head.push(maskBit | data.length);
+  else if (data.length < 65536) head.push(maskBit | 126, (data.length >> 8) & 0xff, data.length & 0xff);
+  else {
+    head.push(maskBit | 127, 0, 0, 0, 0);
+    const buf = Buffer.alloc(8);
+    buf.writeBigUInt64BE(BigInt(data.length));
+    for (const b of buf) head.push(b);
+  }
+  const parts = [Buffer.from(head)];
+  if (mask) {
+    const key = require('crypto').randomBytes(4);
+    parts.push(key);
+    const copy = Buffer.from(data);
+    for (let i = 0; i < copy.length; i++) copy[i] ^= key[i & 3];
+    parts.push(copy);
+  } else {
+    parts.push(data);
+  }
+  return Buffer.concat(parts);
+}
+
+module.exports = {
+  FrameParser,
+  opcodeName,
+  mergeDirections,
+  readFrame,
+  encodeFrame,
+  MAX_PREVIEW,
+  MAX_FRAME_KEEP,
+};

@@ -44,6 +44,14 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 反向代理：端口与上游是环境配置，落盘
+  if (cfg.reverseProxy && typeof cfg.reverseProxy === 'object') {
+    out.reverseProxy = {
+      enabled: cfg.reverseProxy.enabled === true,
+      port: Number(cfg.reverseProxy.port) || 0,
+      target: String(cfg.reverseProxy.target || '').slice(0, 500),
+    };
+  }
   // 脱敏：默认开，但只有用户动过才写进文件 —— 这样以后改默认值能跟着走
   if (cfg.redact && typeof cfg.redact === 'object') {
     out.redact = {

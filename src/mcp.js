@@ -168,7 +168,8 @@ const TOOLS = [
       const total = ctx.server.store.count(opts);
       const raw = ctx.server.store.list({ ...opts, limit });
       // 给模型的 URL 里也不能带 token：脱敏开关开着就按导出那套规则处理
-      const red = redactFlows(raw, ctx.server.config.redact, ctx.server.config.derivedColumns);
+      const annotated = ctx.server.annotations ? ctx.server.annotations.applyAll(raw) : raw;
+      const red = redactFlows(annotated, ctx.server.config.redact, ctx.server.config.derivedColumns);
       const flows = red.flows;
       return {
         total,
@@ -188,6 +189,8 @@ const TOOLS = [
           mocked: Boolean(f.mocked),
           content_type: f.resContentType || null,
           error: f.error || null,
+          ...(f.note ? { note: f.note } : {}),
+          ...(f.pinned ? { pinned: true } : {}),
         })),
       };
     },
@@ -255,8 +258,9 @@ const TOOLS = [
     },
     run(ctx, args) {
       const id = requireString(args, 'id', { max: 100 });
-      const raw = ctx.server.store.get(id);
-      if (!raw) throw new ToolError(`找不到流量 ${id}（可能已被清空）`);
+      const stored = ctx.server.store.get(id);
+      if (!stored) throw new ToolError(`找不到流量 ${id}（可能已被清空）`);
+      const raw = ctx.server.annotations ? ctx.server.annotations.apply(stored) : stored;
       // 模型看到的内容按脱敏配置过滤；界面照旧显示原值，两边互不影响
       const flow = redactFlow(raw, ctx.server.config.redact, ctx.server.config.derivedColumns);
       const redactions = flow._redactions || 0;
@@ -302,6 +306,9 @@ const TOOLS = [
         mocked: Boolean(flow.mocked),
         matched_rule: flow.ruleId || flow.rule || null,
         error: flow.error || null,
+        ...(flow.note ? { note: flow.note } : {}),
+        ...(flow.color ? { color: flow.color } : {}),
+        ...(flow.pinned ? { pinned: true } : {}),
         request: { headers: flow.reqHeaders || {}, size: flow.reqSize || 0 },
         response: {
           headers: flow.resHeaders || {},

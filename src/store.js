@@ -615,6 +615,8 @@ function summary(f) {
     mapped: f.mapped,
     // 从 HAR 文件导进来的（不是本机抓的），列表面板要能区分
     imported: f.imported,
+    // 由反向代理收到的（服务端被调用），不是客户端主动发出的
+    reverse: f.reverse,
     replayOf: f.replayOf,
     error: f.error,
     ws: f.ws,

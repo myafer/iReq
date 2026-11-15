@@ -71,6 +71,7 @@
             <button class="more-item" id="btnNetwork">网络模拟 <b id="netCount" hidden>0</b></button>
             <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
             <button class="more-item" id="btnMap">域名映射 <b id="mapCount" hidden>0</b></button>
+            <button class="more-item" id="btnReverse">反向代理 <b class="on-dot" id="rvDot" hidden title="已开启"></b></button>
             <button class="more-item" id="btnPerf">性能视图</button>
             <button class="more-item" id="btnOverview">会话总览</button>
             <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
@@ -1134,6 +1135,9 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <div class="sc-rules" id="scRules"></div>
           <div class="net-actions">
             <button class="btn ghost" id="scAdd">+ 添加规则</button>
+            <select class="input sc-tpl" id="scTemplate" title="从现成模板开始，比对着空编辑器强">
+              <option value="">从模板开始…</option>
+            </select>
             <button class="btn primary" id="scSave">保存并生效</button>
           </div>
           <details class="lp-details">
@@ -1230,6 +1234,70 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <div id="ovSlow"></div>
           </div>
           <p class="hint ov-note">口径：错误 = 连不上 + 5xx；4xx 是调用方问题，单独计数；进行中的请求不计入耗时与百分位。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 请求标注：一句结论 + 颜色 + 重点 -->
+    <div class="modal" id="modalNote" hidden>
+      <div class="modal-card nt-dialog">
+        <div class="modal-head">
+          <h2>备注与颜色</h2>
+          <span class="hint" id="ntLabel"></span>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <textarea class="input mono nt-text" id="ntText" rows="4" maxlength="500" spellcheck="false"
+            placeholder="这条请求发生了什么？例如「登录后第一次点击，超时 3s，服务端无日志」"></textarea>
+          <div class="nt-row">
+            <span class="nt-label">颜色</span>
+            <div class="nt-colors" id="ntColors"></div>
+            <span class="fill"></span>
+            <label class="nt-pin"><input type="checkbox" id="ntPinned" /> 标记为重点</label>
+          </div>
+          <p class="hint">备注跟着导出走：HAR 的 _iReq、Markdown 报告的「标注过的请求」都会带上。</p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" id="ntRemove">删除标注</button>
+          <span class="spacer"></span>
+          <button class="btn primary" id="ntSave">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 反向代理：抓服务端被动收到的请求（webhook / 回调） -->
+    <div class="modal" id="modalReverse" hidden>
+      <div class="modal-card rv-dialog">
+        <div class="modal-head">
+          <h2>反向代理</h2>
+          <label class="switch" title="开启后起一个端口，把收到的请求转发到上游并记录下来">
+            <input type="checkbox" id="rvEnabled" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">启用</span>
+          </label>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint rv-scope">正向代理抓的是客户端发出去的请求；这里反过来 —— 起一个端口接住打向本机服务的请求（webhook / 回调 / 网关），规则、断点、脚本、弱网照常生效。</p>
+          <div class="rv-form">
+            <label>
+              <span>监听端口</span>
+              <input class="input mono" id="rvPort" type="number" min="1" max="65535" placeholder="8090" spellcheck="false" />
+            </label>
+            <label>
+              <span>转发到</span>
+              <input class="input mono" id="rvTarget" placeholder="http://127.0.0.1:3000" spellcheck="false" />
+            </label>
+          </div>
+          <div class="rv-status" id="rvStatus"></div>
+          <p class="hint">把回调地址改成上面的监听地址即可。外部服务要能访问到本机时，用局域网 IP 那一条 —— 列表里会标「反向」徽标，能和正向流量分开看。</p>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">改端口会重启监听</span>
+          <span class="spacer"></span>
+          <button class="btn primary" id="rvSave">保存</button>
         </div>
       </div>
     </div>

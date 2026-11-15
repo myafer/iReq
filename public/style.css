@@ -6620,3 +6620,182 @@ body.dragging-file::after {
   margin-top: 4px;
   line-height: 1.7;
 }
+
+/* ---------------- 请求标注 ---------------- */
+
+.nt-dialog {
+  width: min(620px, 94vw);
+}
+
+.nt-text {
+  width: 100%;
+  min-height: calc(84px * var(--ui-scale));
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.nt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.nt-label {
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.nt-colors {
+  display: flex;
+  gap: 6px;
+}
+
+/* 色块只做标记用，选中态用描边，不靠阴影（深色下阴影看不见） */
+.nt-sw {
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font-size: calc(10px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.nt-sw.on {
+  border: 2px solid var(--text);
+}
+
+.nt-sw.sw-none {
+  color: var(--muted);
+}
+
+.nt-sw.sw-red {
+  background: var(--err);
+}
+
+.nt-sw.sw-orange {
+  background: #e8792b;
+}
+
+.nt-sw.sw-yellow {
+  background: #d9a400;
+}
+
+.nt-sw.sw-green {
+  background: var(--ok);
+}
+
+.nt-sw.sw-blue {
+  background: var(--accent);
+}
+
+.nt-sw.sw-purple {
+  background: var(--mock);
+}
+
+.nt-pin {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+/* 列表里：左侧 3px 色条 + 标题前的小星 */
+.row.mark-red {
+  box-shadow: inset 3px 0 0 var(--err);
+}
+
+.row.mark-orange {
+  box-shadow: inset 3px 0 0 #e8792b;
+}
+
+.row.mark-yellow {
+  box-shadow: inset 3px 0 0 #d9a400;
+}
+
+.row.mark-green {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.row.mark-blue {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.row.mark-purple {
+  box-shadow: inset 3px 0 0 var(--mock);
+}
+
+.row .pin {
+  color: var(--warn);
+  margin-right: 4px;
+  font-size: 0.95em;
+}
+
+.tag.note {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+/* ---------------- 反向代理 ---------------- */
+
+.rv-dialog {
+  width: min(640px, 94vw);
+}
+
+.rv-scope {
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.rv-form {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rv-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.rv-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: calc(20px * var(--ui-scale));
+  margin-bottom: 8px;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.rv-ok {
+  color: var(--ok);
+}
+
+.rv-bad {
+  color: var(--err);
+}
+
+.rv-status code {
+  font-family: var(--mono);
+}
+
+.tag.rev {
+  color: var(--accent);
+}
+
+/* 脚本面板里的模板下拉：和其它按钮同高，别被 input 的默认边距顶歪 */
+.sc-tpl {
+  min-width: calc(150px * var(--ui-scale));
+  max-width: calc(220px * var(--ui-scale));
+}

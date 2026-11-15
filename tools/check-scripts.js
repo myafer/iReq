@@ -264,6 +264,154 @@ async function historyIds() {
     await browser.close();
   }
 
+  /* ---------------- ⑥ 模板 ---------------- */
+  {
+    const tpl = await jsonApi('/api/scripts/templates');
+    const list = (tpl.body && tpl.body.templates) || [];
+    ok('模板接口返回 9 个模板', list.length === 9, list.length);
+    ok('模板 id 唯一', new Set(list.map((t) => t.id)).size === list.length);
+    ok('每个模板都有中英名字', list.every((t) => t.name && t.nameEn && t.code));
+    ok('模板覆盖三个阶段', new Set(list.map((t) => t.phase)).size === 3, [...new Set(list.map((t) => t.phase))].join(','));
+    // 每个模板都必须能编译，否则「从模板开始」就是个坑
+    let bad = null;
+    for (const t of list) {
+      const c = await jsonApi('/api/scripts/check', { method: 'POST', body: { code: t.code } });
+      if (!c.body || !c.body.ok) {
+        bad = `${t.id}: ${c.body && c.body.error}`;
+        break;
+      }
+    }
+    ok('所有模板都能编译通过', !bad, bad || '');
+    const wsTpl = list.find((t) => t.phase === 'ws');
+    const wsCheck = await jsonApi('/api/scripts/check', { method: 'POST', body: { code: wsTpl.code } });
+    ok('WebSocket 模板识别出 ws 钩子', wsCheck.body.hooks && wsCheck.body.hooks.ws === 'ws', JSON.stringify(wsCheck.body.hooks));
+  }
+
+  /* ---------------- ⑦ WebSocket 钩子 ---------------- */
+  {
+    const http = require('http');
+    const crypto = require('crypto');
+    const fs = require('fs');
+    const os = require('os');
+    const pathMod = require('path');
+    const { FrameParser } = require('../src/ws-frame');
+    const tmp = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'ireq-ws-'));
+    const logs = [];
+    const wsSrv = http.createServer();
+    wsSrv.on('upgrade', (req, socket) => {
+      const key = req.headers['sec-websocket-key'];
+      const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' +
+          accept +
+          '\r\n\r\n'
+      );
+      const p = new FrameParser({ dir: 'up' });
+      socket.on('data', (c) => {
+        for (const f of p.push(c)) if (f.preview) logs.push(f.preview);
+      });
+      socket.on('error', () => {});
+    });
+    await new Promise((r) => wsSrv.listen(0, '127.0.0.1', r));
+    const wsPort = wsSrv.address().port;
+
+    const rules = [
+      { name: '丢心跳', phase: 'ws', enabled: true, code: "onWebsocket((f) => { if (f.text === 'ping') f.drop(); });" },
+      { name: '回一条', phase: 'ws', enabled: true, code: "onWebsocket((f) => { if (f.dir === 'up' && f.text === 'hello') f.sendToClient('mock-ok'); });" },
+      { name: '改内容', phase: 'ws', enabled: true, code: "onWebsocket((f) => { if (f.dir === 'up' && f.text === 'secret') f.text = 'scrubbed'; });" },
+    ];
+    const saved = await jsonApi('/api/scripts', { method: 'PUT', body: { enabled: true, rules } });
+    ok('phase=ws 的规则能保存', saved.status === 200, saved.status);
+
+    const frame = (payload, mask = true) => {
+      const data = Buffer.from(String(payload));
+      const head = [0x81];
+      if (data.length < 126) head.push((mask ? 0x80 : 0) | data.length);
+      else head.push((mask ? 0x80 : 0) | 126, data.length >> 8, data.length & 0xff);
+      const out = [Buffer.from(head)];
+      if (mask) {
+        const k = Buffer.from([7, 8, 9, 10]);
+        out.push(k);
+        const m = Buffer.from(data);
+        for (let i = 0; i < m.length; i++) m[i] ^= k[i & 3];
+        out.push(m);
+      } else out.push(data);
+      return Buffer.concat(out);
+    };
+
+    const client = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port: PROXY_PORT,
+        path: `http://127.0.0.1:${wsPort}/ws-script`,
+        headers: {
+          host: `127.0.0.1:${wsPort}`,
+          connection: 'Upgrade',
+          upgrade: 'websocket',
+          'sec-websocket-version': '13',
+          'sec-websocket-key': crypto.randomBytes(16).toString('base64'),
+        },
+      });
+      req.on('upgrade', (res, socket) => resolve({ res, socket }));
+      req.on('error', reject);
+      req.end();
+    });
+    const down = [];
+    const dp = new FrameParser({ dir: 'down' });
+    client.socket.on('data', (c) => {
+      for (const f of dp.push(c)) if (f.preview) down.push(f.preview);
+    });
+    await wait(200);
+    client.socket.write(frame('ping'));
+    client.socket.write(frame('hello'));
+    client.socket.write(frame('secret'));
+    await wait(500);
+
+    ok('被 drop 的帧没有到达上游', !logs.includes('ping'), logs.join(','));
+    ok('正常帧照常转发', logs.includes('hello'), logs.join(','));
+    ok('脚本改过的帧按新内容转发', logs.includes('scrubbed') && !logs.includes('secret'), logs.join(','));
+    ok('脚本能主动给客户端发消息', down.includes('mock-ok'), down.join(','));
+
+    client.socket.destroy();
+    await wait(400);
+
+    // 流量详情里应该有脚本命中记录（去重后）
+    const list = (await jsonApi('/api/flows?limit=20')).body;
+    const wsFlow = list.find((f) => String(f.path || '').includes('/ws-script'));
+    ok('WS 流量打了 SCRIPT 记号', !!(wsFlow && wsFlow.scripted && wsFlow.scripted.length), wsFlow && wsFlow.scripted && wsFlow.scripted.length);
+    if (wsFlow && wsFlow.scripted) {
+      const names = wsFlow.scripted.map((x) => x.name);
+      ok('命中记录按规则去重', new Set(names).size === names.length, names.join(','));
+      ok('去重后仍带次数', wsFlow.scripted.every((x) => (x.count || 1) >= 1));
+    }
+
+    // 面板里能选模板
+    const { chromium, EXEC } = require('./_pw');
+    const browser = await chromium.launch({ executablePath: EXEC });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
+    await page.goto(UI + '/', { waitUntil: 'networkidle' });
+    await page.waitForSelector('.row');
+    await page.keyboard.press('Escape');
+    await page.click('#btnMore');
+    await page.click('#btnScripts');
+    await page.waitForSelector('#modalScripts:not([hidden])');
+    await page.waitForTimeout(400);
+    const opts = await page.$$eval('#scTemplate option', (els) => els.length);
+    ok('面板里有模板下拉', opts >= 10, opts);
+    const beforeCount = await page.$$eval('#scRules .sc-rule', (els) => els.length);
+    await page.selectOption('#scTemplate', { index: 1 });
+    await page.waitForTimeout(300);
+    const afterCount = await page.$$eval('#scRules .sc-rule', (els) => els.length);
+    ok('选模板会新增一条规则', afterCount === beforeCount + 1, `${beforeCount} -> ${afterCount}`);
+    const lastCode = await page.$eval('#scRules .sc-rule:last-child .sc-code', (el) => el.value);
+    ok('新规则带上了模板代码', lastCode.length > 10);
+    await page.keyboard.press('Escape');
+    await browser.close();
+
+    wsSrv.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
   /* ---------------- 清理 ---------------- */
   await jsonApi('/api/scripts', { method: 'PUT', body: origCfg });
   srv.close();

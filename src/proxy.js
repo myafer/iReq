@@ -29,7 +29,8 @@ const { createCollector } = require('./timing');
 const { applyColumns } = require('./columns');
 const { Alerts } = require('./alerts');
 const { ScriptEngine } = require('./scripts');
-const { FrameParser, mergeDirections } = require('./ws-frame');
+const reverseCfg = require('./reverse');
+const { FrameParser, mergeDirections, readFrame, encodeFrame } = require('./ws-frame');
 const { SseParser } = require('./sse');
 const { Transform } = require('stream');
 
@@ -262,6 +263,27 @@ class BodyCapture {
   }
 }
 
+/**
+ * 同一规则在多帧上重复命中时只留一条（带 count），给列表角标与详情用。
+ * 不去重的话，一个 200 帧的连接会把同一条规则记 200 遍。
+ */
+function dedupeHits(hits) {
+  const out = [];
+  const seen = new Map();
+  for (const h of hits) {
+    const key = `${h.name || ''}|${h.phase}|${h.error || ''}`;
+    const hit = seen.get(key);
+    if (hit) {
+      hit.count = (hit.count || 1) + 1;
+      continue;
+    }
+    const copy = { ...h, count: 1 };
+    seen.set(key, copy);
+    out.push(copy);
+  }
+  return out.slice(0, 20);
+}
+
 class ProxyServer extends EventEmitter {
   constructor({ port = 9090, host = '0.0.0.0', ca, store, rules, config = {}, processMap, breakpoints, hostmap } = {}) {
     super();
@@ -301,6 +323,8 @@ class ProxyServer extends EventEmitter {
     this.alerts = new Alerts(cfg);
     // 脚本规则：沙箱里跑用户代码，只有同步的两个钩子
     this.scripts = new ScriptEngine(cfg);
+    // 反向代理：抓打向本机服务的请求（webhook / 回调），默认不启用
+    this.reverse = { server: null, port: 0, error: '', cfg: null };
   }
 
   start() {
@@ -333,7 +357,8 @@ class ProxyServer extends EventEmitter {
       this.server.on('error', reject);
       this.server.listen(this.port, this.host, () => {
         this.port = this.server.address().port;
-        resolve(this.port);
+        // 反代端口是独立的：这里失败不该拦住主代理启动，错误记下来给界面看
+        this._syncReverse().finally(() => resolve(this.port));
       });
     });
   }
@@ -366,6 +391,97 @@ class ProxyServer extends EventEmitter {
    * 该服务器无条件广播 h2（Node 行为如此），所以 h2Enabled=false 时 CONNECT
    * 分支直接走 _handshakeHttp1 的手动 TLSSocket 回退，不经过这里。
    */
+  /* ------------------------------ 反向代理 ------------------------------ */
+
+  /** 让监听状态跟上配置：按需启停，端口没变就不重建 */
+  async _syncReverse() {
+    const cfg = reverseCfg.normalize(this.config.reverseProxy);
+    this.config.reverseProxy = cfg;
+    // 端口没变时不会重建监听，但上游可能变了：把最新配置挂在 reverse 上，
+    // handler 每次请求都读它（否则改上游要重启才生效，静默失败最难查）
+    this.reverse.cfg = cfg;
+    const wanted = cfg.enabled && cfg.ready;
+    if (!wanted) {
+      this.stopReverse();
+      return this.reverseStatus();
+    }
+    if (this.reverse.server && this.reverse.port === cfg.port) return this.reverseStatus();
+    this.stopReverse();
+    return new Promise((resolve) => {
+      const server = http.createServer((req, res) => {
+        // 记一笔来源：详情里标「反向代理」，排查时能分清是客户端推的还是我们抓的
+        req.__reverse = true;
+        const cur = this.reverse.cfg || cfg;
+        const base = reverseCfg.originOf(cur);
+        // 改成绝对地址，_handle 会按绝对 URL 直接解析目标，不用另开一套转发
+        req.url = base + (req.url.startsWith('/') ? req.url : '/' + req.url);
+        try {
+          req.headers.host = new URL(cur.target).host;
+        } catch (_) {
+          /* 目标不合法时上面 ready 已经是 false，走不到这里 */
+        }
+        this._handle(req, res);
+      });
+      server.on('upgrade', (req, socket, head) => {
+        req.__reverse = true;
+        const cur = this.reverse.cfg || cfg;
+        const base = reverseCfg.originOf(cur);
+        req.url = base + (req.url.startsWith('/') ? req.url : '/' + req.url);
+        this._handleUpgrade(req, socket, head);
+      });
+      server.on('clientError', (err, socket) => {
+        try {
+          socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+        } catch (_) {
+          /* noop */
+        }
+      });
+      server.on('error', (err) => {
+        this.reverse.server = null;
+        this.reverse.port = 0;
+        this.reverse.cfg = cfg;
+        this.reverse.error =
+          err && err.code === 'EADDRINUSE' ? `端口 ${cfg.port} 已被占用` : `监听失败：${(err && err.message) || ''}`;
+        this.emit('reverse', this.reverseStatus());
+        resolve(this.reverseStatus());
+      });
+      server.listen(cfg.port, this.host, () => {
+        this.reverse = { server, port: server.address().port, error: '', cfg };
+        this.emit('reverse', this.reverseStatus());
+        resolve(this.reverseStatus());
+      });
+    });
+  }
+
+  stopReverse() {
+    if (this.reverse.server) {
+      try {
+        this.reverse.server.close();
+      } catch (_) {
+        /* noop */
+      }
+    }
+    this.reverse = { server: null, port: 0, error: '', cfg: this.reverse.cfg };
+    return this.reverseStatus();
+  }
+
+  /** 配置变了（界面点保存）时调用 */
+  async setReverseProxy(cfg) {
+    this.config.reverseProxy = reverseCfg.normalize(cfg);
+    return this._syncReverse();
+  }
+
+  reverseStatus() {
+    const cfg = reverseCfg.normalize(this.config.reverseProxy);
+    return {
+      ...cfg,
+      running: Boolean(this.reverse.server),
+      port: this.reverse.server ? this.reverse.port : cfg.port,
+      error: this.reverse.error || '',
+      url: this.reverse.server ? `http://${this._hostForDisplay(null)}:${this.reverse.port}` : '',
+    };
+  }
+
   _createMitmServer() {
     const server = http2.createSecureServer({
       allowHTTP1: true,
@@ -985,6 +1101,8 @@ class ProxyServer extends EventEmitter {
         wsFramesDropped: upParser.dropped + downParser.dropped,
         wsBytes: upParser.bytes + downParser.bytes,
         wsCompressed: upParser.compressed + downParser.compressed,
+        // 同一规则会在每一帧上命中一次：按名字去重，列表角标才不会重复一长串
+        ...(rw.hits.length ? { scripted: dedupeHits(rw.hits) } : {}),
         ...extra,
       });
     };
@@ -1073,16 +1191,135 @@ class ProxyServer extends EventEmitter {
     if (secureUpstream) upstream.once('secureConnect', onUpstreamReady);
     else upstream.once('connect', onUpstreamReady);
 
+    /* WebSocket 脚本：只有存在命中规则时才接管帧的重写。
+     * 不命中时走的还是原来的「原字节透传」，对现有链路零影响。
+     * 上游协商了 permessage-deflate 时立刻退回透传 —— 压缩帧不能不解压就改。 */
+    const wsRules = this.scripts
+      ? this.scripts.match('ws', { method: req.method, url: target.toString(), host: target.hostname })
+      : [];
+    const rw = {
+      enabled: wsRules.length > 0,
+      off: false,
+      downReady: false,
+      up: Buffer.alloc(0),
+      down: Buffer.alloc(0),
+      hits: [],
+    };
+
+    const runWsScripts = (dir, f, raw) => {
+      if (f.compressed) {
+        rw.off = true;
+        return raw;
+      }
+      // 只改「完整的文本消息」：分片中间改一半、二进制改字节都会把协议弄坏
+      const canEdit = f.opcode === 1 && f.fin;
+      const text0 = f.opcode === 1 ? f.payload.toString('utf8') : null;
+      const frame = {
+        dir,
+        op: f.op,
+        bytes: f.size,
+        fin: f.fin,
+        text: text0,
+        _drop: false,
+        _toClient: [],
+        _toServer: [],
+        drop() {
+          frame._drop = true;
+        },
+        sendToClient(t) {
+          frame._toClient.push(String(t));
+        },
+        sendToServer(t) {
+          frame._toServer.push(String(t));
+        },
+      };
+      for (const rule of wsRules) {
+        const out = this.scripts.run(rule, 'ws', frame);
+        if (!out.ok) {
+          rw.hits.push({ ruleId: rule.id, name: rule.name, phase: 'ws', error: out.error });
+          continue;
+        }
+        if (!out.skipped) {
+          rw.hits.push({
+            ruleId: rule.id,
+            name: rule.name,
+            phase: 'ws',
+            ms: out.ms,
+            logs: (out.logs || []).slice(0, 3),
+          });
+        }
+        if (frame._drop) break;
+      }
+      // 主动发消息：跨方向写另一侧，直接落到对面的 socket / 上游
+      for (const t of frame._toClient) {
+        try {
+          socket.write(encodeFrame({ opcode: 1, payload: t, mask: false }));
+        } catch (_) {
+          /* 连接已关 */
+        }
+      }
+      for (const t of frame._toServer) {
+        try {
+          upstream.write(encodeFrame({ opcode: 1, payload: t, mask: true }));
+        } catch (_) {
+          /* 连接已关 */
+        }
+      }
+      if (frame._drop && canEdit) return null;
+      if (canEdit && typeof frame.text === 'string' && frame.text !== text0) {
+        return encodeFrame({ opcode: 1, payload: frame.text, mask: dir === 'up', fin: true });
+      }
+      return raw;
+    };
+
+    /** 攒够一帧才处理：半个帧改不了，只能等下一块数据 */
+    const rewriteFrames = (dir, chunk) => {
+      if (!rw.enabled || rw.off) return chunk;
+      rw[dir] = rw[dir].length ? Buffer.concat([rw[dir], chunk]) : chunk;
+      const out = [];
+      for (;;) {
+        const f = readFrame(rw[dir]);
+        if (!f) break;
+        const raw = Buffer.from(rw[dir].subarray(0, f.total));
+        rw[dir] = rw[dir].subarray(f.total);
+        try {
+          const r = runWsScripts(dir, f, raw);
+          if (r) out.push(r);
+        } catch (_) {
+          out.push(raw); // 脚本炸了也要保证这一帧原样发出去
+        }
+        if (rw.off) break;
+      }
+      if (rw.off && rw[dir].length) {
+        out.push(rw[dir]);
+        rw[dir] = Buffer.alloc(0);
+      }
+      return out.length ? Buffer.concat(out) : null;
+    };
+
     // 两个方向的 tap：只观察，不改字节。用 Transform 而不是 data 事件，
     // 是为了保留背压 —— 大帧灌进内存最容易把进程撑爆。
     const tapDown = new Transform({
       transform(chunk, enc, cb) {
+        const wasReady = rw.downReady;
         try {
           onDown(chunk);
         } catch (_) {
           /* 解析失败不能影响转发 */
         }
-        cb(null, chunk);
+        // 握手与第一批帧常常在同一个包里：这一包先原样放过，从下一包开始改写
+        if (!wasReady) {
+          if (hsDone) rw.downReady = true;
+          cb(null, chunk);
+          return;
+        }
+        let out = chunk;
+        try {
+          out = rewriteFrames('down', chunk);
+        } catch (_) {
+          out = chunk;
+        }
+        cb(null, out);
       },
     });
     const tapUp = new Transform({
@@ -1092,7 +1329,15 @@ class ProxyServer extends EventEmitter {
         } catch (_) {
           /* 同上 */
         }
-        cb(null, chunk);
+        let out = chunk;
+        if (rw.enabled && flow && flow.ws) {
+          try {
+            out = rewriteFrames('up', chunk);
+          } catch (_) {
+            out = chunk;
+          }
+        }
+        cb(null, out);
       },
     });
 
@@ -1133,6 +1378,7 @@ class ProxyServer extends EventEmitter {
         ...this._appMeta(req),
         route: routeOf(req.method, target.pathname || '/'),
         ws: true,
+        ...(req.__reverse ? { reverse: true } : {}),
         resHeaders: {},
         status: 0,
         statusText: '',
@@ -1322,6 +1568,7 @@ class ProxyServer extends EventEmitter {
       route: routeOf(req.method, target.pathname || '/'),
       // 筛选条按 HTTP1 / HTTP2 分流：MITM 隧道按 ALPN 协商出 h2 的标记 2.0
       ...(req.isH2 ? { httpVersion: 'HTTP/2.0' } : {}),
+      ...(req.__reverse ? { reverse: true } : {}),
     };
 
     const ctx = { req, res, target, startedAt, reqCapture, meta };

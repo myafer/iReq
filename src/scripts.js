@@ -43,7 +43,7 @@ function normalizeScripts(input) {
       name,
       enabled: r.enabled !== false,
       // request / response / both
-      phase: r.phase === 'request' || r.phase === 'response' ? r.phase : 'both',
+      phase: ['request', 'response', 'ws'].includes(r.phase) ? r.phase : 'both',
       host: String(r.host || '').trim().slice(0, 120),
       url: String(r.url || '').trim().slice(0, 200),
       method: String(r.method || '').trim().toUpperCase().slice(0, 10),
@@ -76,7 +76,7 @@ function ruleMatches(rule, phase, req) {
 /** 沙箱里能看到的只有这几个名字；没有任何宿主能力 */
 function createSandbox(logs) {
   const sandbox = {
-    __reg: { request: null, response: null },
+    __reg: { request: null, response: null, ws: null },
     __arg: null,
     __logs: logs,
   };
@@ -85,6 +85,10 @@ function createSandbox(logs) {
   };
   sandbox.onResponse = function (fn) {
     if (typeof fn === 'function') sandbox.__reg.response = fn;
+  };
+  // WebSocket：一帧一次回调。frame 上只有只读字段与三个动作（回一条 / 发一条 / 丢掉）
+  sandbox.onWebsocket = function (fn) {
+    if (typeof fn === 'function') sandbox.__reg.ws = fn;
   };
   sandbox.console = {
     log: function (...args) {
@@ -126,6 +130,7 @@ class ScriptEngine {
     const hooks = {
       request: typeof reg.request === 'function' ? 'request' : null,
       response: typeof reg.response === 'function' ? 'response' : null,
+      ws: typeof reg.ws === 'function' ? 'ws' : null,
     };
     return { ok: true, hooks, logs, sandbox, ctx };
   }
@@ -174,4 +179,80 @@ class ScriptEngine {
   }
 }
 
-module.exports = { ScriptEngine, normalizeScripts, ruleMatches, MAX_RULES, DEFAULT_TIMEOUT };
+/** 现成模板：blank page 最难写，给 8 个能直接改的起点 */
+const TEMPLATES = [
+  {
+    id: 'add-header',
+    name: '给请求加一个头',
+    nameEn: 'Add a request header',
+    phase: 'request',
+    desc: '调试标记、灰度开关都常用',
+    code: "onRequest((req) => {\n  req.headers['x-debug'] = '1';\n});\n",
+  },
+  {
+    id: 'drop-header',
+    name: '去掉请求里的头',
+    nameEn: 'Remove a request header',
+    phase: 'request',
+    desc: '验证服务端是否依赖某个头',
+    code: "onRequest((req) => {\n  delete req.headers['x-client-version'];\n});\n",
+  },
+  {
+    id: 'set-status',
+    name: '改响应状态码',
+    nameEn: 'Change the status code',
+    phase: 'response',
+    desc: '把 500 改成 200，验证前端兜底',
+    code: 'onResponse((res) => {\n  res.status = 200;\n});\n',
+  },
+  {
+    id: 'mock-json',
+    name: '把响应换成一段 JSON',
+    nameEn: 'Replace the body with JSON',
+    phase: 'response',
+    desc: '不建 Mock 规则也能临时改数据',
+    code: "onResponse((res) => {\n  res.headers['content-type'] = 'application/json';\n  res.body = JSON.stringify({ code: 0, data: { mocked: true } });\n});\n",
+  },
+  {
+    id: 'cors',
+    name: '给响应加 CORS 头',
+    nameEn: 'Add CORS headers',
+    phase: 'response',
+    desc: '本地联调浏览器跨域',
+    code: "onResponse((res) => {\n  res.headers['access-control-allow-origin'] = '*';;\n});\n",
+  },
+  {
+    id: 'simulate-500',
+    name: '模拟服务端 500',
+    nameEn: 'Simulate a 500',
+    phase: 'response',
+    desc: '配 URL 包含使用，只影响命中的接口',
+    code: 'onResponse((res) => {\n  res.status = 500;\n  res.body = \'{"error":"simulated"}\';\n});\n',
+  },
+  {
+    id: 'ws-log',
+    name: 'WebSocket：打印每一条消息',
+    nameEn: 'WebSocket: log every message',
+    phase: 'ws',
+    desc: '接上之后帧会同时出现在控制台日志里',
+    code: "onWebsocket((frame) => {\n  console.log(frame.dir, frame.op, frame.bytes, frame.text);\n});\n",
+  },
+  {
+    id: 'ws-drop-ping',
+    name: 'WebSocket：丢掉心跳',
+    nameEn: 'WebSocket: drop heartbeats',
+    phase: 'ws',
+    desc: '验证客户端在没心跳时会不会自己重连',
+    code: "onWebsocket((frame) => {\n  if (frame.text === 'ping' || frame.text === 'heartbeat') frame.drop();\n});\n",
+  },
+  {
+    id: 'ws-echo',
+    name: 'WebSocket：收到关键词就回一条',
+    nameEn: 'WebSocket: reply to a keyword',
+    phase: 'ws',
+    desc: '不用等服务端，客户端立刻拿到响应',
+    code: "onWebsocket((frame) => {\n  if (frame.dir === 'up' && frame.text && frame.text.indexOf('hello') >= 0) {\n    frame.sendToClient('mock-ok');\n  }\n});\n",
+  },
+];
+
+module.exports = { ScriptEngine, normalizeScripts, ruleMatches, TEMPLATES, MAX_RULES, DEFAULT_TIMEOUT };
