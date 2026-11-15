@@ -26,8 +26,13 @@ const { ProcessMap } = require('./process-map');
 const { deviceKeyOf, deviceLabelOf } = require('./local-address');
 const { normalize: normalizeNetworkSim, resolve: resolveNetworkSim, throttleTransform } = require('./network-sim');
 const { createCollector } = require('./timing');
+const { FrameParser, mergeDirections } = require('./ws-frame');
+const { SseParser } = require('./sse');
+const { Transform } = require('stream');
 
 const MAX_BODY_CAPTURE = 2 * 1024 * 1024; // 每个 body 最多记录 2MB
+// WebSocket：每个方向最多留 200 帧（长连接可能跑几万帧），超出只计数
+const WS_FRAME_KEEP = 200;
 // 断点会把 body 整个留在内存里等人操作，超过这个量级就别拦了（大上传 / 大下载）
 const HOLD_MAX = 8 * 1024 * 1024;
 const TEXTUAL_RE =
@@ -287,6 +292,8 @@ class ProxyServer extends EventEmitter {
     this.passthroughHits = new Map();
     // CONNECT 阶段拿不到 UA，靠历史 flow 把 host / IP 关联到应用名，规则才能命中手机 / 模拟器
     this.appHints = { byHost: new Map(), byIp: new Map() };
+    // 正在进行的 WebSocket 会话：帧在内存里滚，关闭时才写进 flow
+    this.wsSessions = new Map();
   }
 
   start() {
@@ -949,8 +956,100 @@ class ProxyServer extends EventEmitter {
       return;
     }
 
-    const port = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
-    const upstream = net.connect(port, target.hostname, () => {
+    const startedAt = Date.now();
+    // 两个方向共用一个序号源：帧列表要按真实到达顺序展示，不能按毫秒排
+    const seq = { n: 0 };
+    const upParser = new FrameParser({ dir: 'up', limit: WS_FRAME_KEEP, startAt: startedAt, seq });
+    const downParser = new FrameParser({ dir: 'down', limit: WS_FRAME_KEEP, startAt: startedAt, seq });
+    let flow = null;
+    let ended = false;
+
+    const finishFlow = (extra) => {
+      if (ended) return;
+      ended = true;
+      if (flow) this.wsSessions.delete(flow.id);
+      if (!this.config.capture || !flow) return;
+      // 帧只在收尾时写一次：升级阶段就落盘的话，重启后同 id 会出现两行
+      this.store.finish(flow, {
+        duration: Date.now() - startedAt,
+        wsClosedAt: Date.now(),
+        wsFrames: mergeDirections(upParser, downParser),
+        wsFrameCount: upParser.count + downParser.count,
+        wsFramesDropped: upParser.dropped + downParser.dropped,
+        wsBytes: upParser.bytes + downParser.bytes,
+        wsCompressed: upParser.compressed + downParser.compressed,
+        ...extra,
+      });
+    };
+
+    /* 握手响应：这里能拿到真实状态码。403 / 401 之类的「升级被拒」以前被一律记成 101，
+     * 用户会以为连接建起来了，只是没消息。 */
+    let hsBuf = Buffer.alloc(0);
+    let hsDone = false;
+    const onDown = (chunk) => {
+      if (!hsDone) {
+        hsBuf = hsBuf.length ? Buffer.concat([hsBuf, chunk]) : chunk;
+        const idx = hsBuf.indexOf('\r\n\r\n');
+        if (idx < 0) {
+          if (hsBuf.length > 65536) {
+            hsDone = true;
+            hsBuf = Buffer.alloc(0);
+          }
+          return;
+        }
+        const headText = hsBuf.subarray(0, idx).toString('latin1');
+        const lines = headText.split('\r\n');
+        const m = /^HTTP\/1\.[01]\s+(\d{3})\s*(.*)$/.exec(lines[0] || '');
+        const headers = {};
+        for (const line of lines.slice(1)) {
+          const c = line.indexOf(':');
+          if (c > 0) headers[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
+        }
+        hsDone = true;
+        const rest = hsBuf.subarray(idx + 4);
+        hsBuf = Buffer.alloc(0);
+        if (flow && m) {
+          const status = Number(m[1]);
+          flow.status = status;
+          flow.statusText = m[2] || '';
+          flow.resHeaders = headers;
+          // 没拿到 101 就不是真的 WebSocket，把 ws 标记摘掉，帧解析也不会开始
+          if (status !== 101) flow.ws = false;
+          else {
+            flow.wsAcceptedAt = Date.now();
+            flow.wsProtocol = headers['sec-websocket-protocol'] || '';
+            flow.wsExtensions = headers['sec-websocket-extensions'] || '';
+          }
+          // 只推 UI，不落盘：落盘统一在 close 时做一次
+          this.store.emit('flow-update', flow);
+        }
+        if (flow && flow.ws && rest.length) downParser.push(rest);
+        return;
+      }
+      if (flow && flow.ws) downParser.push(chunk);
+    };
+
+    /* 上游连接：wss:// 必须自己再握一次 TLS。
+     * 客户端到我们是 MITM 明文，我们到上游仍然是 TLS，SNI 用原域名；
+     * 以前这里一律 net.connect，wss 会拿着明文 HTTP 去撞 443，握手必挂。 */
+    const secureUpstream = target.protocol === 'https:';
+    const upPort = Number(target.port) || (secureUpstream ? 443 : 80);
+    let upstream;
+    try {
+      upstream = secureUpstream
+        ? tls.connect({
+            host: target.hostname,
+            port: upPort,
+            servername: net.isIP(target.hostname) ? undefined : target.hostname,
+            rejectUnauthorized: false,
+          })
+        : net.connect(upPort, target.hostname);
+    } catch (_) {
+      socket.destroy();
+      return;
+    }
+
+    const onUpstreamReady = () => {
       const headers = [];
       headers.push(`${req.method} ${target.pathname}${target.search || ''} HTTP/1.1`);
       for (const [k, v] of Object.entries(req.headers)) {
@@ -958,15 +1057,66 @@ class ProxyServer extends EventEmitter {
         headers.push(`${k}: ${v}`);
       }
       upstream.write(headers.join('\r\n') + '\r\n\r\n');
-      if (head && head.length) upstream.write(head);
-      upstream.pipe(socket);
-      socket.pipe(upstream);
-    });
-    upstream.on('error', () => socket.destroy());
-    socket.on('error', () => upstream.destroy());
+      if (head && head.length) {
+        upstream.write(head);
+        // head 里可能已经带了客户端的第一批帧（WebSocket 允许握手后立刻发）
+        upParser.push(head);
+      }
+    };
+    if (secureUpstream) upstream.once('secureConnect', onUpstreamReady);
+    else upstream.once('connect', onUpstreamReady);
 
-    if (this.config.capture) {
-      this._record({
+    // 两个方向的 tap：只观察，不改字节。用 Transform 而不是 data 事件，
+    // 是为了保留背压 —— 大帧灌进内存最容易把进程撑爆。
+    const tapDown = new Transform({
+      transform(chunk, enc, cb) {
+        try {
+          onDown(chunk);
+        } catch (_) {
+          /* 解析失败不能影响转发 */
+        }
+        cb(null, chunk);
+      },
+    });
+    const tapUp = new Transform({
+      transform(chunk, enc, cb) {
+        try {
+          if (flow && flow.ws) upParser.push(chunk);
+        } catch (_) {
+          /* 同上 */
+        }
+        cb(null, chunk);
+      },
+    });
+
+    upstream.pipe(tapDown).pipe(socket);
+    socket.pipe(tapUp).pipe(upstream);
+
+    upstream.on('error', () => {
+      finishFlow({ error: 'iReq: WebSocket 上游连接失败' });
+      socket.destroy();
+    });
+    socket.on('error', () => {
+      finishFlow();
+      upstream.destroy();
+    });
+    upstream.on('close', () => finishFlow());
+    socket.on('close', () => finishFlow());
+    // 客户端发完 FIN 就算会话结束：WebSocket 没有半关闭语义，继续等上游
+    // 只会让「这条连接到底还活着吗」一直挂着（实测上游要过 3 秒才自己关）
+    socket.on('end', () => {
+      finishFlow();
+      upstream.destroy();
+    });
+    upstream.on('end', () => {
+      finishFlow();
+      socket.end();
+    });
+
+    if (!this.config.capture) return;
+    // 先记一条「进行中」：不落盘，等 close 时连同帧一起写，避免同 id 两行
+    flow = this._begin({
+      meta: {
         method: req.method,
         url: target.toString(),
         host: target.hostname,
@@ -975,17 +1125,34 @@ class ProxyServer extends EventEmitter {
         reqHeaders: { ...req.headers },
         ...this._appMeta(req),
         route: routeOf(req.method, target.pathname || '/'),
-        resHeaders: {},
-        status: 101,
-        statusText: 'Switching Protocols',
-        reqBody: null,
-        resBody: null,
-        reqSize: 0,
-        resSize: 0,
-        duration: 0,
         ws: true,
-      });
+        resHeaders: {},
+        status: 0,
+        statusText: '',
+      },
+    });
+    if (!flow) {
+      // 抓包关掉时 _begin 返回 null；仍然要转发，只是不记录
+      flow = null;
+    } else {
+      this.wsSessions.set(flow.id, { up: upParser, down: downParser, startedAt });
     }
+  }
+
+  /** 正在进行的 WebSocket 会话：帧还在内存里，关闭后才落库 */
+  wsFramesOf(id) {
+    const s = this.wsSessions.get(id);
+    if (!s) return null;
+    const frames = mergeDirections(s.up, s.down);
+    return {
+      live: true,
+      frames,
+      count: s.up.count + s.down.count,
+      dropped: s.up.dropped + s.down.dropped,
+      bytes: s.up.bytes + s.down.bytes,
+      compressed: s.up.compressed + s.down.compressed,
+      startedAt: s.startedAt,
+    };
   }
 
   // ----------------------------------------------------------------- HTTP
@@ -1428,6 +1595,12 @@ class ProxyServer extends EventEmitter {
     upstream.on('response', (upRes) => {
       const resHeaders = { ...upRes.headers };
       const resCapture = new BodyCapture(resHeaders['content-type'], resHeaders['content-encoding']);
+      // SSE：流本身照常转发，额外按空行切成一条条消息。数组是引用共享的，
+      // 详情页轮询 /api/flows/:id/messages 时能边推边看到。
+      const sse = /text\/event-stream/i.test(resHeaders['content-type'] || '')
+        ? new SseParser({ startAt: Date.now() })
+        : null;
+      if (sse && ctx.flow) ctx.flow.sseMessages = sse.messages;
 
       // 响应断点：头已经到了，正是「看结果、改结果」的位置
       if (
@@ -1452,11 +1625,27 @@ class ProxyServer extends EventEmitter {
       const writeChunk = (chunk) => {
         res.write(chunk);
         this.stats.bytes += chunk.length;
-        if (this.config.capture) resCapture.push(chunk);
+        if (this.config.capture) {
+          resCapture.push(chunk);
+          if (sse) {
+            try {
+              sse.push(chunk);
+            } catch (_) {
+              /* 分帧失败不能影响转发 */
+            }
+          }
+        }
       };
       const finishResponse = () => {
         res.end();
         if (!this.config.capture) return;
+        if (sse) {
+          try {
+            sse.flush();
+          } catch (_) {
+            /* 收尾失败不影响记录 */
+          }
+        }
         const digest = resCapture.digest();
         const reqDigest = reqCapture.digest();
         this._record({
@@ -1475,6 +1664,15 @@ class ProxyServer extends EventEmitter {
           statusText: upRes.statusMessage || '',
           duration: elapsed(startedAt),
           timings: timing.finish(),
+          ...(sse
+            ? {
+                sseMessages: sse.messages,
+                sseCount: sse.count,
+                sseComments: sse.comments,
+                sseBytes: sse.bytes,
+                sseDropped: sse.dropped,
+              }
+            : {}),
           ...(sim ? { simMode: 'weak', simRule: sim.rule.match } : {}),
         }, ctx);
       };

@@ -2133,6 +2133,8 @@ function renderDetail() {
   const f = S.selected;
   const pane = $('#detail');
   if (!f) return;
+  // 换一条请求就停掉上一条的消息轮询，别让它在后台一直打接口
+  stopMsgPoll();
   if (f.kind === 'tls') return renderTlsDetail(pane, f);
   renderCmpBar();
 
@@ -2143,6 +2145,7 @@ function renderDetail() {
     ['timing', '耗时'],
     ['raw', '原始'],
   ];
+  if (hasMessages(f)) tabs.splice(3, 0, ['messages', '消息']);
   // 有对照物才给对比页签：手选的基准优先，其次重放关系里的原请求
   const cmpId = compareBaseIdFor(f);
   if (cmpId) tabs.push(['diff', S.cmpBaseId && S.cmpBaseId === cmpId ? '与基准对比' : '对比原请求']);
@@ -2156,6 +2159,8 @@ function renderDetail() {
       ? tabResponse(f)
       : S.detailTab === 'timing'
       ? tabTiming(f)
+      : S.detailTab === 'messages'
+      ? tabMessages(f)
       : S.detailTab === 'diff'
       ? tabDiff(f, cmpId)
       : tabRaw(f);
@@ -2232,6 +2237,11 @@ function renderDetail() {
     $$('[data-goto]').forEach((el) =>
       el.addEventListener('click', () => selectFlow(el.dataset.goto))
     );
+  }
+
+  if (S.detailTab === 'messages' && hasMessages(f)) {
+    renderMsgList(f);
+    startMsgPoll(f);
   }
 }
 
@@ -2401,6 +2411,225 @@ function tabTiming(f) {
       ['等待首字节', waitMs === null || waitMs === undefined ? '—' : fmtTime(waitMs)],
       ['连接复用', f.timings.reused ? '是（keep-alive）' : '否'],
     ])}</div>`;
+}
+
+/* ------------------------------------------------ WebSocket 帧 / SSE 消息 */
+
+/* 帧和消息都只存在服务端，进页面时列表不带它们（可能几万条）。
+ * 打开「消息」页签时才按需取，会话还在进行中就用轮询跟着刷 —— 
+ * 单独开 SSE 通道推每一帧，长连接会把控制台自己刷死。 */
+const MSG_POLL_MS = 1200;
+
+S.msgData = null;
+S.msgFlowId = '';
+S.msgTimer = null;
+S.msgDir = 'all';
+S.msgOpen = new Set();
+
+function isSseFlow(f) {
+  const ct = (f && (f.resContentType || (f.resHeaders || {})['content-type'])) || '';
+  return /text\/event-stream/i.test(String(ct));
+}
+
+function hasMessages(f) {
+  return !!(f && f.kind !== 'tls' && (f.ws || isSseFlow(f)));
+}
+
+/** 优先用轮询拿到的最新数据；归档里的记录自带 wsFrames / sseMessages */
+function msgSource(f) {
+  if (S.msgData && S.msgFlowId === f.id) return S.msgData;
+  if (f.ws) {
+    const frames = f.wsFrames || [];
+    return {
+      ws: {
+        live: !!f.pending,
+        frames,
+        count: f.wsFrameCount || frames.length,
+        dropped: f.wsFramesDropped || 0,
+        bytes: f.wsBytes || 0,
+        compressed: f.wsCompressed || 0,
+        protocol: f.wsProtocol || '',
+        extensions: f.wsExtensions || '',
+      },
+      sse: null,
+    };
+  }
+  const messages = f.sseMessages || [];
+  return {
+    ws: null,
+    sse: {
+      live: !!f.pending,
+      messages,
+      count: f.sseCount || messages.length,
+      comments: f.sseComments || 0,
+      dropped: f.sseDropped || 0,
+    },
+  };
+}
+
+function tabMessages(f) {
+  const src = msgSource(f) || {};
+  const ws = src.ws;
+  const head = ws
+    ? `<div class="msg-head">
+        <span class="msg-kind">WebSocket</span>
+        ${ws.protocol ? `<span class="msg-meta">子协议 ${esc(ws.protocol)}</span>` : ''}
+        ${ws.extensions ? `<span class="msg-meta">扩展 ${esc(ws.extensions)}</span>` : ''}
+        <span class="msg-meta" id="msgCount"></span>
+        <span class="msg-meta" id="msgDropped"></span>
+        <span class="msg-meta" id="msgBytes"></span>
+        <span class="fill"></span>
+        <span class="msg-dirbar" id="msgDirBar">
+          <button type="button" data-msg-dir="all" class="${S.msgDir === 'all' ? 'on' : ''}">全部</button>
+          <button type="button" data-msg-dir="up" class="${S.msgDir === 'up' ? 'on' : ''}">上行</button>
+          <button type="button" data-msg-dir="down" class="${S.msgDir === 'down' ? 'on' : ''}">下行</button>
+        </span>
+      </div>`
+    : `<div class="msg-head">
+        <span class="msg-kind">SSE</span>
+        <span class="msg-meta" id="msgCount"></span>
+        <span class="msg-meta" id="msgComments"></span>
+        <span class="msg-meta" id="msgDropped"></span>
+        <span class="fill"></span>
+        <span class="msg-meta">空行分隔一条消息，注释行是心跳</span>
+      </div>`;
+  const note = ws
+    ? '文本帧给预览，二进制只记体积；压缩帧（permessage-deflate）不解压，只标出来。'
+    : '按 SSE 规范切分：多行 data 合并成一条，只有 event 没有 data 的块不算消息。';
+  return `<div class="sec">${head}<div class="msg-list" id="msgList"></div></div><p class="hint">${note}</p>`;
+}
+
+function msgFrameHtml(fr) {
+  const key = String(fr.seq !== undefined ? fr.seq : fr.i);
+  const open = S.msgOpen.has(key);
+  const up = fr.dir === 'up';
+  const note = fr.compressed
+    ? '压缩帧，不解压'
+    : fr.op === 'binary'
+    ? '二进制，只记体积'
+    : fr.truncated
+    ? '预览已截断'
+    : '';
+  const preview = fr.preview ? String(fr.preview).replace(/\s+/g, ' ').slice(0, 180) : '';
+  return `<div class="msg-item ${open ? 'open' : ''}" data-msg-key="${esc(key)}">
+    <div class="msg-row">
+      <span class="msg-at">+${fr.at}ms</span>
+      <span class="msg-dir ${up ? 'up' : 'down'}" title="${up ? '上行' : '下行'}">${up ? '↑' : '↓'}</span>
+      <span class="msg-op">${esc(fr.compressed ? 'text*' : fr.op)}</span>
+      <span class="msg-size">${fmtSize(fr.size)}</span>
+      <span class="msg-preview">${esc(preview)}${note ? `<em>${esc(note)}</em>` : ''}</span>
+    </div>
+    ${open ? `<pre class="msg-body">${esc(fr.preview || note || '（无内容）')}</pre>` : ''}
+  </div>`;
+}
+
+function msgSseHtml(m) {
+  const key = 's' + m.i;
+  const open = S.msgOpen.has(key);
+  const preview = String(m.preview || '').replace(/\s+/g, ' ').slice(0, 180);
+  return `<div class="msg-item ${open ? 'open' : ''}" data-msg-key="${esc(key)}">
+    <div class="msg-row">
+      <span class="msg-at">+${m.at}ms</span>
+      <span class="msg-dir down" title="服务端推送">↓</span>
+      <span class="msg-op ev">${esc(m.event || 'message')}</span>
+      <span class="msg-size">${fmtSize(m.size)}</span>
+      <span class="msg-preview">${esc(preview)}${m.truncated ? '<em>预览已截断</em>' : ''}${m.id ? `<em>id ${esc(m.id)}</em>` : ''}</span>
+    </div>
+    ${open ? `<pre class="msg-body">${esc(m.preview || '（空）')}</pre>` : ''}
+  </div>`;
+}
+
+function renderMsgList(f) {
+  const list = $('#msgList');
+  if (!list || !f) return;
+  const src = msgSource(f) || {};
+  const ws = src.ws;
+  const sse = src.sse;
+  const countEl = $('#msgCount');
+  const bar = $('#msgDirBar');
+
+  // 轮询只换 innerHTML，这两个容器本身一直在，绑定一次就够
+  if (bar && !bar.dataset.bound) {
+    bar.dataset.bound = '1';
+    bar.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-msg-dir]');
+      if (!b) return;
+      S.msgDir = b.dataset.msgDir;
+      $$('#msgDirBar button').forEach((x) => x.classList.toggle('on', x.dataset.msgDir === S.msgDir));
+      renderMsgList(S.selected);
+    });
+  }
+  if (!list.dataset.bound) {
+    list.dataset.bound = '1';
+    list.addEventListener('click', (e) => {
+      const item = e.target.closest('.msg-item');
+      if (!item) return;
+      const key = item.dataset.msgKey;
+      if (S.msgOpen.has(key)) S.msgOpen.delete(key);
+      else S.msgOpen.add(key);
+      renderMsgList(S.selected);
+    });
+  }
+
+  if (ws) {
+    const all = ws.frames || [];
+    const frames = S.msgDir === 'all' ? all : all.filter((fr) => fr.dir === S.msgDir);
+    if (countEl) countEl.textContent = `${ws.live ? '实时' : '已结束'} · ${ws.count} 帧`;
+    const droppedEl = $('#msgDropped');
+    const bytesEl = $('#msgBytes');
+    if (droppedEl) droppedEl.textContent = ws.dropped ? `另有 ${ws.dropped} 帧未记录` : '';
+    if (bytesEl) bytesEl.textContent = ws.bytes ? fmtSize(ws.bytes) : '';
+    list.innerHTML = frames.length
+      ? frames.map(msgFrameHtml).join('')
+      : `<p class="hint">${ws.count ? '这个方向上没有帧。' : '还没有帧 —— 等客户端或服务端发一条。'}</p>`;
+    return;
+  }
+
+  if (sse) {
+    const msgs = sse.messages || [];
+    if (countEl) countEl.textContent = `${sse.live ? '实时' : '已结束'} · ${sse.count} 条`;
+    const commentsEl = $('#msgComments');
+    const sseDropped = $('#msgDropped');
+    if (commentsEl) commentsEl.textContent = sse.comments ? `${sse.comments} 次心跳` : '';
+    if (sseDropped) sseDropped.textContent = sse.dropped ? `另有 ${sse.dropped} 条未记录` : '';
+    list.innerHTML = msgs.length
+      ? msgs.map(msgSseHtml).join('')
+      : '<p class="hint">还没有消息。</p>';
+  }
+}
+
+/** 会话还在进行中就轮询；归档 / 已结束的直接渲染，不再打接口 */
+function startMsgPoll(f) {
+  stopMsgPoll();
+  if (!f || f.wsFrames || f.sseMessages || S.historyView) return;
+  let stopped = false;
+  const load = async () => {
+    if (stopped) return;
+    try {
+      const d = await api('/api/flows/' + f.id + '/messages');
+      S.msgData = d;
+      S.msgFlowId = f.id;
+      if (S.selected && S.selected.id === f.id && S.detailTab === 'messages') renderMsgList(f);
+      const live = !!((d.ws && d.ws.live) || (d.sse && d.sse.live));
+      if (!live) stopMsgPoll();
+    } catch (_) {
+      stopMsgPoll();
+    }
+  };
+  load();
+  S.msgTimer = setInterval(load, MSG_POLL_MS);
+  S.msgStop = () => {
+    stopped = true;
+  };
+}
+
+function stopMsgPoll() {
+  if (S.msgStop) S.msgStop();
+  S.msgStop = null;
+  if (S.msgTimer) {
+    clearInterval(S.msgTimer);
+    S.msgTimer = null;
+  }
 }
 
 /** 从 base64 头部嗅探真实类型（Content-Type 可能缺失或撒谎） */function sniffMime(b64) {

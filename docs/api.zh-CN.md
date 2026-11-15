@@ -32,6 +32,13 @@ POST   /api/har?name=xxx        导入 HAR：请求体是文件原文（不是 J
                                 回 { id, file, count, bytes, skipped, total, truncated, name }
                                 导入结果直接成为一条历史记录（/api/history/:id 可回看 / 重放 / 导出）
 GET    /api/flows/:id/body      正文原始字节：side=req|res（默认 res），dl=1 强制下载
+GET    /api/flows/:id/messages  WebSocket 帧 / SSE 消息：
+                                { id, contentType, pending,
+                                  ws: { live, frames: [{seq, dir, op, size, at, fin, masked, compressed, preview, truncated}],
+                                        count, dropped, bytes, compressed, protocol, extensions, closedAt } | null,
+                                  sse: { live, messages: [{i, at, event, id, retry, size, preview, truncated}],
+                                         count, comments, dropped } | null }
+                                会话进行中从内存实时取（live=true），结束后读记录里的副本
                                 图片 / 音视频内联（content-disposition: inline），其余一律 attachment；
                                 content-type 缺失或写成 octet-stream 时按魔数纠正
 GET    /api/history/:id/flows/:flowId/body   同上，读归档里的那条

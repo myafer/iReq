@@ -33,6 +33,8 @@ Going deeper: [API and SSE events](docs/api.md) · [MCP access](docs/mcp.md) · 
 | Sort | Click the Status / Time column headers to sort (descending → ascending → back to newest first); "Sort" under the ⋯ menu also offers response size. Live list only |
 | Timing breakdown | Every request is split into **DNS / TCP / TLS / time-to-first-byte / download**. The Time column draws a small segmented bar so you can tell "slow handshake" from "slow response" at a glance; the detail pane adds a waterfall under a Timing tab. Reused connections are labelled instead of being shown as a fake 0ms |
 | Performance view | "⋯ More → Performance view" aggregates the current filter by **endpoint / host**: request count, P50 / P95 / average / max, error rate, bytes, plus the slowest requests. Click a row to filter the list to that endpoint. Error rate counts only failures + 5xx; 4xx is a caller issue and counted separately |
+| WebSocket frames | ws and wss are both recorded: frames from both directions appear as one timeline under the **Messages** tab. Text frames are decoded (client masking is removed), binary frames record their size only, and ping / pong / close are listed too. Fragmented messages stay attached to their first frame; permessage-deflate frames are labelled but not inflated. A rejected upgrade shows its real status (403/401) instead of a hard-coded 101 |
+| SSE messages | Streaming responses are split into individual messages per the spec (multi-line data joined, comment heartbeats counted separately, id / retry exposed), so you can see how many messages arrived and how far apart they were. There is a dedicated `SSE` filter |
 | Exclude specific domains | Add certificate-pinned apps to the "skip decryption" allowlist and pass them through as a raw tunnel. The allowlist has its own manager (source / added time / pass-through hit count), supports add / search / rename / remove / clear / bulk import, and persists across restarts |
 | Decrypt only 443 | **By default only port 443 is decrypted**; other ports pass through untouched (MQTT / IMAP / private binary protocols won't break); add ports in Settings |
 | HTTP/2 | Negotiates h2 via ALPN, so **endpoints that only offer h2 can be decrypted too** (Apple ID auth, gRPC gateways, some CDNs); multiplexed streams are captured individually and filterable |
@@ -295,9 +297,10 @@ It will then open normally. Windows (SmartScreen) and Linux AppImage may show si
 ## Known limitations
 
 - The persisted JSONL includes request/response bodies (up to 2MB each), so files grow quickly under heavy traffic; use `--no-persist` to disable persistence.
-- Long-lived streaming responses (SSE / chunked) are forwarded in real time; an in-flight record exists from the moment the request starts and stays "in progress" until the connection ends (exports skip unfinished records).
-- HTTP/2 is decrypted via ALPN negotiation (h2 streams are recorded individually and details show "Protocol version: HTTP/2"); upstreams are always forwarded over HTTP/1.1, and extended CONNECT (WebSocket over h2) is not supported yet.
-- No WebSocket frame-level decryption. HAR export is supported (**More ⋯ → Export HAR**); unfinished records are skipped.
+- Long-lived streaming responses (SSE / chunked) are forwarded in real time; an in-flight record exists from the moment the request starts and stays "in progress" until the connection ends (exports skip unfinished records). SSE messages appear live under the **Messages** tab.
+- HTTP/2 is decrypted via ALPN negotiation (h2 streams are recorded individually and details show "Protocol version: HTTP/2"); upstreams are always forwarded over HTTP/1.1. WebSocket over HTTP/2 (RFC 8441 extended CONNECT) is not supported yet.
+- WebSocket frame capture is bounded: the last 200 frames per direction are kept, the rest are only counted (`N more frames not recorded`). With permessage-deflate negotiated, compressed frames are not inflated — only sized and labelled.
+- wss connections to a bare IP need SNI from the client: without it we have no hostname to sign a certificate for and the handshake fails (browsers and regular SDKs always send SNI for domains).
 - **Remote devices such as phones have no process / package name** — only UA inference or UA aliases (see [Where app names come from](docs/development.md#where-app-names-come-from)).
 - Local process detection is macOS-only; Linux / Windows would each need `netstat + /proc` / `GetExtendedTcpTable`.
   Very short connections that close immediately may miss the `lsof` snapshot and keep the UA-inferred app name.

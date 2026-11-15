@@ -164,6 +164,8 @@ node tools/check-breakpoint.js  # 断点拦截：请求与响应挂起 / 改体�
 node tools/check-hostmap.js     # 域名映射：三种目标写法 / 通配与路径前缀 / 真改上游地址 / Host 与 SNI 不变 / 记录标记（35 项）
 node tools/check-har.js         # 导入 HAR：解析成历史记录 / 回看字段 / base64 二进制 / 错误分支 / 清理（25 项）
 node tools/check-body.js        # 正文原始字节：图片 inline 与嗅探纠正 / 文本下载 / 请求体 / 归档里也能取（18 项）
+node tools/check-ws.js          # WebSocket 帧：opcode / 掩码 / 分片 / 压缩 / 上限 + ws 与 wss 端到端 + 消息页签（55 项）
+node tools/check-sse.js         # SSE 消息：分帧 / 多行 data / 心跳 / 三种行尾 + 端到端 + 消息页签（35 项）
 node tools/check-timing.js      # 耗时分解：DNS/TCP/TLS/等待/下载四段时间点 / 连接复用记 0 / 拿不到的段留 null / 代理链路与重放都带 timings（27 项）
 node tools/check-perf.js        # 性能视图：百分位口径 / 按接口与按域名聚合 / 错误率只算连不上与 5xx / 排序与截断 / 接口筛选（38 项）
 ```

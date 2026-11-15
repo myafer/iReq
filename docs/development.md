@@ -162,6 +162,8 @@ node tools/check-breakpoint.js  # breakpoints: hold request & response / edit bo
 node tools/check-hostmap.js     # domain mapping: three target forms / wildcards and path prefixes / really changes upstream / Host and SNI untouched / list badge (35 items)
 node tools/check-har.js         # HAR import: becomes a snapshot / fields survive / base64 bodies / error branches / cleanup (25 items)
 node tools/check-body.js        # raw body bytes: inline images + sniffed types / text download / request body / works inside snapshots (18 items)
+node tools/check-ws.js          # WebSocket frames: opcodes / masking / fragmentation / compression / caps, ws + wss end to end, messages tab (55 items)
+node tools/check-sse.js         # SSE messages: framing / multi-line data / heartbeats / three EOLs, end to end, messages tab (35 items)
 node tools/check-timing.js      # timing breakdown: DNS/TCP/TLS/wait/download marks, reused connections report 0, missing phases stay null, proxy + replay carry timings (27 items)
 node tools/check-perf.js        # performance view: percentile definition, per-endpoint/per-host grouping, error rate counts failures + 5xx only, sorting/truncation, filter passthrough (38 items)
 ```

@@ -614,6 +614,9 @@ function summary(f) {
     replayOf: f.replayOf,
     error: f.error,
     ws: f.ws,
+    // 帧 / 消息的条数（正文本身只在单条详情里给，列表不带）
+    wsFrameCount: f.wsFrameCount,
+    sseCount: f.sseCount,
     tunneled: f.tunneled,
     simMode: f.simMode,
     simRule: f.simRule,

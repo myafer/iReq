@@ -32,6 +32,14 @@ POST   /api/har?name=xxx       Import a HAR: raw file body (not JSON-wrapped), 6
                                → { id, file, count, bytes, skipped, total, truncated, name }
                                The import becomes one history snapshot (view / replay / export via /api/history/:id)
 GET    /api/flows/:id/body     Raw body bytes: side=req|res (default res), dl=1 forces download
+GET    /api/flows/:id/messages  WebSocket frames / SSE messages:
+                                { id, contentType, pending,
+                                  ws: { live, frames: [{seq, dir, op, size, at, fin, masked, compressed, preview, truncated}],
+                                        count, dropped, bytes, compressed, protocol, extensions, closedAt } | null,
+                                  sse: { live, messages: [{i, at, event, id, retry, size, preview, truncated}],
+                                         count, comments, dropped } | null }
+                                While a session is still open the data comes from memory (live=true);
+                                once it ends it is read from the stored flow
                                Images and A/V are inlined (content-disposition: inline), everything else is an
                                attachment; a missing or octet-stream content-type is corrected by magic-byte sniffing
 GET    /api/history/:id/flows/:flowId/body   Same, for a snapshot entry

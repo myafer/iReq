@@ -26,6 +26,8 @@ const usedIds = new Set(
 // 由 renderDetail() / 规则树面包屑动态插入的元素，不在 index.html 静态结构中
 const DYNAMIC = new Set([
   'tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'actNet', 'actBreak', 'actMap', 'actBase', 'rtCrumbBack',
+  // 「消息」页签（WebSocket 帧 / SSE 消息）整块由 tabMessages() 现渲染
+  'msgList', 'msgCount', 'msgDirBar', 'msgDropped', 'msgBytes', 'msgComments',
 ]);
 
 const missing = [...usedIds].filter((id) => !htmlIds.has(id) && !DYNAMIC.has(id));

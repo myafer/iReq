@@ -25,6 +25,17 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // WebSocket 帧 / SSE 消息：条数与状态是动态句
+    [/^(实时|已结束) · (\d+) (帧|条)$/, function (m, a, b, c) {
+      return (a === '实时' ? 'Live' : 'Ended') + ' · ' + b + (c === '帧' ? (b === '1' ? ' frame' : ' frames') : b === '1' ? ' message' : ' messages');
+    }],
+    [/^另有 (\d+) (帧|条)未记录$/, function (m, a, b) {
+      return a + (b === '帧' ? ' more frame' : ' more message') + (a === '1' ? '' : 's') + ' not recorded';
+    }],
+    [/^(\d+) 次心跳$/, function (m, a) { return a + ' heartbeat' + (a === '1' ? '' : 's'); }],
+    [/^子协议 (.+)$/, function (m, a) { return 'Subprotocol ' + a; }],
+    [/^扩展 (.+)$/, function (m, a) { return 'Extensions ' + a; }],
+    [/^id (.+)$/, function (m, a) { return 'id ' + a; }],
     // 性能视图：范围说明 / 进行中与截断提示 / 筛选反馈都是动态句
     [/^按(接口|域名) · 内存 (\d+) 条$/, function (m, a, b) {
       return 'By ' + (a === '域名' ? 'host' : 'endpoint') + ' · ' + b + (b === '1' ? ' flow' : ' flows') + ' in memory';

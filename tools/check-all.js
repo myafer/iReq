@@ -68,6 +68,9 @@ const SUITES = [
   ['HTTP/2 解密', 'check-http2.js'],
   // 会清空流量 / 诊断数据 + 自己起慢上游，必须最后跑
   ['发起即见与清空同步', 'check-instant.js'],
+  // 造流量验证 WebSocket 帧 / SSE 消息，结束时清空流量并删掉自己造的历史
+  ['WebSocket 帧', 'check-ws.js'],
+  ['SSE 消息', 'check-sse.js'],
   // 造流量验证分阶段计时与性能聚合，结束时清空流量并删掉自己造的历史
   ['耗时分解', 'check-timing.js'],
   ['性能视图聚合', 'check-perf.js'],

@@ -614,6 +614,45 @@ class ConsoleServer {
         if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
         return this._json(res, 200, flow);
       }
+      /* WebSocket 帧 / SSE 消息：列表不带正文，这里按需取。
+       * WS 帧在会话结束前只存在内存里，所以优先问代理要实时数据。 */
+      if (method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
+        const flow = this.store.get(parts[2]);
+        if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
+        const live = this.proxy && typeof this.proxy.wsFramesOf === 'function'
+          ? this.proxy.wsFramesOf(parts[2])
+          : null;
+        const ws = flow.ws
+          ? {
+              live: !!live,
+              frames: live ? live.frames : flow.wsFrames || [],
+              count: live ? live.count : flow.wsFrameCount || (flow.wsFrames || []).length,
+              dropped: live ? live.dropped : flow.wsFramesDropped || 0,
+              bytes: live ? live.bytes : flow.wsBytes || 0,
+              compressed: live ? live.compressed : flow.wsCompressed || 0,
+              protocol: flow.wsProtocol || '',
+              extensions: flow.wsExtensions || '',
+              closedAt: flow.wsClosedAt || null,
+            }
+          : null;
+        const sseMessages = flow.sseMessages || [];
+        const sse = flow.sseCount || sseMessages.length
+          ? {
+              live: !!flow.pending,
+              messages: sseMessages,
+              count: flow.sseCount || sseMessages.length,
+              comments: flow.sseComments || 0,
+              dropped: flow.sseDropped || 0,
+            }
+          : null;
+        return this._json(res, 200, {
+          id: flow.id,
+          ws,
+          sse,
+          contentType: flow.resContentType || '',
+          pending: !!flow.pending,
+        });
+      }
       // 原始字节：图片直接当 <img src> 用，其它类型给「保存为文件」
       if (method === 'GET' && parts.length === 4 && parts[3] === 'body') {
         const flow = this.store.get(parts[2]);
