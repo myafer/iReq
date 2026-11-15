@@ -74,6 +74,7 @@
             <button class="more-item" id="btnPerf">性能视图</button>
             <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
             <button class="more-item" id="btnScripts">脚本 <b id="scriptCount" hidden>0</b></button>
+            <button class="more-item" id="btnRedact">脱敏 <b class="on-dot" id="redactState" hidden title="已开启"></b></button>
             <button class="more-item" id="btnImportHar">导入 HAR…</button>
             <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
             <button class="more-item" id="btnCa">证书与连接</button>
@@ -1142,6 +1143,56 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <li>按内容判断：<code>onResponse(res =&gt; { if (res.body.includes('redis')) res.headers['x-hit'] = '1'; })</code></li>
             </ul>
           </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- 脱敏：只作用于导出、MCP 与带 redact=1 的接口；界面永远显示原值 -->
+    <div class="modal" id="modalRedact" hidden>
+      <div class="modal-card rd-dialog">
+        <div class="modal-head">
+          <h2>脱敏</h2>
+          <label class="switch" title="总开关：关掉后导出与 MCP 输出都是原值">
+            <input type="checkbox" id="rdEnabled" />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">启用</span>
+          </label>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint rd-scope">只作用于导出文件、MCP 输出和带 redact=1 的接口。界面里始终显示原值 —— 打了码你就没法确认到底是哪个 token 失效了。</p>
+          <div class="rd-parts">
+            <label class="rd-check"><input type="checkbox" id="rdHeaders" /> 请求头 / 响应头</label>
+            <label class="rd-check"><input type="checkbox" id="rdQuery" /> URL 查询参数</label>
+            <label class="rd-check"><input type="checkbox" id="rdBody" /> 正文里的凭据字段</label>
+            <label class="rd-check" title="手机号 / 身份证 / 邮箱这类个人信息，默认不打码，避免调试时要核对的号码也被抹掉">
+              <input type="checkbox" id="rdPii" /> 连手机号 / 身份证 / 邮箱一起
+            </label>
+          </div>
+          <div class="rd-extra">
+            <label>
+              <span>额外要打码的头</span>
+              <input class="input mono" id="rdExtraHeaders" placeholder="x-company-token, x-device-id" spellcheck="false" />
+            </label>
+            <label>
+              <span>额外要打码的字段</span>
+              <input class="input mono" id="rdExtraFields" placeholder="openid, unionid" spellcheck="false" />
+            </label>
+          </div>
+          <div class="rd-preview-head">
+            <span>预览 <b id="rdCount">—</b></span>
+            <span class="hint" id="rdPlaceholder"></span>
+            <span class="fill"></span>
+            <button class="btn ghost" id="rdRefresh">刷新预览</button>
+          </div>
+          <div class="rd-preview" id="rdPreview"></div>
+          <p class="hint rd-note">打码后的正文可能比原来短，所以 HAR 的 size 仍记录原始字节数（那是这次抓包的真实大小），log.comment 里会写明这份导出打过码。</p>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">改动点「保存」后对所有窗口生效</span>
+          <span class="spacer"></span>
+          <button class="btn primary" id="rdSave">保存</button>
         </div>
       </div>
     </div>

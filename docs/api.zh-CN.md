@@ -32,6 +32,7 @@ POST   /api/har?name=xxx        导入 HAR：请求体是文件原文（不是 J
                                 回 { id, file, count, bytes, skipped, total, truncated, name }
                                 导入结果直接成为一条历史记录（/api/history/:id 可回看 / 重放 / 导出）
 GET    /api/flows/:id/body      正文原始字节：side=req|res（默认 res），dl=1 强制下载
+                                ?redact=1 时文本正文按脱敏配置打码（二进制原样）
 GET    /api/flows/:id/messages  WebSocket 帧 / SSE 消息：
                                 { id, contentType, pending,
                                   ws: { live, frames: [{seq, dir, op, size, at, fin, masked, compressed, preview, truncated}],
@@ -49,9 +50,15 @@ DELETE /api/history             清空全部历史
 GET    /api/history/:id/flows?...  回看：同上筛选 + cursor（字节游标），倒序分页
 GET    /api/history/:id/export?format=har|json  导出整条历史（默认 HAR）
                                 → 附件下载，带 X-Flow-Count / X-Export-Truncated；单次上限 5 万条
-GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）
+GET    /api/export/har?...      同上的筛选条件 → HAR 1.2 下载（带 Content-Disposition / X-Flow-Count）。
+                                脱敏开启时内容已打码：HAR 的 log.comment 写明处数，响应头 x-ireq-redacted 给数值
 GET    /api/export/json?...     同上的筛选条件 → 含 headers / body 的原始记录数组
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/redact              脱敏 { enabled, headers, query, body, pii, extraHeaders, extraFields,
+                                  parts, placeholder, effective: {headers, fields, query}, defaults }
+PUT    /api/redact              { enabled, headers, query, body, pii, extraHeaderText, extraFieldText } 全量替换
+GET    /api/redact/preview      ?id=<flowId> 取一条流量给「打码前 / 打码后」对照与处数；
+                                ?draft=1&enabled=1&headers=1… 按未保存的草稿算
 GET    /api/columns             派生列 { columns: [{id, name, path}] }
 PUT    /api/columns             { columns } 全量替换（最多 4 列；保存后立即按已有流量重算并广播）
                                 路径写法：a.b[0].c / $.a.b / req.body.x / h:header-name
@@ -83,7 +90,9 @@ GET    /api/ca/archive           证书档案元信息（指纹 / 路径 / 来�
 GET    /api/ca/p12               导出 .p12 备份（含私钥，密码在 x-ireq-p12-password 响应头）
 POST   /api/ca/import             { p12: "<base64>", password? } 导入 .p12 并重新检测信任
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows/:id         单条完整记录，含 timings: { total, dns, tcp, tls, wait, download, reused }
+GET    /api/flows              ?redact=1 时按脱敏配置打码（默认原值 —— 界面要能调试）
+GET    /api/flows/:id          单条完整记录（?redact=1 同样打码），含 timings:
+                              { total, dns, tcp, tls, wait, download, reused }
                               （单位 ms；拿不到的阶段是 null，连接复用时握手三段为 0 且 reused=true）
 DELETE /api/flows
 POST   /api/flows/:id/replay      { method, url, headers, body }

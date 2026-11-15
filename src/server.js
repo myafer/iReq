@@ -21,6 +21,19 @@ const { importHar } = require('./har-import');
 const { aggregate: aggregatePerf } = require('./perf');
 const { applyColumns, normalizeColumns } = require('./columns');
 const { normalizeScripts } = require('./scripts');
+const {
+  normalize: normalizeRedact,
+  lists: redactLists,
+  describe: describeRedact,
+  redactFlow,
+  redactFlows,
+  redactBodyText,
+  PLACEHOLDER: REDACT_PLACEHOLDER,
+  DEFAULT_HEADERS: REDACT_HEADERS,
+  DEFAULT_FIELDS: REDACT_FIELDS,
+  PII_FIELDS: REDACT_PII,
+  QUERY_NAMES: REDACT_QUERY,
+} = require('./redact');
 const mcp = require('./mcp');
 
 const VERSION = require('../package.json').version;
@@ -510,6 +523,31 @@ class ConsoleServer {
     /* ---------------- MCP 接入：开关 / 令牌 / 审计（本机控制台专用） ---------------- */
     if (parts[1] === 'mcp') return this._apiMcp(req, res, parts, method, url);
 
+    /* ---------------- 脱敏：导出 / MCP / 带 redact=1 的接口才动手，界面永远原值 ---------------- */
+    if (parts[1] === 'redact') {
+      if (method === 'GET' && parts[2] === 'preview') {
+        return this._json(res, 200, this._redactPreview(url.searchParams));
+      }
+      if (method === 'GET') return this._json(res, 200, this._redactView());
+      if (method === 'PUT') {
+        const body = (await this._body(req)) || {};
+        this.config.redact = normalizeRedact({
+          enabled: body.enabled !== false,
+          headers: body.headers !== false,
+          query: body.query !== false,
+          body: body.body !== false,
+          pii: body.pii === true,
+          extraHeaders: body.extraHeaders,
+          extraHeaderText: body.extraHeaderText,
+          extraFields: body.extraFields,
+          extraFieldText: body.extraFieldText,
+        });
+        if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+        this._broadcast({ type: 'redact-changed', redact: this.config.redact });
+        return this._json(res, 200, this._redactView());
+      }
+    }
+
     /* ---------------- 脚本规则：JS 钩子改请求 / 响应 ---------------- */
     if (parts[1] === 'scripts') {
       const engine = this.proxy && this.proxy.scripts;
@@ -661,7 +699,12 @@ class ConsoleServer {
         route: sp.get('route') || '',
         limit: Math.min(Number(sp.get('limit')) || 2000, 2000),
       });
-      const payload = format === 'json' ? flows.slice().reverse() : toHar(flows, VERSION);
+      const red = redactFlows(flows, this.config.redact, this.config.derivedColumns);
+      const payload = format === 'json' ? red.flows.slice().reverse() : toHar(red.flows, VERSION);
+      // HAR 里有 comment 字段：打开的人一眼能看出这份是脱敏过的，不至于拿它去复现 bug
+      if (format === 'har' && red.count) {
+        payload.log.comment = `iReq: 已脱敏 ${red.count} 处（凭据类头部 / 查询参数 / 正文字段），原值仍保留在本机控制台`;
+      }
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const data = Buffer.from(JSON.stringify(payload, null, format === 'har' ? 2 : 0));
       res.writeHead(200, {
@@ -669,6 +712,7 @@ class ConsoleServer {
         'content-disposition': `attachment; filename="ireq-${stamp}.${format === 'json' ? 'json' : 'har'}"`,
         'content-length': data.length,
         'x-flow-count': String(flows.length),
+        'x-ireq-redacted': String(red.count),
         'cache-control': 'no-store',
       });
       return res.end(data);
@@ -680,26 +724,27 @@ class ConsoleServer {
         return this._json(res, 200, this._flowsPage(url.searchParams));
       }
       if (method === 'GET' && parts.length === 2) {
-        return this._json(
-          res,
-          200,
-          this.store.list({
-            query: url.searchParams.get('q') || '',
-            method: url.searchParams.get('method') || '',
-            status: url.searchParams.get('status') || '',
-            onlyMocked: url.searchParams.get('mocked') === '1',
-            host: url.searchParams.get('host') || '',
-            ip: url.searchParams.get('ip') || '',
-            app: url.searchParams.get('app') || '',
-            route: url.searchParams.get('route') || '',
-            limit: Math.min(Number(url.searchParams.get('limit')) || 500, 2000),
-          })
-        );
+        const list = this.store.list({
+          query: url.searchParams.get('q') || '',
+          method: url.searchParams.get('method') || '',
+          status: url.searchParams.get('status') || '',
+          onlyMocked: url.searchParams.get('mocked') === '1',
+          host: url.searchParams.get('host') || '',
+          ip: url.searchParams.get('ip') || '',
+          app: url.searchParams.get('app') || '',
+          route: url.searchParams.get('route') || '',
+          limit: Math.min(Number(url.searchParams.get('limit')) || 500, 2000),
+        });
+        if (url.searchParams.get('redact') !== '1') return this._json(res, 200, list);
+        return this._json(res, 200, redactFlows(list, this.config.redact, this.config.derivedColumns).flows);
       }
       if (method === 'GET' && parts.length === 3) {
         const flow = this.store.get(parts[2]);
         if (!flow) return this._json(res, 404, { error: 'flow 不存在' });
-        return this._json(res, 200, flow);
+        if (url.searchParams.get('redact') !== '1') return this._json(res, 200, flow);
+        const safe = { ...redactFlow(flow, this.config.redact, this.config.derivedColumns) };
+        delete safe._redactions;
+        return this._json(res, 200, safe);
       }
       /* WebSocket 帧 / SSE 消息：列表不带正文，这里按需取。
        * WS 帧在会话结束前只存在内存里，所以优先问代理要实时数据。 */
@@ -1280,8 +1325,12 @@ class ConsoleServer {
         return this._json(res, gone ? 410 : 404, { error: gone ? '文件已被删除' : '记录不存在' });
       }
       const flows = out.flows;
+      const red = redactFlows(flows, this.config.redact, this.config.derivedColumns);
       const payload =
-        format === 'json' ? flows.slice().reverse() : toHar(flows, VERSION);
+        format === 'json' ? red.flows.slice().reverse() : toHar(red.flows, VERSION);
+      if (format === 'har' && red.count) {
+        payload.log.comment = `iReq: 已脱敏 ${red.count} 处（凭据类头部 / 查询参数 / 正文字段），原值仍保留在本机控制台`;
+      }
       const data = Buffer.from(JSON.stringify(payload, null, format === 'har' ? 2 : 0));
       res.writeHead(200, {
         'content-type':
@@ -1292,6 +1341,7 @@ class ConsoleServer {
         'content-length': data.length,
         'x-flow-count': String(flows.length),
         'x-export-truncated': out.truncated ? '1' : '0',
+        'x-ireq-redacted': String(red.count),
         'cache-control': 'no-store',
       });
       return res.end(data);
@@ -1576,6 +1626,71 @@ class ConsoleServer {
    * 图片 / 音视频内联（可直接当 <img src> 用），其余一律 attachment ——
    * 抓到的内容是不可信数据，不能让它以 html / svg 的身份在控制台同源里跑起来。
    */
+  /** 脱敏配置视图：生效名单一起给出来，界面不用自己拼默认值 */
+  _redactView() {
+    const cfg = normalizeRedact(this.config.redact);
+    const sets = redactLists(cfg);
+    return {
+      ...cfg,
+      parts: describeRedact(cfg),
+      placeholder: REDACT_PLACEHOLDER,
+      effective: {
+        headers: [...sets.headers],
+        fields: [...sets.fields],
+        query: [...sets.query],
+      },
+      defaults: {
+        headers: REDACT_HEADERS,
+        fields: REDACT_FIELDS,
+        query: REDACT_QUERY,
+        pii: REDACT_PII,
+      },
+    };
+  }
+
+  /** 拿一条真实流量做「打码前 / 打码后」对照：不敢给人看效果的开关，用户不会信 */
+  _redactPreview(sp) {
+    const id = sp.get('id');
+    let cfg = normalizeRedact(this.config.redact);
+    // draft=1：面板上还没保存的草稿，按参数临时算一份给用户看效果
+    if (sp.get('draft') === '1') {
+      cfg = normalizeRedact({
+        enabled: sp.get('enabled') !== '0',
+        headers: sp.get('headers') === '1',
+        query: sp.get('query') === '1',
+        body: sp.get('body') === '1',
+        pii: sp.get('pii') === '1',
+        extraHeaders: sp.get('extraHeaders') || '',
+        extraFields: sp.get('extraFields') || '',
+      });
+    }
+    let flow = id ? this.store.get(id) : null;
+    if (!flow) flow = (this.store.list({ limit: 1 }) || [])[0] || null;
+    if (!flow) {
+      return { id: null, count: 0, parts: [], placeholder: REDACT_PLACEHOLDER, before: null, after: null };
+    }
+    const trimmed = (v) => {
+      if (v == null) return '';
+      const s = String(v);
+      return s.length > 1500 ? `${s.slice(0, 1500)}…（预览已截断）` : s;
+    };
+    const pick = (f) => ({
+      method: f.method,
+      url: f.url,
+      request: { headers: f.reqHeaders || {}, body: trimmed(f.reqBody) },
+      response: { headers: f.resHeaders || {}, body: trimmed(f.resBody) },
+    });
+    const safe = redactFlow(flow, cfg, this.config.derivedColumns);
+    return {
+      id: flow.id,
+      count: safe._redactions || 0,
+      parts: describeRedact(cfg),
+      placeholder: REDACT_PLACEHOLDER,
+      before: pick(flow),
+      after: pick(safe),
+    };
+  }
+
   _sendFlowBody(res, flow, sp) {
     const isReq = sp.get('side') === 'req';
     const b64 = isReq ? flow.reqBodyBase64 : flow.resBodyBase64;
@@ -1583,7 +1698,7 @@ class ConsoleServer {
     if (!b64 && (text == null || text === '')) {
       return this._json(res, 404, { error: '这条流量没有正文' });
     }
-    const buf = b64 ? Buffer.from(String(b64), 'base64') : Buffer.from(String(text), 'utf8');
+    let buf = b64 ? Buffer.from(String(b64), 'base64') : Buffer.from(String(text), 'utf8');
     const heads = (isReq ? flow.reqHeaders : flow.resHeaders) || {};
     const rawType = heads['content-type'];
     const type = String(Array.isArray(rawType) ? rawType[0] : rawType || '')
@@ -1593,6 +1708,15 @@ class ConsoleServer {
     // 上游经常把图片写成 application/octet-stream 甚至不写，按魔数补一下才认得出是图
     const sniffed = sniffImageType(buf);
     const contentType = (!type || type === 'application/octet-stream') && sniffed ? sniffed : type || 'application/octet-stream';
+    // 存成文件再发给别人是常见的泄漏路径，所以这里也认 redact=1；二进制没法安全打码就不动
+    if (!b64 && sp.get('redact') === '1') {
+      const cfg = normalizeRedact(this.config.redact);
+      if (cfg.enabled) {
+        const counter = { n: 0, parts: new Set() };
+        const safe = redactBodyText(String(text), contentType, redactLists(cfg).fields, counter);
+        if (counter.n) buf = Buffer.from(safe, 'utf8');
+      }
+    }
     const name = bodyFileName(flow, contentType, isReq);
     const inline = !sp.get('dl') && INLINE_BODY_TYPES.has(contentType);
     res.writeHead(200, {

@@ -13,6 +13,7 @@ const os = require('os');
 const { normalize: normalizeNetworkSim } = require('./network-sim');
 const { replay } = require('./replay');
 const { McpAuth } = require('./mcp-auth');
+const { redactFlow, redactFlows } = require('./redact');
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const LATEST_PROTOCOL = PROTOCOL_VERSIONS[0];
@@ -165,11 +166,15 @@ const TOOLS = [
       };
       /* 列表按 limit 截断，但要让调用方知道「筛完到底有多少条」 */
       const total = ctx.server.store.count(opts);
-      const flows = ctx.server.store.list({ ...opts, limit });
+      const raw = ctx.server.store.list({ ...opts, limit });
+      // 给模型的 URL 里也不能带 token：脱敏开关开着就按导出那套规则处理
+      const red = redactFlows(raw, ctx.server.config.redact, ctx.server.config.derivedColumns);
+      const flows = red.flows;
       return {
         total,
         returned: flows.length,
         has_more: total > flows.length,
+        redacted: red.count,
         flows: flows.map((f) => ({
           id: f.id,
           time: new Date(f.ts || Date.now()).toISOString(),
@@ -250,8 +255,11 @@ const TOOLS = [
     },
     run(ctx, args) {
       const id = requireString(args, 'id', { max: 100 });
-      const flow = ctx.server.store.get(id);
-      if (!flow) throw new ToolError(`找不到流量 ${id}（可能已被清空）`);
+      const raw = ctx.server.store.get(id);
+      if (!raw) throw new ToolError(`找不到流量 ${id}（可能已被清空）`);
+      // 模型看到的内容按脱敏配置过滤；界面照旧显示原值，两边互不影响
+      const flow = redactFlow(raw, ctx.server.config.redact, ctx.server.config.derivedColumns);
+      const redactions = flow._redactions || 0;
       const mode = optString(args, 'body', 20) || 'auto';
       const wantReq = mode === 'request' || mode === 'both' || mode === 'auto';
       const wantRes = mode === 'response' || mode === 'both' || mode === 'auto';
@@ -303,6 +311,10 @@ const TOOLS = [
       };
       if (wantReq && mode !== 'none') Object.assign(payload.request, pick(flow.reqBody, flow.reqBodyBase64, true));
       if (wantRes && mode !== 'none') Object.assign(payload.response, pick(flow.resBody, flow.resBodyBase64, false));
+      if (redactions) {
+        payload.redacted = redactions;
+        payload.redacted_note = `已按脱敏规则打码 ${redactions} 处（凭据类头部 / 查询参数 / 正文字段），原值只在本机控制台可见`;
+      }
       return payload;
     },
   },

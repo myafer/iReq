@@ -44,6 +44,18 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 脱敏：默认开，但只有用户动过才写进文件 —— 这样以后改默认值能跟着走
+  if (cfg.redact && typeof cfg.redact === 'object') {
+    out.redact = {
+      enabled: cfg.redact.enabled !== false,
+      headers: cfg.redact.headers !== false,
+      query: cfg.redact.query !== false,
+      body: cfg.redact.body !== false,
+      pii: cfg.redact.pii === true,
+      extraHeaders: Array.isArray(cfg.redact.extraHeaders) ? cfg.redact.extraHeaders.slice(0, 100) : [],
+      extraFields: Array.isArray(cfg.redact.extraFields) ? cfg.redact.extraFields.slice(0, 100) : [],
+    };
+  }
   // 脚本规则：用户写的钩子，属于配置，必须落盘
   if (cfg.scripts && typeof cfg.scripts === 'object') {
     out.scripts = {

@@ -32,6 +32,7 @@ POST   /api/har?name=xxx       Import a HAR: raw file body (not JSON-wrapped), 6
                                → { id, file, count, bytes, skipped, total, truncated, name }
                                The import becomes one history snapshot (view / replay / export via /api/history/:id)
 GET    /api/flows/:id/body     Raw body bytes: side=req|res (default res), dl=1 forces download
+                               ?redact=1 masks textual bodies (binary is left untouched)
 GET    /api/flows/:id/messages  WebSocket frames / SSE messages:
                                 { id, contentType, pending,
                                   ws: { live, frames: [{seq, dir, op, size, at, fin, masked, compressed, preview, truncated}],
@@ -50,9 +51,16 @@ DELETE /api/history             Clear all history
 GET    /api/history/:id/flows?...  Replay: same filters + cursor (byte offset), newest first
 GET    /api/history/:id/export?format=har|json  Export a whole snapshot (HAR by default)
                                 → attachment download with X-Flow-Count / X-Export-Truncated; capped at 50k flows
-GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count)
+GET    /api/export/har?...      Same filters → HAR 1.2 download (Content-Disposition + X-Flow-Count).
+                                With redaction on the content is masked: log.comment states the count and the
+                                x-ireq-redacted response header carries the number
 GET    /api/export/json?...     Same filters → raw flow array with headers / bodies
 GET    /api/facets              { flows, hosts, apps, devices, routes }
+GET    /api/redact              Redaction { enabled, headers, query, body, pii, extraHeaders, extraFields,
+                                 parts, placeholder, effective: {headers, fields, query}, defaults }
+PUT    /api/redact              { enabled, headers, query, body, pii, extraHeaderText, extraFieldText } full replace
+GET    /api/redact/preview      ?id=<flowId> before/after comparison plus a count;
+                                ?draft=1&enabled=1&headers=1… evaluates an unsaved draft
 GET    /api/columns             Derived columns { columns: [{id, name, path}] }
 PUT    /api/columns             { columns } full replace (max 4; existing traffic is recomputed immediately)
                                 path syntax: a.b[0].c / $.a.b / req.body.x / h:header-name
@@ -85,7 +93,9 @@ GET    /api/ca/archive           CA archive metadata (fingerprint / path / sourc
 GET    /api/ca/p12               Export .p12 backup (with private key; password in x-ireq-p12-password header)
 POST   /api/ca/import            { p12: "<base64>", password? } import .p12 and re-check trust
 GET    /api/bookmarks           POST /api/bookmarks { label, filter }   DELETE /api/bookmarks/:id
-GET    /api/flows/:id         One full flow, including timings: { total, dns, tcp, tls, wait, download, reused }
+GET    /api/flows             ?redact=1 masks credentials (default is raw — the UI needs it to debug)
+GET    /api/flows/:id         One full flow (?redact=1 masks too), including timings:
+                               { total, dns, tcp, tls, wait, download, reused }
                               (milliseconds; unavailable phases are null; reused connections report 0 for
                                DNS/TCP/TLS with reused=true)
 DELETE /api/flows

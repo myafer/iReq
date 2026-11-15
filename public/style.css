@@ -6277,3 +6277,160 @@ body.dragging-file::after {
 .tag.script {
   color: var(--mock);
 }
+
+/* ---------------- 脱敏 ---------------- */
+
+.rd-dialog {
+  width: min(880px, 95vw);
+}
+
+.rd-scope {
+  margin: 0 0 10px;
+  line-height: 1.7;
+}
+
+.rd-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-bottom: 10px;
+}
+
+.rd-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.rd-extra {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.rd-extra label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.rd-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.rd-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.rd-pane {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.rd-pane-head {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.rd-rows {
+  max-height: 38vh;
+  overflow: auto;
+}
+
+.rd-row {
+  display: grid;
+  grid-template-columns: minmax(62px, 116px) minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 10px;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.rd-row:first-child {
+  border-top: 0;
+}
+
+/* 只有「被打码的这一处」染色，其余保持安静 —— 两栏对照时才看得出差在哪 */
+.rd-row.hit {
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+
+.rd-k {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-v {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.rd-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.rd-preview mark {
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.rd-note {
+  margin-top: 10px;
+  line-height: 1.7;
+}
+
+.more-item.on {
+  color: var(--accent);
+}
+
+/* 预览里的分组标题：请求头 / 响应头分开列，否则 Set-Cookie 看着像没处理 */
+.rd-sub {
+  padding: 6px 10px 4px;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
+  background: color-mix(in srgb, var(--border) 18%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+/* 菜单项上的「已开启」小圆点：比「开」字更省位置，也省掉一次翻译 */
+.on-dot {
+  display: inline-block;
+  width: calc(6px * var(--ui-scale));
+  height: calc(6px * var(--ui-scale));
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.on-dot[hidden] {
+  display: none;
+}

@@ -25,6 +25,15 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 脱敏：件数与打码处数是动态句
+    [/^(\d+) 处会打码$/, function (m, a) {
+      return a + (a === '1' ? ' value will be masked' : ' values will be masked');
+    }],
+    [/^占位符 (.+)$/, function (m, a) { return 'Placeholder ' + a; }],
+    [/^预览失败：(.+)$/, function (m, a) { return 'Preview failed: ' + a; }],
+    [/^已导出 (\d+) 条 · 脱敏 (\d+) 处$/, function (m, a, b) {
+      return 'Exported ' + a + ' flows · masked ' + b + (b === '1' ? ' value' : ' values');
+    }],
     // 脚本规则：保存结果与语法检查是动态句
     [/^已保存 (\d+) 条脚本规则$/, function (m, a) {
       return 'Saved ' + a + (a === '1' ? ' script rule' : ' script rules');

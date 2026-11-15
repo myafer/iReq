@@ -62,6 +62,10 @@ const S = {
   /* 脚本规则（配置级，服务端落盘）：命中时在沙箱里跑用户代码 */
   scripts: { enabled: true, rules: [] },
   scriptDraft: [],
+  /* 脱敏（配置级，服务端落盘）：只影响导出 / MCP / redact=1 的接口 */
+  redact: { enabled: true, headers: true, query: true, body: true, pii: false },
+  redactView: null,
+  redactPreview: null,
   /* 条件告警：规则在服务端，最近触发只在本地（关窗口就没） */
   alertCfg: { enabled: true, rules: [], mutedUntil: 0 },
   alertDraft: [],
@@ -3583,6 +3587,213 @@ function pickHarFile() {
   });
 }
 
+/* ---------------------------------------------------------------- 脱敏 */
+
+/* 开关在服务端，作用于「离开这台机器」的内容：导出文件、MCP 输出、带 redact=1 的接口。
+ * 界面一帧都不能改 —— 打了码就没法确认是哪个 token 失效，等于把这工具废掉。 */
+async function loadRedact() {
+  try {
+    S.redactView = await api('/api/redact');
+    S.redact = { ...S.redact, ...S.redactView };
+  } catch (_) {
+    /* 老实例没有这个接口时静默 */
+  }
+  syncRedactBadge();
+}
+
+function syncRedactBadge() {
+  const b = $('#redactState');
+  if (!b) return;
+  const on = !!(S.redact && S.redact.enabled);
+  // 只给一个小圆点，不写「开 / 关」：菜单里一列中文字会让英文模式混进汉字
+  b.hidden = !on;
+  const item = $('#btnRedact');
+  if (item) item.classList.toggle('on', on);
+}
+
+async function openRedactPanel() {
+  await loadRedact();
+  fillRedactPanel();
+  openModal('#modalRedact');
+  refreshRedactPreview();
+}
+
+function fillRedactPanel() {
+  const c = S.redact || {};
+  const set = (id, v) => {
+    const el = $(id);
+    if (el) el.checked = !!v;
+  };
+  set('#rdEnabled', c.enabled);
+  set('#rdHeaders', c.headers);
+  set('#rdQuery', c.query);
+  set('#rdBody', c.body);
+  set('#rdPii', c.pii);
+  const eh = $('#rdExtraHeaders');
+  const ef = $('#rdExtraFields');
+  if (eh) eh.value = (c.extraHeaders || []).join(', ');
+  if (ef) ef.value = (c.extraFields || []).join(', ');
+}
+
+function redactDraftFromPanel() {
+  return {
+    enabled: $('#rdEnabled').checked,
+    headers: $('#rdHeaders').checked,
+    query: $('#rdQuery').checked,
+    body: $('#rdBody').checked,
+    pii: $('#rdPii').checked,
+    extraHeaderText: $('#rdExtraHeaders').value,
+    extraFieldText: $('#rdExtraFields').value,
+  };
+}
+
+async function refreshRedactPreview() {
+  const box = $('#rdPreview');
+  if (box) box.innerHTML = '<p class="hint">正在取一条流量…</p>';
+  const id = S.selected && S.selected.id ? S.selected.id : '';
+  try {
+    const d = await api('/api/redact/preview' + (id ? '?id=' + encodeURIComponent(id) : ''));
+    S.redactPreview = d;
+    renderRedactPreview(d);
+  } catch (err) {
+    if (box) box.innerHTML = `<p class="hint">预览失败：${esc(err.message || '')}</p>`;
+  }
+}
+
+/** 把占位符包成 <mark>：这是唯一该被高亮的东西，其它文字保持安静 */
+function rdMark(text, placeholder) {
+  const raw = String(text == null ? '' : text);
+  const ph = placeholder || '[REDACTED]';
+  return esc(raw).split(esc(ph)).join(`<mark>${esc(ph)}</mark>`);
+}
+
+function rdRows(side, other, placeholder) {
+  if (!side) return '';
+  const rows = [];
+  const same = (a, b) => String(a) === String(b);
+  const line = (k, v, changed) =>
+    `<div class="rd-row${changed ? ' hit' : ''}"><span class="rd-k">${esc(k)}</span><span class="rd-v">${v}</span></div>`;
+
+  rows.push(line('URL', rdMark(`${side.method} ${side.url}`, placeholder), !same(side.url, other && other.url)));
+
+  // 请求头与响应头分组：Set-Cookie 在响应侧，只列请求头会让人以为它没被打码
+  for (const [label, which] of [
+    ['请求头', 'request'],
+    ['响应头', 'response'],
+  ]) {
+    const mine = (side[which] && side[which].headers) || {};
+    const theirs = (other && other[which] && other[which].headers) || {};
+    const keys = Object.keys(mine);
+    if (!keys.length) continue;
+    rows.push(`<div class="rd-sub">${esc(label)}</div>`);
+    for (const k of keys) {
+      const v = mine[k];
+      const ov = theirs[k];
+      rows.push(
+        line(k, rdMark(Array.isArray(v) ? v.join(', ') : v, placeholder), !same(JSON.stringify(v), JSON.stringify(ov)))
+      );
+    }
+  }
+  if (side.request.body) {
+    rows.push(
+      line(
+        '请求体',
+        `<pre class="rd-body">${rdMark(String(side.request.body).slice(0, 600), placeholder)}</pre>`,
+        !same(side.request.body, other && other.request.body)
+      )
+    );
+  }
+  if (side.response.body) {
+    rows.push(
+      line(
+        '响应体',
+        `<pre class="rd-body">${rdMark(String(side.response.body).slice(0, 600), placeholder)}</pre>`,
+        !same(side.response.body, other && other.response.body)
+      )
+    );
+  }
+  return rows.join('');
+}
+
+function renderRedactPreview(d) {
+  const box = $('#rdPreview');
+  if (!box) return;
+  const count = $('#rdCount');
+  const ph = $('#rdPlaceholder');
+  if (ph) ph.textContent = d && d.placeholder ? `占位符 ${d.placeholder}` : '';
+  if (!d || !d.before) {
+    if (count) count.textContent = '—';
+    box.innerHTML = '<p class="hint">还没有流量可预览 —— 先抓一条，再回来看效果。</p>';
+    return;
+  }
+  if (count) {
+    count.textContent = d.count ? `${d.count} 处会打码` : '这条没有可打码的内容';
+    count.classList.toggle('bad', false);
+  }
+  box.innerHTML = `
+    <div class="rd-pane">
+      <div class="rd-pane-head">原值（界面上看到的）</div>
+      <div class="rd-rows">${rdRows(d.before, d.after, d.placeholder)}</div>
+    </div>
+    <div class="rd-pane">
+      <div class="rd-pane-head">导出 / 给模型看到的</div>
+      <div class="rd-rows">${rdRows(d.after, d.before, d.placeholder)}</div>
+    </div>`;
+}
+
+async function saveRedact() {
+  try {
+    S.redactView = await api('/api/redact', { method: 'PUT', body: redactDraftFromPanel() });
+    S.redact = { ...S.redact, ...S.redactView };
+    syncRedactBadge();
+    await refreshRedactPreview();
+    toast(S.redact.enabled ? '脱敏已开启' : '脱敏已关闭，导出的将是原值');
+    closeModals();
+  } catch (err) {
+    toast('保存失败：' + (err.message || ''));
+  }
+}
+
+function bindRedact() {
+  $('#btnRedact').addEventListener('click', openRedactPanel);
+  $('#rdSave').addEventListener('click', saveRedact);
+  $('#rdRefresh').addEventListener('click', refreshRedactPreview);
+  // 勾选即重算预览：改了规则却看不到后果，等于让人盲配
+  for (const id of ['#rdEnabled', '#rdHeaders', '#rdQuery', '#rdBody', '#rdPii']) {
+    const el = $(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        // 预览按当前草稿临时算：先把草稿灌进 S.redact，再请求
+        S.redact = { ...S.redact, ...redactDraftFromPanel(), extraHeaders: [], extraFields: [] };
+        refreshRedactPreviewWithDraft();
+      });
+    }
+  }
+}
+
+/** 预览要按「还没保存的草稿」算，否则用户看不到自己刚勾上的效果 */
+async function refreshRedactPreviewWithDraft() {
+  const draft = redactDraftFromPanel();
+  const id = S.selected && S.selected.id ? S.selected.id : '';
+  const qs = new URLSearchParams();
+  qs.set('draft', '1');
+  if (id) qs.set('id', id);
+  if (draft.headers) qs.set('headers', '1');
+  if (draft.query) qs.set('query', '1');
+  if (draft.body) qs.set('body', '1');
+  if (draft.pii) qs.set('pii', '1');
+  qs.set('enabled', draft.enabled ? '1' : '0');
+  if (draft.extraHeaderText) qs.set('extraHeaders', draft.extraHeaderText);
+  if (draft.extraFieldText) qs.set('extraFields', draft.extraFieldText);
+  try {
+    const d = await api('/api/redact/preview?' + qs.toString());
+    S.redactPreview = d;
+    renderRedactPreview(d);
+  } catch (_) {
+    /* 预览失败不打断编辑 */
+  }
+}
+
 /* -------------------------------------------------------------- 脚本规则 */
 
 /* 代码在服务端沙箱里跑。这里只负责编辑：保存前服务端会先编译一遍，
@@ -4524,7 +4735,8 @@ async function exportFlows(format = 'har') {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast(`已导出 ${count} 条`);
+    const redacted = Number(r.headers.get('X-IReq-Redacted') || 0);
+    toast(redacted ? `已导出 ${count} 条 · 脱敏 ${redacted} 处` : `已导出 ${count} 条`);
   } catch (err) {
     toast('导出失败: ' + err.message);
   }
@@ -7300,6 +7512,8 @@ function bind() {
   loadAlerts();
   bindScripts();
   loadScripts();
+  bindRedact();
+  loadRedact();
   // 映射是落盘配置：启动时同步一次，徽标不用等用户点开面板才准
   api('/api/hostmap')
     .then((cfg) => {
@@ -7873,6 +8087,10 @@ function bind() {
         if (S.filter.status !== 'tls') scheduleFlowAdd(m);
         scheduleFacets();
       }
+    } else if (msg.type === 'redact-changed') {
+      S.redact = { ...S.redact, ...(msg.redact || {}) };
+      syncRedactBadge();
+      if (!$('#modalRedact').hidden) fillRedactPanel();
     } else if (msg.type === 'scripts-changed') {
       S.scripts = { enabled: msg.scripts.enabled !== false, rules: msg.scripts.rules || [] };
       syncScriptBadge();
@@ -8234,6 +8452,10 @@ const CMD_ITEMS = [
   {
     label: '脚本', hint: '用 JS 改请求 / 响应', keys: 'script 脚本 js hook 钩子 改写',
     run: () => openScriptsPanel(),
+  },
+  {
+    label: '脱敏', hint: '导出前打码凭据', keys: 'redact 脱敏 打码 敏感 token cookie 导出',
+    run: () => openRedactPanel(),
   },
   { label: '导出 HAR', keys: 'export har 导出', run: () => exportFlows('har') },
   {
