@@ -4217,6 +4217,239 @@ function bindCols() {
   });
 }
 
+/* ------------------------------------------------------------ 会话总览 */
+
+/* 一屏流量的结论页。存在的理由只有一个：排障最后一步是「把结论发给别人」，
+ * 对着截图口述 P95 太痛苦。所以这里每个数字都能一键变成 Markdown。 */
+S.overview = null;
+
+/** 当前筛选条件拼成 query：总览 / 性能 / 导出共用同一套，避免三处口径不一致 */
+function currentFilterParams() {
+  const p = new URLSearchParams();
+  if (S.filter.q) p.set('q', S.filter.q);
+  if (S.filter.status) p.set('status', S.filter.status);
+  if (S.filter.mocked) p.set('mocked', '1');
+  for (const key of ['host', 'ip', 'route']) {
+    if (S.filter[key]) p.set(key, S.filter[key]);
+  }
+  if (S.filter.app.length) p.set('app', S.filter.app.join(','));
+  return p;
+}
+
+async function openOverview() {
+  const box = $('#ovCards');
+  if (box) box.innerHTML = '<p class="hint">统计中…</p>';
+  openModal('#modalOverview');
+  await loadOverview();
+}
+
+async function loadOverview() {
+  const qs = currentFilterParams();
+  qs.set('limit', '2000');
+  try {
+    const d = await api('/api/overview?' + qs.toString());
+    S.overview = d;
+    renderOverview(d);
+  } catch (err) {
+    $('#ovCards').innerHTML = `<p class="hint">统计失败：${esc(err.message || '')}</p>`;
+  }
+}
+
+function ovCard(label, value, sub, tone) {
+  return `<div class="ov-card${tone ? ' ' + tone : ''}">
+    <div class="k">${esc(label)}</div>
+    <div class="v">${value}</div>
+    <div class="sub">${sub || ''}</div>
+  </div>`;
+}
+
+function statusTone(key) {
+  const n = Number(key);
+  if (key === 'ERR') return 'err';
+  if (n >= 500) return 'err';
+  if (n >= 400) return 'warn';
+  if (n >= 300) return 'mute';
+  if (n >= 200) return 'ok';
+  return 'mute';
+}
+
+function renderOverview(d) {
+  if (!d) return;
+  const c = d.counts;
+  const scope = $('#ovScope');
+  if (scope) scope.textContent = `${c.total} 条已汇总`;
+
+  $('#ovCards').innerHTML = [
+    ovCard(
+      '请求数',
+      String(c.total),
+      c.pending ? `已完成 ${c.completed} · 进行中 ${c.pending}` : '全部已完成'
+    ),
+    ovCard(
+      '错误',
+      String(c.errors),
+      `${c.errorRate}% · 5xx ${c.server} · 连不上 ${c.noResponse}`,
+      c.errors ? 'err' : ''
+    ),
+    ovCard('4xx', String(c.client), '调用方问题', c.client ? 'warn' : ''),
+    ovCard('P50', fmtTime(d.duration.p50), '一半请求快于它'),
+    ovCard('P95', fmtTime(d.duration.p95), `最慢 ${fmtTime(d.duration.max)}`),
+    ovCard(
+      '传输',
+      fmtSize(d.bytes.total),
+      `响应 ${fmtSize(d.bytes.res)} · 请求 ${fmtSize(d.bytes.req)}`
+    ),
+  ].join('');
+
+  // 状态分布：一条堆叠条 + 图例，比一张饼图信息密度高
+  const total = d.status.reduce((a, b) => a + b.count, 0) || 1;
+  const bar = d.status
+    .map((s) => `<i class="st-${statusTone(s.key)}" style="width:${(s.count / total) * 100}%"></i>`)
+    .join('');
+  const legend = d.status
+    .map(
+      (s) => `<span class="ov-leg"><i class="st-${statusTone(s.key)}"></i>${esc(statusText(s.key))}
+        <b>${s.count}</b></span>`
+    )
+    .join('');
+  $('#ovStatus').innerHTML = `<div class="ov-bar">${bar || '<i class="st-mute" style="width:100%"></i>'}</div>
+    <div class="ov-legend">${legend || '<span class="hint">没有数据</span>'}</div>`;
+
+  // 域名：条宽按请求数归一，错误单独标出来
+  const maxHost = Math.max(1, ...d.hosts.map((h) => h.count));
+  $('#ovHosts').innerHTML = d.hosts.length
+    ? d.hosts
+        .map(
+          (h) => `<div class="ov-host" data-ov-host="${esc(h.host)}" title="点一下把列表筛到这个域名">
+            <span class="ov-host-name">${esc(h.host)}</span>
+            <span class="ov-host-bar"><i style="width:${(h.count / maxHost) * 100}%"></i></span>
+            <span class="ov-host-num" title="请求数 / 错误数">${h.count}${h.errors ? ` · <em>${h.errors} ✕</em>` : ''}</span>
+          </div>`
+        )
+        .join('')
+    : '<p class="hint">没有数据</p>';
+
+  const rows = d.routes || [];
+  $('#ovRoutes').innerHTML = rows.length
+    ? `<div class="perf-table-wrap"><table class="perf-table"><thead><tr>
+        <th>接口</th><th>次数</th><th>P50</th><th>P95</th><th>最大</th><th>错误</th>
+      </tr></thead><tbody>${rows
+        .map(
+          (r) => `<tr data-ov-route="${esc(r.route)}">
+            <td class="pt-key">${esc(r.route)}</td>
+            <td class="pt-num pt-count">${r.count}</td>
+            <td class="pt-num">${fmtTime(r.p50)}</td>
+            <td class="pt-num">${fmtTime(r.p95)}</td>
+            <td class="pt-num">${fmtTime(r.max)}</td>
+            <td class="pt-num pt-err ${r.errors ? 'bad' : ''}">${r.errors ? `${r.errors}（${r.errorRate}%）` : '—'}</td>
+          </tr>`
+        )
+        .join('')}</tbody></table></div>`
+    : '<p class="hint">没有已完成的请求。</p>';
+
+  $('#ovSlow').innerHTML = d.slowest.length
+    ? d.slowest
+        .map(
+          (s) => `<div class="perf-slow-row" data-goto="${esc(s.id)}">
+            <span class="psl-ms">${fmtTime(s.duration)}</span>
+            <span class="psl-url">${esc(s.method || '')} ${esc(s.url)}</span>
+          </div>`
+        )
+        .join('')
+    : '<p class="hint">没有数据</p>';
+}
+
+/** 状态码在界面上给中文说法；其余原样 */
+function statusText(key) {
+  if (key === 'ERR') return '连不上';
+  if (key === '…') return '进行中';
+  return key;
+}
+
+async function overviewMarkdown() {
+  const qs = currentFilterParams();
+  qs.set('limit', '2000');
+  const r = await fetch('/api/overview/report.md?' + qs.toString());
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return { text: await r.text(), redacted: Number(r.headers.get('X-IReq-Redacted') || 0) };
+}
+
+async function copyOverview() {
+  try {
+    const { text, redacted } = await overviewMarkdown();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch (_) {
+      // 剪贴板 API 在非安全上下文 / 老 WebView 里会被拒，退到 textarea 方案
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    }
+    if (!ok) throw new Error('浏览器拒绝了剪贴板写入');
+    toast(redacted ? `已复制 Markdown · 脱敏 ${redacted} 处` : '已复制 Markdown');
+  } catch (err) {
+    toast('复制失败：' + (err.message || ''));
+  }
+}
+
+async function downloadOverview() {
+  try {
+    const { text } = await overviewMarkdown();
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ireq-report-${stamp}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (err) {
+    toast('下载失败：' + (err.message || ''));
+  }
+}
+
+function bindOverview() {
+  $('#btnOverview').addEventListener('click', openOverview);
+  $('#ovCopy').addEventListener('click', copyOverview);
+  $('#ovDownload').addEventListener('click', downloadOverview);
+  // 点表格行 / 域名行：把列表筛过去，直接看原始请求（与性能视图同一套做法）
+  const filterTo = (key, kind) => {
+    if (!key) return;
+    if (kind === 'host') {
+      S.filter.host = key;
+      delete S.filter.route;
+    } else {
+      S.filter.route = key;
+      delete S.filter.host;
+    }
+    closeModals();
+    syncFilters();
+    toast('已筛选到 ' + key);
+  };
+  $('#ovRoutes').addEventListener('click', (e) => {
+    const tr = e.target.closest('[data-ov-route]');
+    if (tr) filterTo(tr.dataset.ovRoute, 'route');
+  });
+  $('#ovHosts').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-ov-host]');
+    if (row) filterTo(row.dataset.ovHost, 'host');
+  });
+  $('#ovSlow').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-goto]');
+    if (!row) return;
+    closeModals();
+    selectFlow(row.dataset.goto);
+  });
+}
+
 /* ------------------------------------------------------------ 性能视图 */
 
 /* 抓了几千条之后的真问题不是「这条慢」，而是「哪些接口在拖后腿」。
@@ -4712,14 +4945,7 @@ function bindBreak() {
 
 /* 导出：跟随当前筛选条件，后端生成 HAR 1.2（含完整 headers / body） */
 async function exportFlows(format = 'har') {
-  const params = new URLSearchParams();
-  if (S.filter.q) params.set('q', S.filter.q);
-  if (S.filter.status) params.set('status', S.filter.status);
-  if (S.filter.mocked) params.set('mocked', '1');
-  for (const key of ['host', 'ip', 'route']) {
-    if (S.filter[key]) params.set(key, S.filter[key]);
-  }
-  if (S.filter.app.length) params.set('app', S.filter.app.join(','));
+  const params = currentFilterParams();
   try {
     const r = await fetch(`/api/export/${format}?${params.toString()}`);
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -7508,6 +7734,7 @@ function bind() {
   bindPerf();
   bindCols();
   loadColumns();
+  bindOverview();
   bindAlerts();
   loadAlerts();
   bindScripts();
@@ -8436,6 +8663,10 @@ const CMD_ITEMS = [
   },
   {
     label: '网络模拟', keys: 'network 网络 断网 弱网 超时', run: () => openNetwork(),
+  },
+  {
+    label: '会话总览', hint: '一页结论，可复制成 Markdown', keys: 'overview 总览 报告 markdown 汇总 结论',
+    run: () => openOverview(),
   },
   {
     label: '性能视图', hint: '按接口聚合 P50 / P95', keys: 'perf performance 性能 聚合 慢 接口 p95',

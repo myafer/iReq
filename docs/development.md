@@ -168,6 +168,7 @@ node tools/check-columns.js     # derived columns: path parsing / value formatti
 node tools/check-alerts.js      # conditional alerts: match semantics / cooldown / mute / per-minute cap / SSE push / UI (35 items)
 node tools/check-scripts.js     # script rules: sandbox isolation / timeout / request + response rewrites / save validation / UI (37 items)
 node tools/check-redact.js      # redaction: headers / query / body / derived columns / toggle / export + MCP outlets / preview UI (73 items)
+node tools/check-overview.js    # overview: counting rules + shared percentiles / grouping order / Markdown report / redaction / UI (52 items)
 node tools/check-timing.js      # timing breakdown: DNS/TCP/TLS/wait/download marks, reused connections report 0, missing phases stay null, proxy + replay carry timings (27 items)
 node tools/check-perf.js        # performance view: percentile definition, per-endpoint/per-host grouping, error rate counts failures + 5xx only, sorting/truncation, filter passthrough (38 items)
 ```

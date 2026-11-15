@@ -76,6 +76,8 @@ const SUITES = [
   ['脚本规则', 'check-scripts.js'],
   // 会改脱敏配置、清空流量，结束时恢复配置并删掉自己造的历史
   ['脱敏', 'check-redact.js'],
+  // 造流量验总览与 Markdown 报告，结束时清空流量并删掉自己造的历史
+  ['会话总览', 'check-overview.js'],
   // 造流量验证 WebSocket 帧 / SSE 消息，结束时清空流量并删掉自己造的历史
   ['WebSocket 帧', 'check-ws.js'],
   ['SSE 消息', 'check-sse.js'],

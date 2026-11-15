@@ -25,6 +25,20 @@
 
   /* 带变量/数字的动态文案：先按正则整句翻译，避免把变量内容当中文替换 */
   var PATTERNS = [
+    // 会话总览：汇总条数、卡片副标题、复制反馈都是动态句
+    [/^(\d+) 条已汇总$/, function (m, a) { return a + (a === '1' ? ' flow summarised' : ' flows summarised'); }],
+    [/^已完成 (\d+) · 进行中 (\d+)$/, function (m, a, b) { return a + ' done · ' + b + ' in flight'; }],
+    [/^([\d.]+)% · 5xx (\d+) · 连不上 (\d+)$/, function (m, a, b, c) {
+      return a + '% · 5xx ' + b + ' · ' + c + ' unreachable';
+    }],
+    [/^最慢 (.+)$/, function (m, a) { return 'Slowest ' + a; }],
+    [/^响应 (.+) · 请求 (.+)$/, function (m, a, b) { return 'Response ' + a + ' · request ' + b; }],
+    [/^已复制 Markdown · 脱敏 (\d+) 处$/, function (m, a) {
+      return 'Markdown copied · ' + a + (a === '1' ? ' value' : ' values') + ' masked';
+    }],
+    [/^复制失败：(.+)$/, function (m, a) { return 'Copy failed: ' + a; }],
+    [/^下载失败：(.+)$/, function (m, a) { return 'Download failed: ' + a; }],
+    [/^点一下把列表筛到这个域名$/, function () { return 'Click to filter the list to this host'; }],
     // 脱敏：件数与打码处数是动态句
     [/^(\d+) 处会打码$/, function (m, a) {
       return a + (a === '1' ? ' value will be masked' : ' values will be masked');

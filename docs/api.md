@@ -71,6 +71,11 @@ GET    /api/scripts             Script rules { enabled, rules: [{id, name, enabl
 PUT    /api/scripts             { enabled, rules } full replace; compiles first and returns 400 + errors on syntax errors
 POST   /api/scripts/check       { code } compile only → { ok, error, logs, hooks }
 GET    /api/perf?by=route|host&same filters as /api/flows    Performance aggregation (per endpoint / host)
+GET    /api/overview?same filters as /api/flows    Session overview: counts / duration / bytes / span /
+                                                  status / hosts / routes / slowest / largest / errors / contentTypes
+GET    /api/overview/report.md?same filters        The same data as a Markdown report (text/markdown +
+                                                  attachment name). URLs are masked per the redaction
+                                                  settings; x-ireq-redacted carries the masked count
                                → { by, groups: [{ key, count, p50, p95, avg, max, errorRate, noResponse,
                                  serverErrors, clientErrors, bytes, methods, slowest }], groupCount, truncated,
                                  slowest: [{ id, method, path, status, duration }], totals, inMemory }

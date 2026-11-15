@@ -69,6 +69,10 @@ GET    /api/scripts             脚本规则 { enabled, rules: [{id, name, enabl
 PUT    /api/scripts             { enabled, rules } 全量替换；保存前会先编译，语法错回 400 + errors
 POST   /api/scripts/check       { code } 只编译不保存 → { ok, error, logs, hooks }
 GET    /api/perf?by=route|host&参数同 /api/flows    性能聚合（按接口 / 域名）
+GET    /api/overview?参数同 /api/flows           会话总览：counts / duration / bytes / span / status /
+                                               hosts / routes / slowest / largest / errors / contentTypes
+GET    /api/overview/report.md?参数同 /api/flows 同一份数据的 Markdown 报告（text/markdown + 附件名），
+                                              报告里的 URL 按脱敏配置打码，响应头 x-ireq-redacted 给条数
                                回 { by, groups: [{ key, count, p50, p95, avg, max, errorRate, noResponse,
                                   serverErrors, clientErrors, bytes, methods, slowest }], groupCount, truncated,
                                   slowest: [{ id, method, path, status, duration }], totals, inMemory }

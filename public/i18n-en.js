@@ -914,5 +914,21 @@ window.ReqLiteI18N_EN = {
   "正在取一条流量…": "Fetching a flow…",
   "脱敏已开启": "Redaction is on",
   "脱敏已关闭，导出的将是原值": "Redaction is off — exports will contain original values",
-  "导出前打码凭据": "Mask credentials before export"
+  "导出前打码凭据": "Mask credentials before export",
+  "会话总览": "Overview",
+  "一页结论，可复制成 Markdown": "One page of conclusions, copyable as Markdown",
+  "复制 Markdown": "Copy Markdown",
+  "下载 .md": "Download .md",
+  "状态分布": "Status distribution",
+  "最慢的接口": "Slowest endpoints",
+  "最慢的请求": "Slowest requests",
+  "点一行筛到该接口": "Click a row to filter to that endpoint",
+  "点一行跳到该请求": "Click a row to jump to that request",
+  "口径：错误 = 连不上 + 5xx；4xx 是调用方问题，单独计数；进行中的请求不计入耗时与百分位。": "How numbers are counted: errors are failures + 5xx; 4xx means the caller sent something wrong and is counted separately; in-flight requests are excluded from timings and percentiles.",
+  "请求数": "Requests",
+  "全部已完成": "All completed",
+  "调用方问题": "Caller issue",
+  "一半请求快于它": "Half the requests are faster",
+  "没有数据": "No data",
+  "已复制 Markdown": "Markdown copied"
 };

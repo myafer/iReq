@@ -6434,3 +6434,189 @@ body.dragging-file::after {
 .on-dot[hidden] {
   display: none;
 }
+
+/* ---------------- 会话总览 ---------------- */
+
+.ov-dialog {
+  width: min(920px, 95vw);
+}
+
+/* 六张卡一行：数字要能横向扫过去比较，拆成两行就失去意义了 */
+.ov-cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ov-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.ov-card .k {
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.ov-card .v {
+  font-family: var(--mono);
+  font-size: calc(17px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+
+.ov-card .sub {
+  margin-top: 2px;
+  font-size: calc(10.5px * var(--ui-scale));
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-card.err .v {
+  color: var(--err);
+}
+
+.ov-card.warn .v {
+  color: var(--warn);
+}
+
+.ov-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 10px;
+}
+
+.ov-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+
+.ov-grid .ov-block {
+  margin-bottom: 10px;
+}
+
+.ov-block-head {
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.ov-block .perf-table-wrap {
+  max-height: 26vh;
+}
+
+.ov-bar {
+  display: flex;
+  height: calc(10px * var(--ui-scale));
+  border-radius: 5px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.ov-bar i {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+.ov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.ov-leg i {
+  display: inline-block;
+  width: calc(7px * var(--ui-scale));
+  height: calc(7px * var(--ui-scale));
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+.ov-leg b {
+  color: var(--text);
+  margin-left: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 状态色：2xx 绿、3xx 灰、4xx 黄、5xx 与连不上 红 */
+.st-ok {
+  background: var(--ok);
+}
+
+.st-warn {
+  background: var(--warn);
+}
+
+.st-err {
+  background: var(--err);
+}
+
+.st-mute {
+  background: var(--muted);
+}
+
+.ov-host {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(84px * var(--ui-scale)) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.ov-host:hover {
+  background: var(--panel-2);
+}
+
+.ov-host-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  color: var(--text-2);
+}
+
+.ov-host-bar {
+  height: calc(5px * var(--ui-scale));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  overflow: hidden;
+}
+
+.ov-host-bar i {
+  display: block;
+  height: 100%;
+  background: var(--ph-tls);
+}
+
+.ov-host-num {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ov-host-num em {
+  font-style: normal;
+  color: var(--err);
+}
+
+.ov-note {
+  margin-top: 4px;
+  line-height: 1.7;
+}

@@ -72,6 +72,7 @@
             <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
             <button class="more-item" id="btnMap">域名映射 <b id="mapCount" hidden>0</b></button>
             <button class="more-item" id="btnPerf">性能视图</button>
+            <button class="more-item" id="btnOverview">会话总览</button>
             <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
             <button class="more-item" id="btnScripts">脚本 <b id="scriptCount" hidden>0</b></button>
             <button class="more-item" id="btnRedact">脱敏 <b class="on-dot" id="redactState" hidden title="已开启"></b></button>
@@ -1193,6 +1194,42 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <span class="hint">改动点「保存」后对所有窗口生效</span>
           <span class="spacer"></span>
           <button class="btn primary" id="rdSave">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 会话总览：一页结论，能复制成 Markdown 贴进工单 -->
+    <div class="modal" id="modalOverview" hidden>
+      <div class="modal-card ov-dialog">
+        <div class="modal-head">
+          <h2>会话总览</h2>
+          <span class="hint" id="ovScope"></span>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="ovCopy">复制 Markdown</button>
+          <button class="btn ghost" id="ovDownload">下载 .md</button>
+          <button class="btn icon ghost" data-close>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="ov-cards" id="ovCards"></div>
+          <div class="ov-grid">
+            <div class="ov-block">
+              <div class="ov-block-head">状态分布</div>
+              <div id="ovStatus"></div>
+            </div>
+            <div class="ov-block">
+              <div class="ov-block-head">域名</div>
+              <div id="ovHosts"></div>
+            </div>
+          </div>
+          <div class="ov-block">
+            <div class="ov-block-head">最慢的接口 <span class="hint">点一行筛到该接口</span></div>
+            <div id="ovRoutes"></div>
+          </div>
+          <div class="ov-block">
+            <div class="ov-block-head">最慢的请求 <span class="hint">点一行跳到该请求</span></div>
+            <div id="ovSlow"></div>
+          </div>
+          <p class="hint ov-note">口径：错误 = 连不上 + 5xx；4xx 是调用方问题，单独计数；进行中的请求不计入耗时与百分位。</p>
         </div>
       </div>
     </div>

@@ -170,6 +170,7 @@ node tools/check-columns.js     # 派生列：路径解析 / 取值与格式化 
 node tools/check-alerts.js      # 条件告警：匹配语义 / 冷却 / 静音 / 每分钟上限 / SSE 推送 / 界面（35 项）
 node tools/check-scripts.js     # 脚本规则：沙箱隔离 / 超时 / 请求与响应改写 / 保存校验 / 界面（37 项）
 node tools/check-redact.js      # 脱敏：头 / 查询 / 正文 / 派生列 / 开关 / 导出与 MCP 出口 / 界面预览（73 项）
+node tools/check-overview.js    # 会话总览：口径与百分位同源 / 分组排序 / Markdown 报告 / 脱敏 / 界面（52 项）
 node tools/check-timing.js      # 耗时分解：DNS/TCP/TLS/等待/下载四段时间点 / 连接复用记 0 / 拿不到的段留 null / 代理链路与重放都带 timings（27 项）
 node tools/check-perf.js        # 性能视图：百分位口径 / 按接口与按域名聚合 / 错误率只算连不上与 5xx / 排序与截断 / 接口筛选（38 项）
 ```

@@ -19,6 +19,7 @@ const { passthroughMatches, normalizePassthroughRule } = require('./proxy');
 const { McpAuth } = require('./mcp-auth');
 const { importHar } = require('./har-import');
 const { aggregate: aggregatePerf } = require('./perf');
+const { build: buildOverview, toMarkdown: overviewToMarkdown } = require('./overview');
 const { applyColumns, normalizeColumns } = require('./columns');
 const { normalizeScripts } = require('./scripts');
 const {
@@ -655,6 +656,48 @@ class ConsoleServer {
         // 内存里的总条数（含进行中）：让界面能提示「统计的是筛出来的这 N 条里的多少」
         inMemory: this.store.flows.length,
       });
+    }
+
+    /* ---------------- 会话总览：一页结论 + 可贴进工单的 Markdown ---------------- */
+    if (parts[1] === 'overview' && method === 'GET') {
+      const sp = url.searchParams;
+      const flows = this.store.list({
+        query: sp.get('q') || '',
+        method: sp.get('method') || '',
+        status: sp.get('status') || '',
+        onlyMocked: sp.get('mocked') === '1',
+        host: sp.get('host') || '',
+        ip: sp.get('ip') || '',
+        app: sp.get('app') || '',
+        route: sp.get('route') || '',
+        limit: Math.min(Number(sp.get('limit')) || 2000, 5000),
+      });
+      const ov = buildOverview(flows, {
+        version: VERSION,
+        redact: this.config.redact,
+        columns: this.config.derivedColumns,
+      });
+      if (parts[2] !== 'report.md') return this._json(res, 200, { ...ov, inMemory: this.store.flows.length });
+
+      // 报告里的筛选条件是给人看的句子，不是 url 参数
+      const filters = [];
+      if (sp.get('host')) filters.push(`域名 ${sp.get('host')}`);
+      if (sp.get('route')) filters.push(`接口 ${sp.get('route')}`);
+      if (sp.get('app')) filters.push(`应用 ${sp.get('app')}`);
+      if (sp.get('q')) filters.push(`关键词 ${sp.get('q')}`);
+      if (sp.get('status')) filters.push(`状态 ${sp.get('status')}`);
+      if (sp.get('mocked') === '1') filters.push('仅 Mock');
+      const md = overviewToMarkdown(ov, { title: 'iReq 抓包报告', filters });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const data = Buffer.from(md, 'utf8');
+      res.writeHead(200, {
+        'content-type': 'text/markdown; charset=utf-8',
+        'content-disposition': `attachment; filename="ireq-report-${stamp}.md"`,
+        'content-length': data.length,
+        'x-ireq-redacted': String(ov.redactions || 0),
+        'cache-control': 'no-store',
+      });
+      return res.end(data);
     }
 
     /* ---------------- 历史记录：每次「清空」一条，可改名 / 回看 / 删除 ---------------- */
