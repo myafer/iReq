@@ -38,13 +38,24 @@ const { seedFlows } = require('./_seed');
   const histLast = groups.length > 0 && groups[groups.length - 1].title === '历史记录';
   const histClosed = await page.$eval('.sgroup.hg', (e) => e.classList.contains('closed')).catch(() => false);
   checks.push(['历史记录排最后且默认收起', histLast && histClosed, `last=${groups[groups.length - 1] && groups[groups.length - 1].title} closed=${histClosed}`]);
+  const routesClosed = await page.$eval('[data-group="routes"]', (e) => e.classList.contains('closed')).catch(() => false);
+  checks.push(['接口结构默认收起', routesClosed]);
+  await page.click('[data-toggle="routes"]');
+  await page.waitForTimeout(250);
+  const routesOpenItems = await page.$$eval('[data-group="routes"] .sitem', (els) => els.filter((e) => e.offsetParent !== null).length);
+  checks.push(['展开接口结构能看到接口', routesOpenItems > 0, routesOpenItems]);
+  await page.click('[data-toggle="routes"]');
+  await page.waitForTimeout(200);
+
   await page.click('[data-toggle="history"]');
   await page.waitForTimeout(250);
   const histOpenRows = await page.$$eval('.sgroup.hg .hg-row', (els) => els.filter((e) => e.offsetParent !== null).length);
   const histOpen = await page.$eval('.sgroup.hg', (e) => !e.classList.contains('closed'));
   const stored = await page.evaluate(() => localStorage.getItem('reqlite-side-closed-v2'));
-  checks.push(['展开历史记录能看到归档行', histOpen && histOpenRows > 0 && String(stored).includes('history') === false,
-    `open=${histOpen} rows=${histOpenRows} stored=${stored}`]);
+  // 这台机器可能还没留过历史（一条都没有时分组里是空提示），那种情况只验「能展开」
+  const histAll = await page.$$eval('.sgroup.hg .hg-row', (els) => els.length);
+  checks.push(['展开历史记录能看到归档行', histOpen && (histAll === 0 || histOpenRows > 0) && String(stored).includes('history') === false,
+    `open=${histOpen} rows=${histOpenRows}/${histAll} stored=${stored}`]);
   await page.click('[data-toggle="history"]');
   await page.waitForTimeout(200);
 

@@ -96,7 +96,10 @@ const S = {
   /* 侧栏折叠态。历史记录是低频入口：默认收起、排在侧栏最下面，
    * 所以默认值里带 'history'；换 -v2 键做一次性迁移，免得老用户本地存的
    * 「展开」把它又顶开（其它分组的折叠状态会重置一次，代价可接受）。 */
-  closedGroups: new Set(JSON.parse(localStorage.getItem('reqlite-side-closed-v2') || '["history"]')),
+  closedGroups: new Set(JSON.parse(localStorage.getItem('reqlite-side-closed-v2') || '[]')),
+  /* 显式「展开过」的分组：默认折叠的组（历史记录 / 接口结构）靠它区分
+   * 「用户亲手打开」和「从没碰过」，这样改默认值不会跟本地习惯打架 */
+  openedGroups: new Set(JSON.parse(localStorage.getItem('reqlite-side-opened') || '[]')),
   /* 接口结构树：与默认展开态相反的目录 key（顶层默认展开，深层默认收起） */
   routeToggled: new Set(JSON.parse(localStorage.getItem('reqlite-route-toggled') || '[]')),
 };
@@ -1431,12 +1434,21 @@ function activeFilterKeys() {
   );
 }
 
+/* 侧栏分组的折叠判定：closedGroups 记「明确收起」，openedGroups 记「明确展开」。
+ * 历史记录与接口结构是低频入口（接口结构尤其长），默认收起，只露标题和条数。 */
+const DEFAULT_CLOSED_GROUPS = new Set(['history', 'routes']);
+
+function groupClosed(key) {
+  if (S.closedGroups.has(key)) return true;
+  return DEFAULT_CLOSED_GROUPS.has(key) && !S.openedGroups.has(key);
+}
+
 /* ---------------------------------------------------------- 历史记录（侧栏）
  * 每次「清空」都会把当天抓包归档，界面上就是一条记录：点开回看、双击改名、✕ 删除。
  * 名字默认是清空时刻（11-14 13:20），改过名的记录不会再被系统覆盖。 */
 function historyGroupHtml() {
   const items = S.history || [];
-  const closed = S.closedGroups.has('history');
+  const closed = groupClosed('history');
   const rows = items.length
     ? items
         .map((it) => {
@@ -1612,7 +1624,7 @@ function renderSide() {
 function facetGroupHtml(section) {
   if (section.key === 'routes') return routeGroupHtml(section);
   const items = S.facets[section.key] || [];
-  const closed = S.closedGroups.has(section.key);
+  const closed = groupClosed(section.key);
   const rows = items.length
     ? items
         .map((it) => {
@@ -1748,7 +1760,8 @@ function renderRouteNode(node, depth, prefix) {
 
 function routeGroupHtml(section) {
   const items = S.facets.routes || [];
-  const closed = S.closedGroups.has(section.key);
+  // 正在按接口筛选时强制展开，否则选中的那条藏在收起的分组里，看不到高亮
+  const closed = groupClosed(section.key) && !S.filter.route;
   const rows = items.length ? renderRouteKids(buildRouteTree(items), 0, '') : '<div class="side-empty">还没有数据</div>';
   return `<div class="sgroup ${closed ? 'closed' : ''}" data-group="${section.key}">
     <button class="sgroup-head" data-toggle="${section.key}">
@@ -1758,7 +1771,7 @@ function routeGroupHtml(section) {
   </div>`;
 }
 
-function bookmarkGroupHtml() {  const closed = S.closedGroups.has('bookmarks');
+function bookmarkGroupHtml() {  const closed = groupClosed('bookmarks');
   const active = activeFilterKeys().length > 0;
   const items = S.bookmarks
     .map(
@@ -7806,11 +7819,18 @@ function bind() {
     const toggle = e.target.closest('[data-toggle]');
     if (toggle) {
       const key = toggle.dataset.toggle;
-      if (S.closedGroups.has(key)) S.closedGroups.delete(key);
-      else S.closedGroups.add(key);
+      const wasClosed = groupClosed(key);
+      if (wasClosed) {
+        S.closedGroups.delete(key);
+        S.openedGroups.add(key);
+      } else {
+        S.closedGroups.add(key);
+        S.openedGroups.delete(key);
+      }
       localStorage.setItem('reqlite-side-closed-v2', JSON.stringify([...S.closedGroups]));
+      localStorage.setItem('reqlite-side-opened', JSON.stringify([...S.openedGroups]));
       const group = toggle.closest('.sgroup');
-      if (group) group.classList.toggle('closed');
+      if (group) group.classList.toggle('closed', !wasClosed);
       return;
     }
     const rt = e.target.closest('[data-rtoggle]');
