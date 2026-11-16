@@ -65,6 +65,14 @@ A read-only token does not even see write tools in `tools/list`, and calls are r
 | `set_network_sim` | Weak network, offline, timeout, with per-app / host / IP rules |
 | `set_passthrough` | Manage the "skip decryption" allowlist |
 | `clear_flows` | Clear the in-memory flow list |
+| `perf_summary` | Aggregate by route / host: P50 / P95 / avg / max / error rate / bytes, plus the slowest requests |
+| `list_breakpoints` / `set_breakpoints` | Read / write breakpoint rules (URL contains, method, phase, timeout) |
+| `list_scripts` / `save_scripts` | Read / write sandbox script rules (`onRequest` / `onResponse`), compiled before saving |
+| `list_alerts` / `set_alerts` | Read / write conditional alerts (status / host / URL / body / latency) |
+| `get_hostmap` / `set_hostmap` | Read / write host mapping: only the target machine changes, URL / Host / cert stay |
+| `get_redact` / `set_redact` | Read / write redaction (exports, MCP output and `redact=1` only; UI always shows raw) |
+| `get_columns` / `set_columns` | Read / write derived columns (up to 4, recomputed immediately) |
+| `annotate_flow` | Note / color / pin a flow (merge semantics; all empty clears it) |
 
 When the capture has thousands of flows, don't make the model page through them. Two steps:
 

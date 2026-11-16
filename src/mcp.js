@@ -13,7 +13,11 @@ const os = require('os');
 const { normalize: normalizeNetworkSim } = require('./network-sim');
 const { replay } = require('./replay');
 const { McpAuth } = require('./mcp-auth');
-const { redactFlow, redactFlows } = require('./redact');
+const { redactFlow, redactFlows, normalize: normalizeRedact } = require('./redact');
+const { normalizeScripts } = require('./scripts');
+const { normalizeColumns, applyColumns } = require('./columns');
+const { aggregate: aggregatePerf } = require('./perf');
+const { COLORS: ANNOT_COLORS } = require('./annotations');
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const LATEST_PROTOCOL = PROTOCOL_VERSIONS[0];
@@ -774,6 +778,451 @@ const TOOLS = [
       else throw new ToolError(`未知 action：${action}`);
       const out = ctx.server._setPassthrough(next, 'mcp');
       return { ok: true, ...out, passthrough: out.passthrough };
+    },
+  },
+
+  /* ============================ 之后加的模块（断点 / 脚本 / 告警 / 映射 / 脱敏 / 派生列 / 标注 / 性能） */
+
+  {
+    name: 'list_breakpoints',
+    title: '查看断点规则',
+    description:
+      '断点会在请求或响应阶段把连接挂住、等人改完再放行（超时自动放行）。这里返回开关、超时时间、规则列表，以及当前正挂着的请求。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(ctx) {
+      const bp = ctx.server.breakpoints;
+      if (!bp) throw new ToolError('断点模块未启用');
+      const st = bp.state();
+      return {
+        enabled: st.enabled,
+        timeout_ms: st.timeoutMs,
+        rules: st.rules,
+        pending: st.pending.map((r) => ({
+          id: r.id,
+          phase: r.phase,
+          method: r.method,
+          url: r.url,
+          rule: r.rule || '',
+          started_at: r.startedAt || null,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'set_breakpoints',
+    title: '设置断点规则',
+    description:
+      '整体替换断点规则（不传 match 就沿用现有规则，只改开关 / 超时）。点开后命中的请求会挂起，用 update_breakpoint 放行或改包。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: S.bool('是否开启断点'),
+        timeout_ms: S.int('挂起后自动放行时间（毫秒，1000–600000）', { min: 1000, max: 600000 }),
+        match: {
+          type: 'array',
+          description: '规则列表；每条按 URL 包含匹配（* 通配，空串=全部）',
+          items: {
+            type: 'object',
+            properties: {
+              match: S.str('URL 包含这段文字（* 通配，空串=全部请求）'),
+              method: S.str('只拦这个方法，空=全部'),
+              phase: S.str('拦哪个阶段', { enum: ['request', 'response', 'both'] }),
+            },
+            required: ['match'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const bp = ctx.server.breakpoints;
+      if (!bp) throw new ToolError('断点模块未启用');
+      if (args.timeout_ms != null) bp.setTimeoutMs(args.timeout_ms);
+      const rules = Array.isArray(args.match)
+        ? args.match.map((r) => ({
+            match: String((r && r.match) || ''),
+            method: String((r && r.method) || '').toUpperCase(),
+            phase: ['request', 'response', 'both'].includes(r && r.phase) ? r.phase : 'both',
+          }))
+        : bp.state().rules;
+      const out = bp.setRules(rules, optBool(args, 'enabled'));
+      ctx.server._broadcast({
+        type: 'breakpoints',
+        state: { enabled: out.enabled, rules: out.rules, pending: out.pending.length, timeoutMs: out.timeoutMs },
+      });
+      return { ok: true, enabled: out.enabled, timeout_ms: out.timeoutMs, rules: out.rules, pending: out.pending.length };
+    },
+  },
+
+  {
+    name: 'list_scripts',
+    title: '查看脚本规则',
+    description:
+      '脚本规则用沙箱里的 onRequest / onResponse 钩子改请求或响应（无网络、无文件、单次 50ms）。返回开关和每条规则的匹配条件与代码。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(ctx) {
+      const engine = ctx.server.proxy && ctx.server.proxy.scripts;
+      if (!engine) throw new ToolError('脚本模块未启用');
+      const st = engine.settings();
+      return {
+        enabled: st.enabled,
+        rules: st.rules.map((r) => ({
+          id: r.id,
+          name: r.name,
+          phase: r.phase,
+          enabled: r.enabled !== false,
+          method: r.method || '',
+          host: r.host || '',
+          url: r.url || '',
+          code: r.code,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'save_scripts',
+    title: '保存脚本规则',
+    description:
+      '整体替换脚本规则（含开关）。保存前会逐条编译，语法错或死循环直接报错、不落盘。代码只能用 onRequest(req) / onResponse(res)。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: S.bool('总开关'),
+        rules: {
+          type: 'array',
+          description: '规则列表（不传则沿用现有规则）',
+          items: {
+            type: 'object',
+            properties: {
+              id: S.str('规则 id（改已有规则时带上，新规则可省）'),
+              name: S.str('规则名'),
+              phase: S.str('执行阶段', { enum: ['request', 'response', 'both', 'ws'] }),
+              enabled: S.bool('这条是否启用'),
+              method: S.str('只匹配这个方法，空=全部'),
+              host: S.str('域名（可空，* 通配）'),
+              url: S.str('URL 包含（可空）'),
+              code: S.str('脚本代码，例如 onResponse(res => { res.headers["x-debug"] = "1"; })'),
+            },
+            required: ['name', 'code'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const engine = ctx.server.proxy && ctx.server.proxy.scripts;
+      if (!engine) throw new ToolError('脚本模块未启用');
+      const cur = engine.settings();
+      const next = normalizeScripts({
+        enabled: args.enabled !== undefined ? args.enabled === true : cur.enabled,
+        rules: Array.isArray(args.rules) ? args.rules : cur.rules,
+      });
+      const errors = [];
+      for (const rule of next.rules) {
+        const c = engine.compile(rule.code, rule.timeoutMs);
+        if (!c.ok) errors.push({ name: rule.name, error: c.error });
+      }
+      if (errors.length) throw new ToolError('脚本有错，未保存：' + errors.map((e) => `${e.name} → ${e.error}`).join('；'));
+      engine.set(next);
+      if (ctx.server.dataDir) ctx.server._persistConfig();
+      ctx.server._broadcast({ type: 'scripts-changed', scripts: next });
+      return { ok: true, enabled: next.enabled, rules: next.rules.length };
+    },
+  },
+
+  {
+    name: 'list_alerts',
+    title: '查看条件告警',
+    description: '告警规则按「且」组合匹配状态码 / 域名 / URL / 正文 / 耗时，命中后推给窗口。返回规则、开关、静音状态与限速。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(ctx) {
+      const engine = ctx.server.proxy && ctx.server.proxy.alerts;
+      if (!engine) throw new ToolError('告警模块未启用');
+      return engine.status();
+    },
+  },
+
+  {
+    name: 'set_alerts',
+    title: '设置条件告警',
+    description: '整体替换告警规则（不传 rules 就沿用现有规则，只改开关）。每条规则自带冷却，全局每分钟最多 20 条。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: S.bool('是否开启告警'),
+        rules: {
+          type: 'array',
+          description: '规则列表（不传则沿用现有规则）',
+          items: {
+            type: 'object',
+            properties: {
+              id: S.str('规则 id（改已有规则时带上）'),
+              name: S.str('规则名'),
+              enabled: S.bool('这条是否启用'),
+              status: S.str('状态码条件，如 5xx / 4xx / 200（可空）'),
+              host: S.str('域名包含（可空）'),
+              url: S.str('URL 包含（可空）'),
+              body: S.str('响应体包含（可空）'),
+              min_ms: S.int('耗时下限（毫秒，可空）', { min: 0 }),
+            },
+            required: ['name'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const engine = ctx.server.proxy && ctx.server.proxy.alerts;
+      if (!engine) throw new ToolError('告警模块未启用');
+      const cur = engine.settings();
+      const saved = engine.set({
+        enabled: args.enabled !== undefined ? args.enabled === true : cur.enabled,
+        rules: Array.isArray(args.rules) ? args.rules : cur.rules,
+      });
+      if (ctx.server.dataDir) ctx.server._persistConfig();
+      ctx.server._broadcast({ type: 'alerts-changed', alerts: saved });
+      const st = engine.status();
+      return { ok: true, enabled: st.enabled, rules: (st.rules || []).length };
+    },
+  },
+
+  {
+    name: 'get_hostmap',
+    title: '查看域名映射',
+    description: '域名映射只改「连哪台机器」：URL、Host 头、证书仍是原域名。返回开关与规则（from → to）。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(ctx) {
+      const hm = ctx.server.hostmap;
+      if (!hm) throw new ToolError('域名映射未启用');
+      return hm.state();
+    },
+  },
+
+  {
+    name: 'set_hostmap',
+    title: '设置域名映射',
+    description: '整体替换映射规则。from 可写 * 通配、可带路径前缀；to 是 host:port 或完整 URL。改完立刻生效并落盘。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: S.bool('是否开启映射'),
+        rules: {
+          type: 'array',
+          description: '规则列表（不传则沿用现有规则）',
+          items: {
+            type: 'object',
+            properties: {
+              from: S.str('原域名，可含 * 与路径前缀，如 api.example.com/v2'),
+              to: S.str('目标，如 127.0.0.1:8080 或 http://host:port'),
+            },
+            required: ['from', 'to'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const hm = ctx.server.hostmap;
+      if (!hm) throw new ToolError('域名映射未启用');
+      const cur = hm.state();
+      const out = hm.setState({
+        enabled: args.enabled !== undefined ? args.enabled === true : undefined,
+        rules: Array.isArray(args.rules) ? args.rules : cur.rules,
+      });
+      ctx.server.config.hostMap = out;
+      if (ctx.server.dataDir) ctx.server._persistConfig();
+      ctx.server._broadcast({ type: 'hostmap', state: out });
+      return { ok: true, enabled: out.enabled, rules: out.rules };
+    },
+  },
+
+  {
+    name: 'get_redact',
+    title: '查看脱敏配置',
+    description:
+      '脱敏只作用于导出文件、MCP 输出和带 redact=1 的接口，界面永远显示原值。返回开关、四类开关与生效的头 / 字段 / 查询参数清单。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(ctx) {
+      return ctx.server._redactView();
+    },
+  },
+
+  {
+    name: 'set_redact',
+    title: '设置脱敏',
+    description: '改脱敏开关（不传的字段保持原值）。extra_headers / extra_fields 是追加的自定义清单，空数组表示清空。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: S.bool('总开关'),
+        headers: S.bool('打码凭据类请求头 / 响应头'),
+        query: S.bool('打码 URL 里的凭据参数'),
+        body: S.bool('打码正文里的凭据字段'),
+        pii: S.bool('连手机号 / 身份证 / 邮箱一起打码'),
+        extra_headers: { type: 'array', items: { type: 'string' }, description: '追加要打码的头名' },
+        extra_fields: { type: 'array', items: { type: 'string' }, description: '追加要打码的正文 / 查询字段名' },
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const cur = normalizeRedact(ctx.server.config.redact);
+      const pick = (k, dflt) => (args[k] === undefined ? dflt : args[k] === true);
+      ctx.server.config.redact = normalizeRedact({
+        enabled: pick('enabled', cur.enabled),
+        headers: pick('headers', cur.headers),
+        query: pick('query', cur.query),
+        body: pick('body', cur.body),
+        pii: pick('pii', cur.pii),
+        extraHeaders: Array.isArray(args.extra_headers) ? args.extra_headers : cur.extraHeaders,
+        extraFields: Array.isArray(args.extra_fields) ? args.extra_fields : cur.extraFields,
+      });
+      if (ctx.server.dataDir) ctx.server._persistConfig();
+      ctx.server._broadcast({ type: 'redact-changed', redact: ctx.server.config.redact });
+      const view = ctx.server._redactView();
+      return { ok: true, enabled: view.enabled, headers: view.headers, query: view.query, body: view.body, pii: view.pii };
+    },
+  },
+
+  {
+    name: 'get_columns',
+    title: '查看派生列',
+    description: '派生列把响应 JSON 字段 / 响应头提成列表里的一列（最多 4 列）。返回当前配置。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(ctx) {
+      return { columns: ctx.server.config.derivedColumns || [] };
+    },
+  },
+
+  {
+    name: 'set_columns',
+    title: '设置派生列',
+    description: '整体替换派生列，改完立刻对已有流量重算。path 支持 data.items[0].id，前缀 req. 表示取请求侧。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        columns: {
+          type: 'array',
+          description: '列定义（最多 4 条），空数组=清空',
+          items: {
+            type: 'object',
+            properties: {
+              id: S.str('列 id（可省，会自动生成）'),
+              name: S.str('表头名'),
+              source: S.str('取哪一侧', { enum: ['res', 'req', 'header'] }),
+              path: S.str('字段路径，如 data.items[0].id'),
+            },
+            required: ['name', 'path'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['columns'],
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const columns = normalizeColumns(args.columns);
+      ctx.server.config.derivedColumns = columns;
+      for (const f of ctx.server.store.flows) {
+        const d = applyColumns(f, columns);
+        if (d) f.derived = d;
+        else delete f.derived;
+      }
+      if (ctx.server.dataDir) ctx.server._persistConfig();
+      ctx.server._broadcast({ type: 'columns-changed', columns });
+      return { ok: true, columns };
+    },
+  },
+
+  {
+    name: 'annotate_flow',
+    title: '标注一条请求',
+    description:
+      '给某条请求加备注 / 颜色 / 重点标记（合并语义：只改传进来的字段，三个都空等于清掉）。标注跟着导出和报告一起走。',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: S.str('请求 id'),
+        note: S.str('备注（最多 200 字，空串=清空）'),
+        color: S.str('颜色名', { enum: ['', ...ANNOT_COLORS] }),
+        pinned: S.bool('是否标为重点'),
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const id = String(args.id || '');
+      if (!id) throw new ToolError('id 不能为空');
+      if (!ctx.server.store.get(id) && !ctx.server.annotations.get(id)) throw new ToolError('flow 不存在');
+      const saved = ctx.server.annotations.set(id, {
+        note: args.note,
+        color: args.color === undefined ? undefined : String(args.color || ''),
+        pinned: args.pinned === undefined ? undefined : args.pinned === true,
+      });
+      ctx.server._broadcast({ type: 'annotation', id, annotation: saved });
+      return { ok: true, id, annotation: saved };
+    },
+  },
+
+  {
+    name: 'perf_summary',
+    title: '按接口看性能',
+    description:
+      '把当前流量按接口（或域名）聚合：P50 / P95 / 平均 / 最大 / 错误率 / 传输量，外加最慢的几条。定位「哪个接口慢」时先调这个。',
+    scope: 'read',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        by: S.str('聚合维度', { enum: ['route', 'host'] }),
+        q: S.str('只看 URL 含这段文字的'),
+        host: S.str('只看这个域名'),
+        app: S.str('只看这个应用'),
+        status: S.str('状态段，如 5xx'),
+        limit: S.int('最多看多少条流量（默认 2000）', { min: 1, max: 5000 }),
+        groups: S.int('返回多少个分组（默认 20）', { min: 1, max: 200 }),
+        slowest: S.int('最慢请求返回几条（默认 5）', { min: 0, max: 20 }),
+      },
+      additionalProperties: false,
+    },
+    run(ctx, args) {
+      const flows = ctx.server.store.list({
+        query: optString(args, 'q', 200) || '',
+        host: optString(args, 'host', 200) || '',
+        app: optString(args, 'app', 100) || '',
+        status: optString(args, 'status', 20) || '',
+        limit: optInt(args, 'limit', { min: 1, max: 5000 }) || 2000,
+      });
+      const out = aggregatePerf(flows, {
+        by: args.by === 'host' ? 'host' : 'route',
+        limit: optInt(args, 'groups', { min: 1, max: 200 }) || 20,
+        slowest: optInt(args, 'slowest', { min: 0, max: 20 }),
+      });
+      return { ...out, in_memory: ctx.server.store.flows.length };
     },
   },
 ];

@@ -1741,6 +1741,11 @@ class ConsoleServer {
    * 抓到的内容是不可信数据，不能让它以 html / svg 的身份在控制台同源里跑起来。
    */
   /** 脱敏配置视图：生效名单一起给出来，界面不用自己拼默认值 */
+  /** MCP 工具改完配置后统一落盘（没有 dataDir 就只在内存里生效） */
+  _persistConfig() {
+    if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+  }
+
   _redactView() {
     const cfg = normalizeRedact(this.config.redact);
     const sets = redactLists(cfg);

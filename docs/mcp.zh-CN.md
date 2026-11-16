@@ -44,7 +44,7 @@ iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户
 | 令牌 | 能做什么 |
 | --- | --- |
 | 只读 `read` | 看状态、查流量、读详情、列规则、读配置 |
-| 读写 `readwrite` | 以上全部 + 建 / 改 / 删规则、由流量生成 Mock、重放、清空列表、改弱网、改跳过解密白名单 |
+| 读写 `readwrite` | 以上全部 + 建 / 改 / 删规则、由流量生成 Mock、重放、清空列表、改弱网 / 跳过解密、断点、脚本、告警、域名映射、脱敏、派生列、标注 |
 
 只读令牌连 `tools/list` 都看不到写工具，调用会被 JSON-RPC 拒（`-32003`）。
 
@@ -63,6 +63,14 @@ iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户
 | `set_network_sim` | 开弱网、断网、超时，按应用 / 域名 / IP 加规则 |
 | `set_passthrough` | 管理「跳过解密的域名」 |
 | `clear_flows` | 清空内存里的流量列表 |
+| `perf_summary` | 按接口 / 域名聚合 P50 / P95 / 平均 / 最大 / 错误率 / 传输量 + 最慢请求 |
+| `list_breakpoints` / `set_breakpoints` | 读 / 写断点规则（URL 包含、方法、阶段、超时）；命中会挂起等人放行 |
+| `list_scripts` / `save_scripts` | 读 / 写沙箱脚本规则（`onRequest` / `onResponse`），保存前逐条编译，语法错不落盘 |
+| `list_alerts` / `set_alerts` | 读 / 写条件告警（状态码 / 域名 / URL / 正文 / 耗时组合匹配，带冷却与限速） |
+| `get_hostmap` / `set_hostmap` | 读 / 写域名映射：只改「连哪台机器」，URL / Host / 证书仍是原域名 |
+| `get_redact` / `set_redact` | 读 / 写脱敏开关（只作用于导出、MCP 输出与 `redact=1`，界面永远原值） |
+| `get_columns` / `set_columns` | 读 / 写派生列（把响应字段提成列表一列，最多 4 列，改完立即重算） |
+| `annotate_flow` | 给某条请求加备注 / 颜色 / 重点标记（合并语义，三个字段都空等于清掉） |
 
 流量攒到几千条时，别让 AI 从第一页开始翻。推荐两步：
 
