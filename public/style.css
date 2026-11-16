@@ -6086,12 +6086,16 @@ body.dragging-file::after {
 
 /* ---------------- 派生列：列表右侧多出来的几列 ---------------- */
 
-/* 列数由 JS 写在 :root 上；0 时 repeat(0, …) 不产生任何轨道，布局与之前一致 */
+/* 派生列走「隐式轨道」，千万别用 repeat(var(--dcols), …)：repeat() 的重复次数
+   必须是正整数，0 会让整条 grid-template-columns 失效，行就塌成单列
+   （方法 / 地址 / 状态 / 耗时各占一行，一屏只剩五六条）。没有派生列时
+   grid-auto-columns 不产生任何格子，布局与加功能之前完全一致。 */
 .listhead,
 .row {
   grid-template-columns:
-    calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale))
-    repeat(var(--dcols, 0), calc(104px * var(--ui-scale)));
+    calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale));
+  grid-auto-flow: column;
+  grid-auto-columns: calc(104px * var(--ui-scale));
 }
 
 .c-dcol {

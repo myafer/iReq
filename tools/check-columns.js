@@ -222,6 +222,44 @@ async function historyIds() {
     const afterSave = await jsonApi('/api/columns');
     ok('保存后服务端有 3 列', afterSave.body.columns.length === 3, afterSave.body.columns.length);
     ok('界面无脚本报错', errs.length === 0, errs.join(' | '));
+
+    /* 密度回归：派生列是往行里追加格子，一旦列模板写坏（例如 repeat(0, …)，
+       0 不是合法重复次数，整条 grid-template-columns 会失效），行会塌成单列——
+       方法 / 地址 / 状态 / 耗时各占一行，一屏只剩五六条。 */
+    const geometry = () =>
+      page.evaluate(() => {
+        const row = document.querySelector('.row');
+        const boxes = [...row.children].map((c) => c.getBoundingClientRect());
+        const centers = boxes.map((b) => Math.round(b.top + b.height / 2));
+        const lefts = boxes.map((b) => Math.round(b.left));
+        return {
+          centers,
+          lefts,
+          rowH: Math.round(row.getBoundingClientRect().height),
+          headH: Math.round(document.querySelector('.listhead').getBoundingClientRect().height),
+        };
+      });
+
+    const g2 = await geometry();
+    ok('派生列与基础列在同一行（垂直中心对齐）', new Set(g2.centers).size === 1, g2.centers.join(','));
+    // 这里已经有 3 列（面板里刚加了一列），派生列必须全部排在耗时右边且依次右移
+    const tail = g2.lefts.slice(4);
+    ok(
+      '派生列依次排在耗时右侧',
+      tail.length === 3 && tail.every((x, i) => x > g2.lefts[3] && (i === 0 || x > tail[i - 1])),
+      g2.lefts.join(',')
+    );
+    ok('有派生列时行高仍是一行两行文的高度', g2.rowH < 80, g2.rowH);
+    // 列多到放不下时表头允许折行，但不能塌成竖排
+    ok('有派生列时表头最多两行', g2.headH < 70, g2.headH);
+
+    await jsonApi('/api/columns', { method: 'PUT', body: { columns: [] } });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('.row');
+    const g0 = await geometry();
+    ok('没有派生列时行不塌成单列', new Set(g0.centers).size === 1, g0.centers.join(','));
+    ok('没有派生列时行高与加功能前一致', g0.rowH < 80, g0.rowH);
+    ok('没有派生列时表头一行', g0.headH < 45, g0.headH);
     await browser.close();
   }
 
