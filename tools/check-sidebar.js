@@ -38,6 +38,8 @@ const { seedFlows } = require('./_seed');
   const histLast = groups.length > 0 && groups[groups.length - 1].title === '历史记录';
   const histClosed = await page.$eval('.sgroup.hg', (e) => e.classList.contains('closed')).catch(() => false);
   checks.push(['历史记录排最后且默认收起', histLast && histClosed, `last=${groups[groups.length - 1] && groups[groups.length - 1].title} closed=${histClosed}`]);
+  const bookmarksClosed = await page.$eval('[data-group="bookmarks"]', (e) => e.classList.contains('closed')).catch(() => false);
+  checks.push(['收藏默认收起', bookmarksClosed]);
   const routesClosed = await page.$eval('[data-group="routes"]', (e) => e.classList.contains('closed')).catch(() => false);
   checks.push(['接口结构默认收起', routesClosed]);
   await page.click('[data-toggle="routes"]');

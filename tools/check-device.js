@@ -213,6 +213,12 @@ function viaLan(lan) {
   ok('筛选条件用合并后的 key', filtered.ip === 'local' && filtered.rows > 0);
   ok('筛选结果只有本机地址', filtered.ips.every((ip) => ['127.0.0.1', LAN, '::1'].includes(ip)));
 
+  // 收藏分组默认收起：先展开，否则「收藏当前筛选」不可见
+  await page.evaluate(() => {
+    const g = document.querySelector('[data-group="bookmarks"]');
+    if (g && g.classList.contains('closed')) g.querySelector('[data-toggle="bookmarks"]').click();
+  });
+  await page.waitForTimeout(250);
   const saveBtn = await page.$('[data-save-bookmark]');
   if (saveBtn) {
     await saveBtn.click();

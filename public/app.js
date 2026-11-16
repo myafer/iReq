@@ -1436,7 +1436,7 @@ function activeFilterKeys() {
 
 /* 侧栏分组的折叠判定：closedGroups 记「明确收起」，openedGroups 记「明确展开」。
  * 历史记录与接口结构是低频入口（接口结构尤其长），默认收起，只露标题和条数。 */
-const DEFAULT_CLOSED_GROUPS = new Set(['history', 'routes']);
+const DEFAULT_CLOSED_GROUPS = new Set(['history', 'routes', 'bookmarks']);
 
 function groupClosed(key) {
   if (S.closedGroups.has(key)) return true;
@@ -1771,12 +1771,24 @@ function routeGroupHtml(section) {
   </div>`;
 }
 
+/** 书签的可读描述：悬停时给一行「应用 X · 域名 Y」，不再甩一坨 JSON */
+function bookmarkFilterText(filter) {
+  // 固定顺序（应用 → 设备 → 域名 → 接口 → 搜索），别按 JSON 键序乱排
+  const parts = ['app', 'ip', 'host', 'route', 'q']
+    .filter((k) => {
+      const v = (filter || {})[k];
+      return v !== '' && v != null && !(Array.isArray(v) && v.length === 0);
+    })
+    .map((k) => `${FILTER_LABELS[k] || k} ${facetDisplay(k, filter[k])}`);
+  return parts.length ? parts.join(' · ') : '全部请求';
+}
+
 function bookmarkGroupHtml() {  const closed = groupClosed('bookmarks');
   const active = activeFilterKeys().length > 0;
   const items = S.bookmarks
     .map(
       (b) => `<div class="sitem ${sameFilter(b.filter) ? 'on' : ''}" data-bookmark="${b.id}" title="${esc(
-        JSON.stringify(b.filter)
+        bookmarkFilterText(b.filter)
       )}">
         <span class="lbl">★ ${esc(b.label)}</span>
         <button class="del" data-del-bookmark="${b.id}" title="删除书签">✕</button>
@@ -1793,7 +1805,7 @@ function bookmarkGroupHtml() {  const closed = groupClosed('bookmarks');
       ${active ? '<div class="sitem" data-save-bookmark="1"><span class="lbl">＋ 收藏当前筛选</span></div>' : ''}
       ${
         !S.bookmarks.length && !active
-          ? '<div class="side-empty">在请求详情里点「收藏」，会把这条请求的「应用 + 接口」存成书签</div>'
+          ? '<div class="side-empty">详情里点「收藏」即可存成书签</div>'
           : ''
       }
     </div>
@@ -1862,6 +1874,9 @@ function renderChips() {
 async function saveBookmark(filter, label) {
   try {
     await api('/api/bookmarks', { method: 'POST', body: { filter, label } });
+    // 收藏是「手动」动作：顺手把分组张开，让刚存的这条看得见（默认是收起的）
+    S.openedGroups.add('bookmarks');
+    localStorage.setItem('reqlite-side-opened', JSON.stringify([...S.openedGroups]));
     await loadBookmarks();
     toast('已收藏');
   } catch (err) {

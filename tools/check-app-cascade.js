@@ -212,6 +212,12 @@ async function waitUi() {
     });
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForTimeout(700);
+    // 收藏分组默认收起：先展开再点书签
+    await page.evaluate(() => {
+      const g = document.querySelector('[data-group="bookmarks"]');
+      if (g && g.classList.contains('closed')) g.querySelector('[data-toggle="bookmarks"]').click();
+    });
+    await page.waitForTimeout(250);
     await page.click('[data-bookmark]');
     await page.waitForTimeout(700);
     push('老书签应用后列表 2 条（应用归一成数组）', await page.evaluate(() =>

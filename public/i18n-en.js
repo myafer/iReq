@@ -143,7 +143,7 @@ window.ReqLiteI18N_EN = {
   "响应体": "Response body",
   "响应头": "Response headers",
   "响应设置": "Response settings",
-      "在请求详情里点「收藏」，会把这条请求的「应用 + 接口」存成书签": "Click \"Bookmark\" in a request's details to save its \"App + API\" as a bookmark",
+      "详情里点「收藏」即可存成书签": "Click \"Bookmark\" in the details to save one",
   "地址": "URL",
   "域名": "Host",
   "基本信息": "Basic info",
