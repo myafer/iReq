@@ -26,6 +26,8 @@ const usedIds = new Set(
 // 由 renderDetail() / 规则树面包屑动态插入的元素，不在 index.html 静态结构中
 const DYNAMIC = new Set([
   'tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'actNet', 'actBreak', 'actMap', 'actBase', 'rtCrumbBack',
+  // 详情头部的关闭按钮、请求/响应页里「头部 ↔ 正文」的分割条
+  'detailClose', 'dSplit',
   // 「消息」页签（WebSocket 帧 / SSE 消息）整块由 tabMessages() 现渲染
   'msgList', 'msgCount', 'msgDirBar', 'msgDropped', 'msgBytes', 'msgComments',
 ]);

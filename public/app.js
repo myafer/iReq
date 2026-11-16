@@ -16,6 +16,8 @@ const S = {
   selectedId: null,
   selected: null,
   detailTab: 'overview',
+  /* 详情面板按需打开：没选中请求时不占位，列表吃满宽度 */
+  detailOpen: false,
   filter: { q: '', status: '', mocked: false, host: '', ip: '', app: [], route: '' },
   /* 列表排序：'' = 时间倒序（内存队列本来的顺序）。其余见 SORT_LABELS。
    * 排序只在实时列表生效 —— 历史回看是倒序分块读文件，跨块排序得整份读进内存。 */
@@ -574,11 +576,30 @@ function backToLive() {
   loadFlows();
 }
 
+/**
+ * 列表上方偶尔会多出「正在查看历史 / 对比基准」两条提示（只属于列表区）。
+ * 它们会把列表表头往下推，分组栏标题就会跟着错位 —— 这里把同样的高度补给边栏，
+ * 让两栏的第一行永远在同一条线上。
+ */
+function syncSideHeadOffset() {
+  if (NARROW.matches) {
+    document.documentElement.style.removeProperty('--side-pre');
+    return;
+  }
+  let h = 0;
+  for (const id of ['#histBar', '#cmpBar']) {
+    const el = $(id);
+    if (el && !el.hidden) h += el.getBoundingClientRect().height;
+  }
+  document.documentElement.style.setProperty('--side-pre', Math.round(h) + 'px');
+}
+
 function syncHistBar() {
   const bar = $('#histBar');
   if (!bar) return;
   const item = S.historyView;
   bar.hidden = !item;
+  syncSideHeadOffset();
   if (!item) return;
   const name = $('#histBarName');
   if (name) name.textContent = item.name;
@@ -895,7 +916,7 @@ function rowHtml(f) {
     <span class="m ${esc(f.method)}">${esc(f.method)}</span>
     <span class="cellurl">
       <div class="p">${pin}${esc(p)}</div>
-      <div class="h">${sub}${badges}</div>
+      <div class="h" title="${esc(f.host)}${appName ? ' · ' + esc(appName) : ''}">${sub}${badges}</div>
     </span>
     <span class="st ${statusClass(f.status)}">${esc(stText)}</span>
     <span class="tm ${f.duration > 800 ? 'slow' : ''}">${
@@ -907,6 +928,23 @@ function rowHtml(f) {
       .map((c) => `<span class="c-dcol" title="${esc(c.name)}">${esc((f.derived || {})[c.id] || '')}</span>`)
       .join('')}
   </div>`;
+}
+
+/* ---------------------------------------------- 列表行里的长域名：折叠 / 展开 */
+
+/** 真被截断了才允许展开（用 scrollWidth 判定，换字体 / 缩放都准） */
+function markHostOverflow(row) {
+  if (!row || row.classList.contains('host-open')) return;
+  const hl = row.querySelector('.cellurl .h .hl');
+  if (!hl) return;
+  if (hl.scrollWidth > hl.clientWidth + 1) row.dataset.trunc = '1';
+  else delete row.dataset.trunc;
+}
+
+/** 展开 / 收起：展开后换行显示完整域名，行长跟着变，再点收起 */
+function toggleHostExpand(row) {
+  row.classList.toggle('host-open');
+  markHostOverflow(row);
 }
 
 /* -------------------------------------------------- 握手失败（连接层诊断行）
@@ -1003,9 +1041,7 @@ function removeTlsFailures(rules) {
   S.tlsFailures = S.tlsFailures.filter((f) => !hit(f.host));
   syncTlsBadge();
   if (gone.some((f) => S.selectedId === TLS_ROW_PREFIX + f.host)) {
-    S.selectedId = null;
-    S.selected = null;
-    $('#detail').innerHTML = detailEmptyHtml;
+    closeDetail();
   }
   scheduleRender();
   return gone.length;
@@ -1381,9 +1417,7 @@ function clearFlowsUi({ resetDetail = false } = {}) {
   renderCmpBar();
   renderList();
   if (resetDetail) {
-    S.selectedId = null;
-    S.selected = null;
-    $('#detail').innerHTML = detailEmptyHtml;
+    closeDetail();
   }
   resetFacetsNow();
 }
@@ -2043,9 +2077,147 @@ function bindSplitter(which) {
 
 /* ---------------------------------------------------------------- 详情 */
 
+/**
+ * 详情面板的开关。
+ * 没选中请求时不给它留位置：列表吃满宽度（一屏能多看好几列、URL 也不用挤成省略号）。
+ * 一旦选中就打开；右上角 ✕ 关掉后回到「只有列表」的状态，再点任意一行又会打开。
+ */
+function setDetailOpen(open) {
+  const want = !!open;
+  S.detailOpen = want;
+  const shell = $('#shell');
+  if (shell) shell.classList.toggle('no-detail', !want);
+  if (want) requestAnimationFrame(() => applyPaneWidths());
+}
+
+function closeDetail() {
+  stopMsgPoll();
+  S.selectedId = null;
+  S.selected = null;
+  $$('.row').forEach((r) => r.classList.remove('sel'));
+  const pane = $('#detail');
+  if (pane) pane.innerHTML = detailEmptyHtml;
+  setDetailOpen(false);
+}
+
+/* -------------------------------------- 详情里「头部 ↔ 正文」的上下分割线 */
+
+const DETAIL_SPLIT_KEY = 'reqlite-detail-split';
+
+/** 拖过分就按存下来的像素走；没拖过用 38% 的默认比例 */
+function bindDetailSplit(pane) {
+  const body = pane.querySelector('.dbody.can-split');
+  const bar = pane.querySelector('#dSplit');
+  const top = body && body.querySelector('.sec.split-top');
+  if (!body || !bar || !top) return;
+
+  let saved = 0;
+  try {
+    saved = Number(localStorage.getItem(DETAIL_SPLIT_KEY)) || 0;
+  } catch (_) {
+    saved = 0;
+  }
+  if (saved > 60) body.style.setProperty('--split-h', Math.round(saved) + 'px');
+
+  // 上下都要留出「看得见」的最小高度：上 88，下 140
+  const limits = () => [88, Math.max(140, body.getBoundingClientRect().height - 140)];
+  const syncAria = () => {
+    const [lo, hi] = limits();
+    bar.setAttribute('aria-valuemin', String(Math.round(lo)));
+    bar.setAttribute('aria-valuemax', String(Math.round(hi)));
+    bar.setAttribute('aria-valuenow', String(Math.round(top.getBoundingClientRect().height)));
+  };
+  const apply = (px, persist) => {
+    const [lo, hi] = limits();
+    const v = clampNum(px, lo, hi);
+    body.style.setProperty('--split-h', Math.round(v) + 'px');
+    if (persist) {
+      try {
+        localStorage.setItem(DETAIL_SPLIT_KEY, String(Math.round(v)));
+      } catch (_) {
+        /* 隐私模式：只在本次会话内生效 */
+      }
+    }
+    syncAria();
+    return v;
+  };
+  const reset = () => {
+    body.style.removeProperty('--split-h');
+    try {
+      localStorage.removeItem(DETAIL_SPLIT_KEY);
+    } catch (_) {
+      /* noop */
+    }
+    syncAria();
+  };
+
+  let active = false;
+  let startY = 0;
+  let startH = 0;
+  let lastH = 0;
+
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    active = true;
+    startY = e.clientY;
+    startH = top.getBoundingClientRect().height;
+    lastH = startH;
+    try {
+      bar.setPointerCapture(e.pointerId);
+    } catch (_) {
+      /* 老浏览器靠 pointerup 兜底 */
+    }
+    bar.classList.add('dragging');
+    document.body.classList.add('resizing-v');
+    e.preventDefault();
+  });
+
+  bar.addEventListener('pointermove', (e) => {
+    if (!active) return;
+    lastH = apply(startH + (e.clientY - startY), false);
+  });
+
+  const finish = () => {
+    if (!active) return;
+    active = false;
+    bar.classList.remove('dragging');
+    document.body.classList.remove('resizing-v');
+    apply(lastH, true);
+  };
+  bar.addEventListener('pointerup', finish);
+  bar.addEventListener('pointercancel', finish);
+  bar.addEventListener('lostpointercapture', finish);
+
+  bar.addEventListener('dblclick', () => {
+    reset();
+    toast('上下比例已复位');
+  });
+
+  bar.addEventListener('keydown', (e) => {
+    const cur = top.getBoundingClientRect().height;
+    let next;
+    if (e.key === 'ArrowUp') next = cur - (e.shiftKey ? 48 : 16);
+    else if (e.key === 'ArrowDown') next = cur + (e.shiftKey ? 48 : 16);
+    else if (e.key === 'Home') {
+      reset();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    } else return;
+    apply(next, true);
+    e.preventDefault();
+    // 全局 ↑↓ 是「上一条 / 下一条请求」，焦点在这条分割线上时别抢走
+    e.stopPropagation();
+  });
+
+  syncAria();
+}
+
 async function selectFlow(id) {
   if (!id) return;
   S.selectedId = id;
+  // 先开面板再渲染：不开的话详情写进隐藏的容器里，量出来的宽高全是 0
+  setDetailOpen(true);
   $$('.row').forEach((r) => r.classList.toggle('sel', r.dataset.id === id));
   // 握手失败行不是 flow，详情数据就在前端的聚合记录里，不必请求 /api/flows/:id
   if (id.startsWith(TLS_ROW_PREFIX)) {
@@ -2103,7 +2275,7 @@ function headersKv(headers, side) {
 }
 
 /** 请求头/响应头区块：行 hover 复制 + 复制全部（k: v）/ 复制 JSON */
-function headerSec(title, headers, side) {
+function headerSec(title, headers, side, cls = '') {
   const n = Object.keys(headers || {}).length;
   const tools = n
     ? `<span class="body-tools">
@@ -2111,7 +2283,15 @@ function headerSec(title, headers, side) {
         <button class="body-tool" data-hd-json="${side}" title="复制为 JSON 对象">复制 JSON</button>
       </span>`
     : '';
-  return `<div class="sec"><div class="sec-head">${esc(title)} <span class="hint">${n} 项</span>${tools}<span class="fill"></span></div>${headersKv(headers, side)}</div>`;
+  return `<div class="sec${cls ? ' ' + cls : ''}"><div class="sec-head">${esc(title)} <span class="hint">${n} 项</span>${tools}<span class="fill"></span></div>${headersKv(headers, side)}</div>`;
+}
+
+/** 请求 / 响应页：头部与正文之间一条可上下拖的线，把高度分给更关心的那半 */
+function splitLayout(headHtml, bodyHtml) {
+  return `${headHtml}
+    <div class="hsplit" id="dSplit" role="separator" aria-orientation="horizontal" tabindex="0"
+      title="上下拖动调整高度 · 双击复位"></div>
+    ${bodyHtml}`;
 }
 
 /** 原始报文文本（渲染与复制共用一份逻辑） */
@@ -2136,6 +2316,7 @@ function renderTlsDetail(pane, f) {
       <div class="dline">
         <span class="dmethod tls">TLS</span>
         <span class="durl">${esc(f.host)}</span>
+        <button class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
       </div>
       <div class="dmeta">
         <span class="st fail">连接失败</span>
@@ -2165,6 +2346,7 @@ function renderTlsDetail(pane, f) {
         <p class="hint">客户端不认 iReq 的根证书（证书固定 / 自带校验），或这个端口跑的不是 HTTP。加入「跳过解密的域名」后改为原样透传，App 能连上，但看不到明文。</p>
       </div>
     </div>`;
+  pane.querySelector('#detailClose')?.addEventListener('click', closeDetail);
 }
 
 function renderDetail() {
@@ -2203,11 +2385,15 @@ function renderDetail() {
       ? tabDiff(f, cmpId)
       : tabRaw(f);
 
+  // 请求 / 响应页才有「头部 ↔ 正文」这条可上下拖的线
+  const splitTab = S.detailTab === 'request' || S.detailTab === 'response';
+
   pane.innerHTML = `
     <div class="dhead">
       <div class="dline">
         <span class="dmethod">${esc(f.method)}</span>
         <span class="durl">${urlHtml(f)}</span>
+        <button class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
       </div>
       <div class="dmeta">
         <span class="st ${statusClass(f.status)}">${esc(f.error ? 'ERR' : f.status || '—')} ${esc(f.statusText || '')}</span>
@@ -2241,7 +2427,7 @@ function renderDetail() {
         <button data-tab="copy-body" class="hint">复制响应体</button>
       </div>
     </div>
-    <div class="dbody">${bodyHtml}</div>`;
+    <div class="dbody${splitTab ? ' can-split' : ''}">${bodyHtml}</div>`;
 
   $('#tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
@@ -2256,6 +2442,9 @@ function renderDetail() {
     S.detailTab = btn.dataset.tab;
     renderDetail();
   });
+
+  $('#detailClose')?.addEventListener('click', closeDetail);
+  if (splitTab) bindDetailSplit(pane);
 
   $('#actReplay')?.addEventListener('click', openReplay);
   $('#actMock')?.addEventListener('click', () => openQuickMock(f));
@@ -2743,7 +2932,7 @@ function bodyUrlOf(f, kind, dl) {
   return `/api/flows/${encodeURIComponent(f.id)}/body?${q}`;
 }
 
-function bodySection(title, sizeLabel, body, contentType, kind, bin) {
+function bodySection(title, sizeLabel, body, contentType, kind, bin, cls = '') {
   const raw = String(body == null ? '' : body);
   const prettyText = pretty(raw, contentType);
   const json = JE() ? JE().looksLikeJSON(prettyText) : false;
@@ -2754,23 +2943,27 @@ function bodySection(title, sizeLabel, body, contentType, kind, bin) {
   if (bin && !['preview', 'base64', 'hex'].includes(S.bodyView[kind].mode)) S.bodyView[kind].mode = bin.isImage ? 'preview' : 'base64';
   const mode = S.bodyView[kind].mode;
   const fs = !!S.bodyView[kind].fs;
-  const btn = (m, label, tip) =>
-    `<button class="body-tool ${mode === m ? 'on' : ''}" data-body-mode="${m}" data-body-kind="${kind}" title="${tip || label}">${label}</button>`;
+  // 视图切换用和顶部页签同一套外观（.tabs），「全屏 / 下载 / 复制」留在右侧工具区
+  const tab = (m, label, tip) =>
+    `<button class="${mode === m ? 'on' : ''}" data-body-mode="${m}" data-body-kind="${kind}" title="${esc(tip || label)}">${label}</button>`;
   const foldBtns =
     json && mode === 'pretty'
       ? `<button class="body-tool" data-body-fold="1" data-body-kind="${kind}" title="展开全部对象和数组">展开全部</button>
          <button class="body-tool" data-body-fold="0" data-body-kind="${kind}" title="收起全部对象和数组">折叠全部</button>`
       : '';
-  const binBtns = bin
-    ? `${bin.isImage ? btn('preview', '预览', '渲染图片预览') : ''}${btn('base64', 'Base64', '完整 base64 文本')}${btn('hex', 'Hex', '十六进制 dump（前 4KB）')}`
-    : '';
+  const modeTabs = bin
+    ? `${bin.isImage ? tab('preview', '预览', '渲染图片预览') : ''}${tab('base64', 'Base64', '完整 base64 文本')}${tab(
+        'hex',
+        'Hex',
+        '十六进制 dump（前 4KB）'
+      )}`
+    : `${tab('pretty', '结构化', '格式化 JSON，每层可折叠')}${tab('raw', '原始', '未经处理的原文')}`;
   const dlUrl = bodyUrlOf(S.selected, kind, true);
   // 走服务端原始字节，不再把 base64 塞进 data URI：几十 MB 的响应塞进 DOM 会直接卡死
   const dlBtn = dlUrl
     ? `<a class="body-tool" href="${esc(dlUrl)}" download title="保存为本地文件（原始字节，不经过 base64）">下载</a>`
     : '';
   const tools = `<span class="body-tools">
-    ${bin ? binBtns : `${btn('pretty', '结构化', '格式化 JSON，每层可折叠')}${btn('raw', '原始', '未经处理的原文')}`}
     ${foldBtns}
     <button class="body-tool" data-body-fs="${kind}" title="全屏查看，Esc 退出">${fs ? '⤡ 退出全屏' : '⤢ 全屏'}</button>
     ${dlBtn}
@@ -2802,21 +2995,26 @@ function bodySection(title, sizeLabel, body, contentType, kind, bin) {
   }
   const lineCount = !bin && raw ? (mode === 'raw' ? raw : prettyText).split('\n').length : 0;
   const head = `${esc(title)} <span class="hint">${esc(sizeLabel)}${lineCount ? ` · ${lineCount} 行` : ''}</span>${tools}<span class="fill"></span>`;
-  return `<div class="sec${fs ? ' body-fs' : ''}"><div class="sec-head">${head}</div>${view}</div>`;
+  return `<div class="sec${cls ? ' ' + cls : ''}${fs ? ' body-fs' : ''}">
+    <div class="sec-head">${head}</div>
+    <div class="tabs sec-tabs">${modeTabs}</div>
+    ${view}</div>`;
 }
 
 function tabRequest(f) {
   const bin = binInfoOf(f, 'request');
-  return `
-    ${headerSec('请求头', f.reqHeaders, 'req')}
-    ${bodySection('请求体', fmtSize(f.reqSize), f.reqBody || '', (f.reqHeaders || {})['content-type'], 'request', bin)}`;
+  return splitLayout(
+    headerSec('请求头', f.reqHeaders, 'req', 'split-top'),
+    bodySection('请求体', fmtSize(f.reqSize), f.reqBody || '', (f.reqHeaders || {})['content-type'], 'request', bin, 'split-bottom')
+  );
 }
 
 function tabResponse(f) {
   const bin = binInfoOf(f, 'response');
-  return `
-    ${headerSec('响应头', f.resHeaders, 'res')}
-    ${bodySection('响应体', fmtSize(f.resSize), f.resBody || '', f.resContentType, 'response', bin)}`;
+  return splitLayout(
+    headerSec('响应头', f.resHeaders, 'res', 'split-top'),
+    bodySection('响应体', fmtSize(f.resSize), f.resBody || '', f.resContentType, 'response', bin, 'split-bottom')
+  );
 }
 
 function tabRaw(f) {
@@ -2863,6 +3061,7 @@ function renderCmpBar() {
   if (!bar) return;
   const m = S.cmpBaseMeta;
   bar.hidden = !(S.cmpBaseId && m);
+  syncSideHeadOffset();
   if (bar.hidden) return;
   $('#cmpBarName').textContent = `${m.method || ''} ${m.path || m.url || ''}`.trim();
   $('#cmpBarMeta').textContent = [m.host, m.status ? `${m.status}` : '进行中', fmtTime(m.duration)]
@@ -7503,7 +7702,18 @@ function bind() {
       return; // 别顺手选中这条马上要消失的诊断行
     }
     const row = e.target.closest('.row');
-    if (row) selectFlow(row.dataset.id);
+    if (!row) return;
+    // 域名被折成省略号时，点这行小字是「展开看全 / 再点收起」，不是选中
+    if (row.dataset.trunc === '1' && e.target.closest('.cellurl .h')) {
+      toggleHostExpand(row);
+      return;
+    }
+    selectFlow(row.dataset.id);
+  });
+  // 只有真被截断的行才给「可展开」的手感（用 scrollWidth 判，别猜字符数）
+  $('#list').addEventListener('mouseover', (e) => {
+    const row = e.target.closest('.row');
+    if (row) markHostOverflow(row);
   });
   $('#list').addEventListener('contextmenu', (e) => {
     const row = e.target.closest('.row');
@@ -8440,9 +8650,7 @@ function bind() {
       S.tlsFailures = [];
       syncTlsBadge();
       if (String(S.selectedId || '').startsWith(TLS_ROW_PREFIX)) {
-        S.selectedId = null;
-        S.selected = null;
-        $('#detail').innerHTML = detailEmptyHtml;
+        closeDetail();
       }
       scheduleRender();
     } else if (msg.type === 'passthrough') {
@@ -9299,6 +9507,7 @@ async function init() {
   NARROW.addEventListener('change', () => {
     syncSideForViewport();
     applyPaneWidths();
+    syncSideHeadOffset();
   });
   window.addEventListener('resize', applyPaneWidths);
   // 筛选「更多」是 fixed 定位，窗口缩放或筛选条横向滚动后会和触发器脱钩，直接收起

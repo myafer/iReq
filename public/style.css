@@ -6808,3 +6808,222 @@ body.dragging-file::after {
   min-width: calc(150px * var(--ui-scale));
   max-width: calc(220px * var(--ui-scale));
 }
+
+/* ======================================================= 布局打磨（1.4.0） */
+
+/* ---------------------------------------------- 分组栏标题 ═ 列表表头 */
+/* 用同一个 --head-h：两栏的第一行同高、底边同一条线，不再一高一低 */
+:root {
+  --head-h: calc(34px * var(--ui-scale));
+}
+
+.listhead {
+  height: var(--head-h);
+  padding: 0 12px;
+  align-items: center;
+}
+
+.side-head {
+  height: var(--head-h);
+  min-height: 0;
+  padding: 0 5px 0 10px;
+  /* 列表上方出现「历史 / 对比」提示条时，把同样的高度补给边栏，两栏第一行仍对齐 */
+  margin-top: var(--side-pre, 0px);
+}
+
+/* -------------------------------------------------- 详情面板按需打开 */
+/* 没选中请求时详情不占位：列表直接吃满宽度，一屏能多看好几列 */
+.shell.no-detail .layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell.no-detail #splitList,
+.shell.no-detail #detail {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .shell.no-detail .layout {
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+/* 详情：头部固定、正文自己滚（上下分割线要有「可分配的高度」才有意义） */
+.detailpane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detailpane > .dhead {
+  flex: none;
+}
+
+.detailpane > .dbody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 关闭按钮：贴在头部右上角，不跟一堆操作按钮抢位置 */
+.dclose {
+  margin-left: auto;
+  flex: none;
+  align-self: flex-start;
+  color: var(--muted);
+}
+
+.dclose:hover {
+  color: var(--err);
+}
+
+/* ------------------------------------ 请求 / 响应：头部 ↔ 正文可上下拖 */
+.dbody.can-split {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.dbody.can-split > .sec.split-top:not(.body-fs) {
+  flex: 0 0 auto;
+  height: var(--split-h, 38%);
+  min-height: 88px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 16px 4px;
+}
+
+.dbody.can-split > .sec.split-bottom:not(.body-fs) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 6px 16px 32px;
+}
+
+.hsplit {
+  position: relative;
+  flex: none;
+  height: 9px;
+  background: transparent;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.hsplit::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+/* 中间的小握把：告诉用户这里可以拉 */
+.hsplit::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  transition: background 0.15s;
+  pointer-events: none;
+}
+
+.hsplit:hover::after,
+.hsplit.dragging::after,
+.hsplit:focus-visible::after {
+  background: var(--accent);
+}
+
+.hsplit:hover::before,
+.hsplit.dragging::before,
+.hsplit:focus-visible::before {
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.hsplit:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+body.resizing-v,
+body.resizing-v * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+/* ----------------------- 正文里的视图切换：和顶部页签同一套外观 */
+.sec-tabs {
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 8px;
+}
+
+/* ------------------------------------------- 长域名：折叠 + 点开看全 */
+.cellurl {
+  position: relative;
+}
+
+.cellurl .h,
+.cellurl .h .hl {
+  min-width: 0;
+}
+
+.cellurl .h .hl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 被截断才给「可展开」的手感；展开后换行显示全部 */
+.row[data-trunc='1'] .cellurl .h {
+  cursor: zoom-in;
+}
+
+.row[data-trunc='1']:hover .cellurl::after,
+.row.host-open .cellurl::after {
+  content: '⌄';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 15px;
+  height: 13px;
+  line-height: 11px;
+  text-align: center;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
+  background: linear-gradient(90deg, transparent, var(--panel) 40%);
+  pointer-events: none;
+}
+
+.row[data-trunc='1']:hover {
+  background: var(--panel-2);
+}
+
+.row.host-open .cellurl::after {
+  content: '⌃';
+  color: var(--accent);
+}
+
+.row.host-open .cellurl .h {
+  flex-wrap: wrap;
+  white-space: normal;
+  overflow: visible;
+  align-items: flex-start;
+}
+
+.row.host-open .cellurl .h .hl {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}

@@ -30,6 +30,7 @@ const SUITES = [
   ['空状态', 'check-empty-state.js'],
   ['滚动条', 'check-scrollbar.js'],
   ['分栏拖动', 'check-splitters.js'],
+  ['详情面板（按需打开 / 上下分割线 / 长域名展开）', 'check-detail-pane.js'],
   ['界面字号', 'check-scale.js'],
   ['Mock 编辑器', 'check-mock-editor.js'],
   ['规则工作区', 'check-rule-workspace.js'],

@@ -18,6 +18,11 @@ const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
 
   await page.goto(`${UI}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(900);
+  // 刚装好还没走过引导时，欢迎层会盖住列表（本套自检要真的点行）
+  await page.evaluate(() => {
+    const w = document.querySelector('#modalWelcome');
+    if (w && !w.hidden) w.hidden = true;
+  });
 
   const geo = () =>
     page.evaluate(() => {
@@ -59,6 +64,19 @@ const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
     await page.mouse.up();
     await page.waitForTimeout(150);
   };
+
+  /* ------------------------------------------------ 详情按需打开（默认关） */
+  const gClosed = await geo();
+  console.log('未选中:', JSON.stringify(gClosed));
+  checks.push(['未选中请求时详情不占位', gClosed.detail.display === 'none' && gClosed.splitList.display === 'none']);
+  checks.push(['未选中时列表吃满宽度', gClosed.list.w >= gClosed.layout.w - 2]);
+  checks.push(['未选中时无横向溢出', gClosed.overflowX <= 0]);
+
+  await page.click('.row');
+  await page.waitForTimeout(500);
+  const gOpen = await geo();
+  checks.push(['选中后详情自动打开', gOpen.detail.display !== 'none' && gOpen.detail.w > 260]);
+  checks.push(['选中后第二根线出现', gOpen.splitList.display !== 'none' && gOpen.splitList.w === 1]);
 
   /* ------------------------------------------------------------ 初始形态 */
   const g0 = await geo();
@@ -103,6 +121,9 @@ const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
   /* ------------------------------------------------------------- 持久化 */
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
+  // 刷新后详情回到「按需打开」的初始态，重新选中一条再看宽度是否记住
+  await page.click('.row');
+  await page.waitForTimeout(500);
   const g3 = await geo();
   console.log('刷新后:', JSON.stringify(g3));
   checks.push(['刷新后两根线宽度保持', near(g3.side.w, g2.side.w, 2) && near(g3.list.w, g2.list.w, 2)]);
@@ -158,6 +179,18 @@ const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
   await page.waitForTimeout(400);
   const gBack = await geo();
   checks.push(['回到宽屏两根线自动恢复', gBack.splitSide.display !== 'none' && gBack.splitList.display !== 'none']);
+
+  /* ------------------------------------------------ ✕ 关闭，列表吃满宽度 */
+  await page.click('#detailClose');
+  await page.waitForTimeout(300);
+  const gClose = await geo();
+  console.log('关闭详情:', JSON.stringify(gClose));
+  checks.push(['点 ✕ 后详情收起', gClose.detail.display === 'none' && gClose.splitList.display === 'none']);
+  checks.push(['关闭后列表吃满宽度', gClose.list.w >= gClose.layout.w - 2]);
+  await page.click('.row');
+  await page.waitForTimeout(400);
+  const gReopen = await geo();
+  checks.push(['再点一行又能打开', gReopen.detail.display !== 'none' && gReopen.detail.w > 260]);
 
   checks.push(['无 JS 报错', errs.length === 0]);
   console.log('\n--- 结果 ---');
