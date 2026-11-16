@@ -7027,3 +7027,11 @@ body.resizing-v * {
   text-overflow: clip;
   overflow-wrap: anywhere;
 }
+
+/* ------------------------------------------- 历史记录：侧栏最下面 + 默认收起 */
+/* 低频入口：默认只露一行标题，展开才把归档列出来；放在最后不挤占高频分组 */
+.sgroup.hg {
+  margin-top: 6px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+}

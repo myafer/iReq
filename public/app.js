@@ -93,7 +93,10 @@ const S = {
   historyStats: { count: 0, bytes: 0 },
   historyView: null,
   historyRenaming: null,
-  closedGroups: new Set(JSON.parse(localStorage.getItem('reqlite-side-closed') || '[]')),
+  /* 侧栏折叠态。历史记录是低频入口：默认收起、排在侧栏最下面，
+   * 所以默认值里带 'history'；换 -v2 键做一次性迁移，免得老用户本地存的
+   * 「展开」把它又顶开（其它分组的折叠状态会重置一次，代价可接受）。 */
+  closedGroups: new Set(JSON.parse(localStorage.getItem('reqlite-side-closed-v2') || '["history"]')),
   /* 接口结构树：与默认展开态相反的目录 key（顶层默认展开，深层默认收起） */
   routeToggled: new Set(JSON.parse(localStorage.getItem('reqlite-route-toggled') || '[]')),
 };
@@ -1595,13 +1598,13 @@ function renderSide() {
   // 上面的收藏 / 设备分组不再展示，应用分组本身始终显示全部应用
   const appChecked = S.filter.app.length > 0;
   const groups = [];
-  // 历史记录放最上面：清空之后第一件想做的事就是「刚才那些还在吗」
-  groups.push(historyGroupHtml());
   if (!appChecked) groups.push(bookmarkGroupHtml());
   for (const section of FACET_SECTIONS) {
     if (appChecked && section.key === 'devices') continue;
     groups.push(facetGroupHtml(section));
   }
+  // 历史记录是低频入口：默认收起并排在最下面，别把高频的域名 / 接口挤出首屏
+  groups.push(historyGroupHtml());
   body.innerHTML = groups.join('');
   if (S.historyRenaming) focusHistInput();
 }
@@ -7805,7 +7808,7 @@ function bind() {
       const key = toggle.dataset.toggle;
       if (S.closedGroups.has(key)) S.closedGroups.delete(key);
       else S.closedGroups.add(key);
-      localStorage.setItem('reqlite-side-closed', JSON.stringify([...S.closedGroups]));
+      localStorage.setItem('reqlite-side-closed-v2', JSON.stringify([...S.closedGroups]));
       const group = toggle.closest('.sgroup');
       if (group) group.classList.toggle('closed');
       return;

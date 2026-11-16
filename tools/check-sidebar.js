@@ -34,6 +34,20 @@ const { seedFlows } = require('./_seed');
   ]);
   checks.push(['四个数据维度都有条目', ['设备', '应用', '域名', '接口结构'].every((t) => groups.find((g) => g.title === t)?.items > 0)]);
 
+  // 历史记录是低频入口：排在最后、默认收起（展开后要把状态记住）
+  const histLast = groups.length > 0 && groups[groups.length - 1].title === '历史记录';
+  const histClosed = await page.$eval('.sgroup.hg', (e) => e.classList.contains('closed')).catch(() => false);
+  checks.push(['历史记录排最后且默认收起', histLast && histClosed, `last=${groups[groups.length - 1] && groups[groups.length - 1].title} closed=${histClosed}`]);
+  await page.click('[data-toggle="history"]');
+  await page.waitForTimeout(250);
+  const histOpenRows = await page.$$eval('.sgroup.hg .hg-row', (els) => els.filter((e) => e.offsetParent !== null).length);
+  const histOpen = await page.$eval('.sgroup.hg', (e) => !e.classList.contains('closed'));
+  const stored = await page.evaluate(() => localStorage.getItem('reqlite-side-closed-v2'));
+  checks.push(['展开历史记录能看到归档行', histOpen && histOpenRows > 0 && String(stored).includes('history') === false,
+    `open=${histOpen} rows=${histOpenRows} stored=${stored}`]);
+  await page.click('[data-toggle="history"]');
+  await page.waitForTimeout(200);
+
   const hosts = await page.$$eval('[data-facet="host"]', (els) =>
     els.slice(0, 3).map((e) => e.textContent.trim().replace(/\s+/g, ' '))
   );
