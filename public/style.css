@@ -7035,3 +7035,61 @@ body.resizing-v * {
   padding-top: 3px;
   border-top: 1px solid var(--border);
 }
+
+/* --------------------------------------------- 面板说明：默认一行，点开看全 */
+/* 这些说明都是「读一次就够」，常驻三四行会把面板顶下去；折成一行 + 小箭头，
+ * 想细看再点。用纯符号做指示，不引入新文案（也就不会漏翻译）。 */
+[data-fold-hint] {
+  position: relative;
+  padding-right: 16px;
+  cursor: pointer;
+}
+
+[data-fold-hint]:not(.open) {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+[data-fold-hint]::after {
+  content: '▾';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  color: var(--muted);
+  font-size: calc(10px * var(--ui-scale));
+  line-height: 1;
+  pointer-events: none;
+}
+
+[data-fold-hint].open::after {
+  content: '▴';
+}
+
+[data-fold-hint]:hover::after {
+  color: var(--text-2);
+}
+
+/* 弹窗头部收紧一档：小面板里 60px 的头占了两三成高度 */
+.modal-head {
+  padding: 9px 14px 9px 16px;
+}
+
+.modal-head h2 {
+  font-size: calc(13.5px * var(--ui-scale));
+}
+
+.modal-body {
+  padding: 13px 16px;
+}
+
+/* 放得下就不显示折叠箭头（JS 会加 .no-fold） */
+[data-fold-hint].no-fold {
+  padding-right: 0;
+  cursor: default;
+}
+
+[data-fold-hint].no-fold::after {
+  content: none;
+}

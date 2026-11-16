@@ -423,6 +423,9 @@ window.ReqLiteI18N_EN = {
 
   "网络": "Network",
   "网络模拟": "Network Simulation",
+  "网络模拟…": "Network…",
+  "断点…": "Breakpoints…",
+  "域名映射…": "Host mapping…",
   "启用": "Enabled",
   "关闭后所有规则暂停，但不会删除": "Pause all rules without deleting them",
   "只影响匹配的请求；重启服务后自动清空": "Applies only to matching requests; cleared when the service restarts",
@@ -502,7 +505,6 @@ window.ReqLiteI18N_EN = {
   "输入 URL 跳到请求": "Type a URL to jump to a request",
   "命令面板": "Command palette",
   "搜索请求或输入命令…": "Search requests or type a command…",
-  "网络 ▾": "Network ▾",
   "管理网络规则": "Manage network rules",
   "没有匹配的命令或请求": "No matching commands or requests",
   "命令": "Command",

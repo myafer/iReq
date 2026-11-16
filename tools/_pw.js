@@ -62,11 +62,13 @@ function decoratePage(page) {
         if (!el) return '';
         if (el.closest('#moreMenu')) return 'top';
         if (el.closest('#filterMoreMenu')) return 'filter';
+        // 详情头部低频操作收在「⋯」里：点它们之前先把菜单展开
+        if (el.closest('#flowMoreMenu')) return 'flow';
         return '';
       }, selector);
       if (where) {
-        const menuId = where === 'top' ? '#moreMenu' : '#filterMoreMenu';
-        const trigger = where === 'top' ? '#btnMore' : '#btnFilterMore';
+        const menuId = where === 'top' ? '#moreMenu' : where === 'filter' ? '#filterMoreMenu' : '#flowMoreMenu';
+        const trigger = where === 'top' ? '#btnMore' : where === 'filter' ? '#btnFilterMore' : '#btnFlowMore';
         const opened = await page.evaluate((id) => {
           const m = document.querySelector(id);
           return !!m && !m.hidden;

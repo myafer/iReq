@@ -27,7 +27,7 @@ const usedIds = new Set(
 const DYNAMIC = new Set([
   'tabs', 'actReplay', 'actMock', 'actCurl', 'actStar', 'actNet', 'actBreak', 'actMap', 'actBase', 'rtCrumbBack',
   // 详情头部的关闭按钮、请求/响应页里「头部 ↔ 正文」的分割条
-  'detailClose', 'dSplit',
+  'detailClose', 'dSplit', 'btnFlowMore', 'flowMoreMenu',
   // 「消息」页签（WebSocket 帧 / SSE 消息）整块由 tabMessages() 现渲染
   'msgList', 'msgCount', 'msgDirBar', 'msgDropped', 'msgBytes', 'msgComments',
 ]);

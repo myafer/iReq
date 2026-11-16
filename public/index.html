@@ -1100,7 +1100,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <button class="btn icon ghost" data-close>✕</button>
         </div>
         <div class="modal-body">
-          <p class="hint">规则之间是「且」的关系：留空的字段表示不限。每条规则自带冷却，同一问题不会连着刷屏；全局每分钟最多 20 条。</p>
+          <p class="hint" data-fold-hint>规则之间是「且」的关系：留空的字段表示不限。每条规则自带冷却，同一问题不会连着刷屏；全局每分钟最多 20 条。</p>
           <div class="al-rules" id="alRules"></div>
           <div class="net-actions">
             <button class="btn ghost" id="alAdd">+ 添加规则</button>
@@ -1128,7 +1128,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <button class="btn icon ghost" data-close>✕</button>
         </div>
         <div class="modal-body">
-          <p class="hint">
+          <p class="hint" data-fold-hint>
             只给两个同步钩子：<code>onRequest(req)</code> 改 method / url / headers，
             <code>onResponse(res)</code> 改 status / headers / body。沙箱里没有网络、文件和 require，
             每次调用最多 50ms。响应阶段需要先收全响应体，命中规则的请求上限 4MB。
@@ -1167,7 +1167,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <button class="btn icon ghost" data-close>✕</button>
         </div>
         <div class="modal-body">
-          <p class="hint rd-scope">只作用于导出文件、MCP 输出和带 redact=1 的接口。界面里始终显示原值 —— 打了码你就没法确认到底是哪个 token 失效了。</p>
+          <p class="hint rd-scope" data-fold-hint>只作用于导出文件、MCP 输出和带 redact=1 的接口。界面里始终显示原值 —— 打了码你就没法确认到底是哪个 token 失效了。</p>
           <div class="rd-parts">
             <label class="rd-check"><input type="checkbox" id="rdHeaders" /> 请求头 / 响应头</label>
             <label class="rd-check"><input type="checkbox" id="rdQuery" /> URL 查询参数</label>
@@ -1281,7 +1281,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <button class="btn icon ghost" data-close>✕</button>
         </div>
         <div class="modal-body">
-          <p class="hint rv-scope">正向代理抓的是客户端发出去的请求；这里反过来 —— 起一个端口接住打向本机服务的请求（webhook / 回调 / 网关），规则、断点、脚本、弱网照常生效。</p>
+          <p class="hint rv-scope" data-fold-hint>正向代理抓的是客户端发出去的请求；这里反过来 —— 起一个端口接住打向本机服务的请求（webhook / 回调 / 网关），规则、断点、脚本、弱网照常生效。</p>
           <div class="rv-form">
             <label>
               <span>监听端口</span>
@@ -1400,7 +1400,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <span class="hint" id="ptKilledText" hidden></span>
             <button class="btn ghost" id="ptRefresh">刷新</button>
           </div>
-          <p class="hint pt-intro">命中的域名走原样透传：App 能连上，但看不到明文。规则匹配该域名及所有子域，改动立即生效并自动保存。</p>
+          <p class="hint pt-intro" data-fold-hint>命中的域名走原样透传：App 能连上，但看不到明文。规则匹配该域名及所有子域，改动立即生效并自动保存。</p>
           <div class="pt-add">
             <input id="ptAddInput" class="input mono" placeholder="输入域名后回车，支持空格 / 逗号批量" spellcheck="false" />
             <button class="btn primary" id="ptAddBtn">添加</button>

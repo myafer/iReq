@@ -2437,14 +2437,20 @@ function renderDetail() {
         <span class="dactions">
           <button class="btn" id="actReplay">重放</button>
           <button class="btn" id="actMock">Mock 此请求</button>
-          <button class="btn ghost" id="actBreak" title="给这个路径加一条断点规则：下次命中时停下来让你改">断点</button>
-          <button class="btn ghost" id="actMap" title="把这个域名映射到别的机器：配一次就一直生效">映射</button>
-          <button class="btn ghost" id="actBase" title="把它设为对比基准：别的请求详情里就能跟它比，再点一次取消">${
-            S.cmpBaseId === f.id ? '取消基准' : '对比基准'
-          }</button>
-          <button class="btn ghost" id="actNet">网络 ▾</button>
-          <button class="btn ghost" id="actStar">☆ 收藏</button>
-          <button class="btn ghost" id="actCurl">复制 cURL</button>
+          <button class="btn ghost" id="actStar" title="收藏这条请求的「应用 + 接口」，下次一点就筛回来">☆ 收藏</button>
+          <div class="more-wrap" id="flowMoreWrap">
+            <button class="btn icon ghost" id="btnFlowMore" title="更多操作" aria-haspopup="true"
+              aria-expanded="false" aria-label="更多操作">⋯</button>
+            <div class="more-menu" id="flowMoreMenu" hidden>
+              <button class="more-item" id="actBreak" title="给这个路径加一条断点规则：下次命中时停下来让你改">断点…</button>
+              <button class="more-item" id="actMap" title="把这个域名映射到别的机器：配一次就一直生效">域名映射…</button>
+              <button class="more-item" id="actBase" title="把它设为对比基准：别的请求详情里就能跟它比，再点一次取消">${
+                S.cmpBaseId === f.id ? '取消基准' : '对比基准'
+              }</button>
+              <button class="more-item" id="actNet">网络模拟…</button>
+              <button class="more-item" id="actCurl">复制 cURL</button>
+            </div>
+          </div>
         </span>
       </div>
       <div class="tabs" id="tabs">
@@ -2475,6 +2481,24 @@ function renderDetail() {
   });
 
   $('#detailClose')?.addEventListener('click', closeDetail);
+
+  // 详情头部低频操作收进「⋯」：断点 / 映射 / 基准 / 网络 / curl 平时用不到，
+  // 8 个按钮挤一行在窄详情里会换行，把 dmeta 撑高
+  const flowMoreBtn = $('#btnFlowMore');
+  const flowMoreMenu = $('#flowMoreMenu');
+  if (flowMoreBtn && flowMoreMenu) {
+    flowMoreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = flowMoreMenu.hidden;
+      flowMoreMenu.hidden = !open;
+      flowMoreBtn.setAttribute('aria-expanded', String(open));
+    });
+    flowMoreMenu.addEventListener('click', () => {
+      flowMoreMenu.hidden = true;
+      flowMoreBtn.setAttribute('aria-expanded', 'false');
+    });
+  }
+
   if (splitTab) bindDetailSplit(pane);
 
   $('#actReplay')?.addEventListener('click', openReplay);
@@ -3360,10 +3384,22 @@ function focusableIn(modal) {
   );
 }
 
+/**
+ * 说明文字默认折一行；只有「真的放不下」才给折叠箭头 ——
+ * 一行就能显示完的说明再挂个 ▾ 只是噪声。
+ */
+function markFoldHints() {
+  $$('[data-fold-hint]').forEach((el) => {
+    if (el.classList.contains('open')) return;
+    el.classList.toggle('no-fold', el.scrollHeight <= el.clientHeight + 1);
+  });
+}
+
 function openModal(id) {
   const modal = $(id);
   lastModalFocus = document.activeElement;
   modal.hidden = false;
+  requestAnimationFrame(markFoldHints);
   if (window.ReqLiteJSON) setTimeout(() => window.ReqLiteJSON.relayout(), 30);
   // 纯展示型弹窗（如首启引导）不抢焦点：自动 focus 会带出浏览器默认的焦点环，
   // 在深色下是一圈白框，比弹窗本身还扎眼。Tab 仍然能进，键盘可达性不受影响。
@@ -8366,6 +8402,27 @@ function bind() {
   $('#rpFormat').addEventListener('click', () => { if (RU.replayBody && RU.replayBody.format()) toast('已格式化'); else toast('内容不是合法 JSON'); });
   $('#rpMinify').addEventListener('click', () => { if (RU.replayBody && RU.replayBody.minify()) toast('已压缩'); else toast('内容不是合法 JSON'); });
   $('#rpCopyBody').addEventListener('click', () => copyText(replayBodyValue(), '请求体已复制'));
+
+  // 面板说明默认折成一行（[data-fold-hint]），点一下展开/收起
+  document.addEventListener('click', (e) => {
+    const hint = e.target.closest('[data-fold-hint]');
+    if (!hint || hint.classList.contains('no-fold')) return;
+    hint.classList.toggle('open');
+  });
+  markFoldHints();
+
+  // 点空白处收起详情头部的「⋯」菜单
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      const menu = $('#flowMoreMenu');
+      if (!menu || menu.hidden) return;
+      if (e.target.closest('#flowMoreWrap')) return;
+      menu.hidden = true;
+      $('#btnFlowMore')?.setAttribute('aria-expanded', 'false');
+    },
+    true
+  );
 
   // 详情里的「结构化 / 原始 / 展开折叠 / 全屏 / 复制」：#detail 常驻，委托一次即可
   $('#detail').addEventListener('click', (e) => {
