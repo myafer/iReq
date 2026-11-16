@@ -26,8 +26,20 @@ const { seedFlows } = require('./_seed');
     const head = [...document.querySelectorAll('.listhead > *')].map((e) => Math.round(e.getBoundingClientRect().x));
     const firstRow = rows[0];
     const cells = firstRow ? [...firstRow.children].map((e) => Math.round(e.getBoundingClientRect().x)) : [];
+    // 状态徽标 → 耗时微条的空隙：两列都是固定宽度，宽了看着就「散」
+    const gaps = [];
+    const barLefts = [];
+    for (const row of rows) {
+      const st = row.querySelector('.st');
+      const bar = row.querySelector('.tbar');
+      if (!st || !bar) continue;
+      gaps.push(Math.round(bar.getBoundingClientRect().left - st.getBoundingClientRect().right));
+      barLefts.push(Math.round(bar.getBoundingClientRect().left));
+    }
     return {
       rows: rows.length,
+      gapPillBar: gaps.length ? Math.max(...gaps) : null,
+      barSpread: barLefts.length ? Math.max(...barLefts) - Math.min(...barLefts) : null,
       emptyHiddenAttr: emptyEl.hidden,
       emptyDisplay: emptyStyle.display,
       emptyVisible: !!(emptyEl.offsetWidth || emptyEl.offsetHeight || emptyEl.getClientRects().length),
@@ -56,6 +68,9 @@ const { seedFlows } = require('./_seed');
   checks.push(['表头与首行列位置对齐', r.headX.every((x, i) => Math.abs(x - r.cellX[i]) <= 2)]);
   checks.push(['列表字号已生效', Object.values(r.fonts).every((v) => v && parseFloat(v) > 0)]);
   checks.push(['无横向溢出', r.overflowX <= 0]);
+  // 两列挨得够紧：空隙超过 32px 就又变成「状态在这头、耗时在那头」
+  checks.push(['状态与耗时之间不空一大截', r.gapPillBar !== null && r.gapPillBar <= 32, r.gapPillBar]);
+  checks.push(['各行耗时微条同一竖线', r.barSpread !== null && r.barSpread <= 1, r.barSpread]);
 
   // 详情页字号：必须真的选中一条请求后才有 .durl / .tabs / .kv
   const rows = await page.$$('.row');

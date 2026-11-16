@@ -1287,7 +1287,7 @@ body.resizing * {
 
 .listhead {
   display: grid;
-  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale));
+  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(42px * var(--ui-scale)) calc(80px * var(--ui-scale));
   gap: 8px;
   padding: calc(7px * var(--ui-scale)) 12px;
   font-size: calc(12px * var(--ui-scale));
@@ -1342,7 +1342,7 @@ body.resizing * {
 
 .row {
   display: grid;
-  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale));
+  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(42px * var(--ui-scale)) calc(80px * var(--ui-scale));
   gap: 8px;
   align-items: center;
   padding: calc(8px * var(--ui-scale)) 12px;
@@ -5627,15 +5627,20 @@ body.dragging-file::after {
 
 /* ---------------- 耗时分解：列表微条 / 详情瀑布图 / 性能视图 ---------------- */
 
-/* 耗时列：微条 + 数字。列表里就能看出「慢在握手」还是「慢在等响应」 */
+/* 耗时列：微条 + 数字。列表里就能看出「慢在握手」还是「慢在等响应」。
+   微条压到 28px、条与数字间距 5px：两者相加才是耗时列的「实体宽度」，
+   宽了会把状态徽标推得离数字很远（状态列 42 + 耗时 80 是按最长的 1234ms 定的） */
 .row .tm {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 5px;
 }
 
+/* 数字留给固定宽度：微条位置不再随「1ms / 1234ms」左右漂，
+   所有行的条都落在同一竖线上，状态徽标到微条的距离也恒定（不必再靠加宽列来找齐） */
 .row .tm .tmv {
+  min-width: calc(46px * var(--ui-scale));
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -5643,7 +5648,7 @@ body.dragging-file::after {
 .tbar {
   display: inline-flex;
   flex: none;
-  width: calc(34px * var(--ui-scale));
+  width: calc(28px * var(--ui-scale));
   height: calc(8px * var(--ui-scale));
   border-radius: 3px;
   overflow: hidden;
@@ -6093,7 +6098,7 @@ body.dragging-file::after {
 .listhead,
 .row {
   grid-template-columns:
-    calc(64px * var(--ui-scale)) 1fr calc(56px * var(--ui-scale)) calc(96px * var(--ui-scale));
+    calc(64px * var(--ui-scale)) 1fr calc(42px * var(--ui-scale)) calc(80px * var(--ui-scale));
   grid-auto-flow: column;
   grid-auto-columns: calc(104px * var(--ui-scale));
 }
