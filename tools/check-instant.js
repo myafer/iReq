@@ -204,7 +204,7 @@ const SNAPSHOT = () => ({
     await proxyGet(fastUrl);
     await page.waitForTimeout(300);
     const dock = await page.evaluate(() => {
-      document.querySelector('#dockClear').click();
+      document.querySelector('#btnClear').click();
       return {
         rows: document.querySelectorAll('#list .row').length,
         apps: document.querySelectorAll('[data-group="apps"] .sitem').length,

@@ -184,6 +184,30 @@ async function waitUi() {
     }));
     push('页面无 JS 报错', errs.length === 0);
 
+    /* ------------------------------------------ 控制坞可隐藏（省一行） */
+    const listBefore = await page.evaluate(() => Math.round(document.querySelector('#list').getBoundingClientRect().height));
+    await page.click('#btnMore');
+    await page.waitForTimeout(150);
+    await page.click('#btnDock');
+    await page.waitForTimeout(250);
+    const listHidden = await page.evaluate(() => Math.round(document.querySelector('#list').getBoundingClientRect().height));
+    checks.push(['外观里可以隐藏控制坞', await page.evaluate(() =>
+      document.querySelector('#dock').hidden === true && localStorage.getItem('reqlite-dock-hidden') === '1')]);
+    checks.push(['隐藏后列表多出一行高度', listHidden - listBefore >= 30, `${listBefore} → ${listHidden}`]);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(800);
+    const afterReload = await page.evaluate(() => ({
+      hidden: document.querySelector('#dock').hidden,
+      listH: Math.round(document.querySelector('#list').getBoundingClientRect().height),
+    }));
+    checks.push(['隐藏状态刷新后保持', afterReload.hidden === true && Math.abs(afterReload.listH - listHidden) <= 2,
+      `${listHidden} → ${afterReload.listH}`]);
+    await page.click('#btnMore');
+    await page.waitForTimeout(150);
+    await page.click('#btnDock');
+    await page.waitForTimeout(200);
+  checks.push(['可以再显示回来', await page.evaluate(() => document.querySelector('#dock').hidden === false)]);
+
     await browser.close();
   } else {
     push('Playwright 可用（跳过 UI 检查）', true);

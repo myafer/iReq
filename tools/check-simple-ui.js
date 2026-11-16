@@ -161,6 +161,21 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.keyboard.press('Escape');
     await page.evaluate(() => window.ReqLiteI18N.setLang('auto'));
 
+    // 二级分组：导入 / 证书这类低频入口收在「导入与证书」里，默认收起
+    await page.evaluate(() => window.ReqLiteI18N.setLang('auto'));
+    await page.click('#btnMore');
+    await page.waitForTimeout(200);
+    const subClosed = await page.evaluate(() =>
+      document.querySelector('#moreAdvanced').hidden === true &&
+      document.querySelector('#btnMoreAdvanced').getAttribute('aria-expanded') === 'false');
+    await page.click('#btnMoreAdvanced');
+    await page.waitForTimeout(200);
+    const subOpen = await page.evaluate(() =>
+      document.querySelector('#moreAdvanced').hidden === false &&
+      document.querySelectorAll('#moreAdvanced .more-item').length === 3);
+    ok('更多菜单有二级分组（默认收起 / 可展开）', subClosed && subOpen, `${subClosed} / ${subOpen}`);
+    await page.click('body', { position: { x: 5, y: 5 } });
+
     ok('UI 无 JS 报错', errs.length === 0, JSON.stringify(errs.slice(0, 2)));
   } finally {
     await browser.close();

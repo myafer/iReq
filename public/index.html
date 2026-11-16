@@ -77,9 +77,13 @@
             <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
             <button class="more-item" id="btnScripts">脚本 <b id="scriptCount" hidden>0</b></button>
             <button class="more-item" id="btnRedact">脱敏 <b class="on-dot" id="redactState" hidden title="已开启"></b></button>
-            <button class="more-item" id="btnImportHar">导入 HAR…</button>
-            <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
-            <button class="more-item" id="btnCa">证书与连接</button>
+            <button class="more-item more-group" id="btnMoreAdvanced" aria-expanded="false" aria-controls="moreAdvanced"
+              title="低频操作收在这里，菜单一行扫完不用滚">导入与证书 <span class="more-caret">▸</span></button>
+            <div class="more-sub" id="moreAdvanced" hidden>
+              <button class="more-item" id="btnImportHar">导入 HAR…</button>
+              <button class="more-item" id="btnPassthrough">跳过解密 <b id="ptCount" hidden>0</b></button>
+              <button class="more-item" id="btnCa">证书与连接</button>
+            </div>
             <button class="more-item" id="btnSettings">设置</button>
             <button class="more-item" id="btnExport">导出 HAR</button>
             <a class="more-item upd-badge" id="updBadge" hidden target="_blank" rel="noreferrer" title="点击打开新版本发布页">↑ <span id="updBadgeVer"></span></a>
@@ -99,6 +103,7 @@
               <button class="btn icon ghost" id="fontUp" aria-label="增大字号">A+</button>
               <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
               <button class="btn icon" id="btnLang" data-no-i18n title="Switch interface language">EN</button>
+              <button class="btn icon" id="btnDock" title="显示 / 隐藏底部控制坞（多留一行给列表）">▤</button>
             </div>
           </div>
         </div>
@@ -125,12 +130,17 @@
         <kbd id="searchKbd">⌘K</kbd>
       </div>
       <div class="chips" id="chips"></div>
+      <button class="btn ghost fbar-toggle" id="btnFilters" aria-expanded="false" aria-controls="filters"
+        title="展开 / 收起筛选条（已选条件始终显示在左侧）">
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 3.5h11L9.3 8.6v4.2l-2.6-1.1V8.6L2.5 3.5Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span>筛选</span><b class="fbar-dot" id="fbarDot" hidden>·</b>
+      </button>
       <div class="count" id="count">0 条</div>
     </div>
 
     <!-- 筛选条：单选（同顶部搜索一样是「视图」）。一行只放最高频的几项，
          其余收进「更多」菜单（协议版本 / 内容类型 / 状态码 / 其他），避免一眼看过去 20 个按钮 -->
-    <div class="fbar" id="filters">
+    <div class="fbar" id="filters" hidden>
       <button class="on" data-status="">全部</button>
       <span class="fbar-sep" aria-hidden="true"></span>
       <button data-status="http">HTTP</button>
@@ -265,9 +275,6 @@
         <svg class="ic-pause" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3v10M11 3v10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
         <svg class="ic-play" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3.2v9.6l8-4.8z" fill="currentColor"/></svg>
         <span id="dockPauseText">暂停</span>
-      </button>
-      <button type="button" class="dock-btn icon" id="dockClear" title="清空请求列表">
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5 5.2 13h5.6l.7-8.5M6.8 7v4M9.2 7v4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </footer>
 
@@ -716,14 +723,14 @@
                     <input type="file" id="caP12File" accept=".p12,.pfx" hidden>
                     <input type="password" id="caP12Password" class="ca-p12-pwd" placeholder=".p12 密码（默认 ireq）" autocomplete="off" spellcheck="false">
                   </div>
-                  <p class="hint" id="caAutoTip">安装由系统弹出授权确认；失败时可展开下面的手动命令。根证书与私钥固定在 ~/.ireq/ca，覆盖安装不会换证书。</p>
+                  <p class="hint" id="caAutoTip" data-fold-hint>安装由系统弹出授权确认；失败时可展开下面的手动命令。根证书与私钥固定在 ~/.ireq/ca，覆盖安装不会换证书。</p>
                   <p class="hint" id="caStaleTip" hidden></p>
                 </div>
                 <div class="addr-card-row">
                   <a class="btn primary" href="/ca.cer" download="reqlite-ca.cer">下载 .cer（推荐）</a>
                   <a class="btn" href="/ca.pem" download="reqlite-ca.pem">下载 .pem</a>
                 </div>
-                <p class="hint">
+                <p class="hint" data-fold-hint>
                   手机在 Wi-Fi 代理指向 <code id="caMobileProxy">—</code> 后，浏览器打开
                   <code id="caUrl">—</code> 安装描述文件；本机直接复制下面的信任命令。
                 </p>

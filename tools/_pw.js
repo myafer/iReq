@@ -57,23 +57,25 @@ function decoratePage(page) {
   const origClick = page.click.bind(page);
   page.click = async (selector, options) => {
     try {
-      const where = await page.evaluate((s) => {
+      // 从外到内的展开链：筛选条（默认收起）→ 更多菜单 → 菜单里的二级分组 → 详情「⋯」
+      const chain = await page.evaluate((s) => {
         const el = document.querySelector(s);
-        if (!el) return '';
-        if (el.closest('#moreMenu')) return 'top';
-        if (el.closest('#filterMoreMenu')) return 'filter';
-        // 详情头部低频操作收在「⋯」里：点它们之前先把菜单展开
-        if (el.closest('#flowMoreMenu')) return 'flow';
-        return '';
+        if (!el) return [];
+        const steps = [];
+        const fbar = document.querySelector('#filters');
+        if (el.closest('#filters') && fbar && fbar.hidden) steps.push(['#filters', '#btnFilters']);
+        if (el.closest('#moreAdvanced')) steps.push(['#moreMenu', '#btnMore'], ['#moreAdvanced', '#btnMoreAdvanced']);
+        else if (el.closest('#moreMenu')) steps.push(['#moreMenu', '#btnMore']);
+        if (el.closest('#filterMoreMenu')) steps.push(['#filterMoreMenu', '#btnFilterMore']);
+        if (el.closest('#flowMoreMenu')) steps.push(['#flowMoreMenu', '#btnFlowMore']);
+        return steps;
       }, selector);
-      if (where) {
-        const menuId = where === 'top' ? '#moreMenu' : where === 'filter' ? '#filterMoreMenu' : '#flowMoreMenu';
-        const trigger = where === 'top' ? '#btnMore' : where === 'filter' ? '#btnFilterMore' : '#btnFlowMore';
+      for (const [boxId, triggerId] of chain) {
         const opened = await page.evaluate((id) => {
           const m = document.querySelector(id);
           return !!m && !m.hidden;
-        }, menuId);
-        if (!opened) await origClick(trigger);
+        }, boxId);
+        if (!opened) await origClick(triggerId);
       }
     } catch (_) {
       /* 复杂选择器 / 页面尚未就绪时按原行为处理 */

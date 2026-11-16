@@ -1470,7 +1470,7 @@ function historyGroupHtml() {
       </div>`;
         })
         .join('')
-    : '<div class="side-empty">点一次「清空」就会在这里留一条，随时能回来看</div>';
+    : '<div class="side-empty">清空后会自动留档，随时能回看</div>';
   const bytes = S.historyStats && S.historyStats.bytes ? ` · ${fmtSize(S.historyStats.bytes)}` : '';
   return `<div class="sgroup hg ${closed ? 'closed' : ''}" data-group="history">
     <button class="sgroup-head" data-toggle="history">
@@ -1852,9 +1852,58 @@ function syncFilters() {
   loadFacets();
 }
 
+/* 筛选条默认收起：它只是「挑条件」的工具，已选条件始终在工具栏的 chips 里看得见。
+ * 收起后列表多出 32px；按钮上的小圆点提示「现在有条件生效」。 */
+const FBAR_KEY = 'reqlite-fbar-open';
+
+function setFiltersOpen(open, persist = true) {
+  const bar = $('#filters');
+  const btn = $('#btnFilters');
+  if (!bar) return;
+  bar.hidden = !open;
+  if (btn) btn.setAttribute('aria-expanded', String(!!open));
+  if (persist) {
+    try {
+      localStorage.setItem(FBAR_KEY, open ? '1' : '0');
+    } catch (_) {
+      /* 隐私模式：只在本次会话内生效 */
+    }
+  }
+  if (open) markFoldHints();
+}
+
+/* 底部控制坞：里面的「清空」和顶栏重复，抓包开关也和顶栏一致 ——
+ * 想多留一行给列表时可以直接收起来，状态记在本地下次保持 */
+const DOCK_KEY = 'reqlite-dock-hidden';
+
+function applyDock(hidden, persist = true) {
+  const dock = $('#dock');
+  if (dock) dock.hidden = !!hidden;
+  const btn = $('#btnDock');
+  if (btn) {
+    btn.classList.toggle('on', !hidden);
+    btn.title = hidden ? '显示底部控制坞' : '隐藏底部控制坞（多留一行给列表）';
+  }
+  if (persist) {
+    try {
+      localStorage.setItem(DOCK_KEY, hidden ? '1' : '0');
+    } catch (_) {
+      /* 隐私模式 */
+    }
+  }
+}
+
+function syncFilterDot() {
+  const dot = $('#fbarDot');
+  if (!dot) return;
+  const on = activeFilterKeys().length > 0 || !!S.filter.status || !!S.filter.mocked;
+  dot.hidden = !on;
+}
+
 function renderChips() {
   const el = $('#chips');
   if (!el) return;
+  syncFilterDot();
   const parts = [];
   for (const key of ['ip', 'app', 'host', 'route']) {
     // 应用是多选数组：空数组不算激活
@@ -7206,7 +7255,7 @@ function bindDock() {
     });
   }
   $('#dockPause').addEventListener('click', () => $('#capture').click());
-  $('#dockClear').addEventListener('click', () => $('#btnClear').click());
+  // 控制坞里的「清空」和顶栏重复，已去掉（顶栏 #btnClear 保留）
 }
 
 /* ------------------------------------- 根证书档案 / 一键信任 / .p12 备份
@@ -8829,6 +8878,17 @@ function bind() {
 /* -------------------------------------------- 精简交互层：功能不删，只收路径 */
 
 /** 顶栏「更多」与筛选「更多」互斥展开；force 可强制开 / 关 */
+/** 更多菜单里的二级分组（导入 / 证书这类低频入口） */
+function toggleMoreAdvanced(open) {
+  const box = $('#moreAdvanced');
+  const btn = $('#btnMoreAdvanced');
+  if (!box || !btn) return;
+  const next = typeof open === 'boolean' ? open : box.hidden;
+  box.hidden = !next;
+  btn.setAttribute('aria-expanded', String(next));
+  btn.classList.toggle('open', next);
+}
+
 function toggleMoreMenu(which, force) {
   const top = which !== 'filter';
   const menu = $(top ? '#moreMenu' : '#filterMoreMenu');
@@ -8842,6 +8902,7 @@ function toggleMoreMenu(which, force) {
     if (otherTrigger) otherTrigger.setAttribute('aria-expanded', 'false');
   }
   menu.hidden = !open;
+  if (!open) toggleMoreAdvanced(false);
   if (trigger) trigger.setAttribute('aria-expanded', String(open));
   // 筛选菜单是 fixed 的（要跳出 .fbar 的横向滚动裁剪），展开前得先算好坐标
   if (open && !top) placeFilterMenu();
@@ -8910,6 +8971,8 @@ function syncFilterMore() {
   const trig = $('#btnFilterMore');
   if (dot) dot.hidden = !active;
   if (trig) trig.classList.toggle('on', active);
+  // 收起筛选条时，靠工具栏按钮上的小圆点提示「有条件生效」
+  syncFilterDot();
 }
 
 /** 三步连接向导：从「证书」进来直接高亮第 2 步，从「设置」进来常规打开 */
@@ -9470,13 +9533,32 @@ function bindRuleWorkspace() {
 /* ------------------------------------------------------------ 新交互绑定 */
 
 function bindSimpleUI() {
+  // 筛选条默认收起 / 控制坞可隐藏：初始化按本地记忆还原
+  try {
+    setFiltersOpen(localStorage.getItem(FBAR_KEY) === '1', false);
+    applyDock(localStorage.getItem(DOCK_KEY) === '1', false);
+  } catch (_) {
+    /* 隐私模式：用默认值 */
+  }
+  syncFilterDot();
+
+  $('#btnFilters').addEventListener('click', (e) => {
+    e.stopPropagation();
+    setFiltersOpen(!!$('#filters').hidden);
+  });
+  $('#btnDock').addEventListener('click', () => applyDock(!$('#dock').hidden));
+  $('#btnMoreAdvanced').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMoreAdvanced();
+  });
+
   $('#btnMore').addEventListener('click', (e) => {
     e.stopPropagation();
     toggleMoreMenu('top');
   });
   $('#moreMenu').addEventListener('click', (e) => {
     // 外观类与排序可以连续点（点完还想翻个方向），不收菜单；打开弹窗的类目点完即收
-    const keep = e.target.closest('#fontDown, #fontUp, #fontVal, #btnTheme, #btnLang, #sortCtl');
+    const keep = e.target.closest('#fontDown, #fontUp, #fontVal, #btnTheme, #btnLang, #btnDock, #sortCtl, #btnMoreAdvanced');
     if (!keep) toggleMoreMenu('top', false);
   });
 

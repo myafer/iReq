@@ -159,9 +159,17 @@ async function waitUi() {
     await page.goto(UI + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(600);
 
-    push('筛选条可见', await page.evaluate(() => {
+    // 筛选条默认收起（列表多一行），点工具栏「筛选」才展开
+    push('筛选条默认收起', await page.evaluate(() => {
       const b = document.querySelector('#filters');
-      return b && b.classList.contains('fbar') && b.offsetHeight > 0;
+      return b && b.hidden === true && b.offsetHeight === 0;
+    }));
+    await page.click('#btnFilters');
+    await page.waitForTimeout(250);
+    push('点「筛选」后筛选条可见', await page.evaluate(() => {
+      const b = document.querySelector('#filters');
+      return b && b.classList.contains('fbar') && b.offsetHeight > 0 &&
+        document.querySelector('#btnFilters').getAttribute('aria-expanded') === 'true';
     }));
     // 一行只露高频项：全部 / 协议三个 / 状态码四段 / JSON·HTML + 更多
     push('筛选条只露 10 个高频项 + 更多', await page.evaluate(() => {

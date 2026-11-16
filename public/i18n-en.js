@@ -423,6 +423,8 @@ window.ReqLiteI18N_EN = {
 
   "网络": "Network",
   "网络模拟": "Network Simulation",
+  "筛选": "Filters",
+  "导入与证书": "Import & certificates",
   "网络模拟…": "Network…",
   "断点…": "Breakpoints…",
   "域名映射…": "Host mapping…",
@@ -644,7 +646,6 @@ window.ReqLiteI18N_EN = {
   "点击释放本机系统代理": "Click to release the local system proxy",
   "点击接管本机系统代理": "Click to take over the local system proxy",
   "Mock 总开关：单击切换，右键打开规则工作区": "Mock master switch: click to toggle, right-click for the rules workspace",
-  "清空请求列表": "Clear the request list",
   "协商 HTTP/2": "Negotiate HTTP/2",
   "连接与证书设置": "Connection & certificate settings",
 
@@ -768,7 +769,7 @@ window.ReqLiteI18N_EN = {
   "历史记录": "History",
   "回到实时": "Back to live",
   "正在查看历史 ·": "Viewing history ·",
-  "点一次「清空」就会在这里留一条，随时能回来看": "Each clear leaves one entry here — open it any time",
+  "清空后会自动留档，随时能回看": "Clearing keeps an archive here — reopen it anytime.",
   "载入中…": "Loading…",
   "向下滚动继续加载": "Scroll down to load more",
   "向下滚动加载更早的请求": "Scroll down for earlier requests",

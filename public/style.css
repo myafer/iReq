@@ -7093,3 +7093,67 @@ body.resizing-v * {
 [data-fold-hint].no-fold::after {
   content: none;
 }
+
+/* ------------------------------------------------ 筛选条可收起 / 控制坞可隐藏 */
+/* .fbar 是 flex，[hidden] 压不住，得显式一条 */
+.fbar[hidden],
+.dock[hidden] {
+  display: none;
+}
+
+.fbar-toggle {
+  flex: none;
+  gap: 5px;
+  padding: 0 9px;
+  height: calc(28px * var(--ui-scale));
+}
+
+.fbar-toggle svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.fbar-toggle[aria-expanded='true'] {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.fbar-dot {
+  color: var(--accent);
+  font-size: calc(15px * var(--ui-scale));
+  line-height: 1;
+  margin-left: -3px;
+}
+
+/* 控制坞被隐藏时，外观里那个开关点一下，图标变实心提示当前是显示状态 */
+#btnDock.on {
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+
+/* ------------------------------------------------ 更多菜单里的二级分组 */
+.more-group .more-caret {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: calc(10px * var(--ui-scale));
+  transition: transform 0.15s;
+}
+
+.more-group.open .more-caret {
+  transform: rotate(90deg);
+}
+
+.more-sub {
+  margin: 2px 0 2px 10px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+
+.more-sub[hidden] {
+  display: none;
+}
+
+.more-sub .more-item {
+  padding: 7px 10px;
+  font-size: calc(12.5px * var(--ui-scale));
+}
