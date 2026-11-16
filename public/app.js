@@ -4195,21 +4195,35 @@ function scriptRuleHtml(r, i) {
     ['ws', '只 WebSocket'],
   ];
   return `<div class="sc-rule" data-i="${i}">
-    <div class="sc-line">
+    <div class="sc-head">
+      <span class="sc-idx" title="第 ${i + 1} 条脚本">${i + 1}</span>
       <input class="input sc-name" value="${esc(r.name || '')}" placeholder="规则名（必填）" maxlength="40" spellcheck="false" />
-      <select class="input sc-phase">${phases
+      <select class="input sc-phase" title="在哪个阶段执行">${phases
         .map(([v, label]) => `<option value="${v}"${(r.phase || 'both') === v ? ' selected' : ''}>${label}</option>`)
         .join('')}</select>
-      <input class="input mono sc-method" value="${esc(r.method || '')}" placeholder="方法" maxlength="8" spellcheck="false" />
-      <input class="input mono sc-host" value="${esc(r.host || '')}" placeholder="域名（可空，* 通配）" spellcheck="false" />
-      <input class="input mono sc-url" value="${esc(r.url || '')}" placeholder="URL 包含（可空）" spellcheck="false" />
+      <label class="sc-on-wrap" title="这条规则是否执行">
+        <input type="checkbox" class="sc-on"${r.enabled !== false ? ' checked' : ''} /> 启用
+      </label>
       <button class="btn icon ghost sc-del" data-sc-del="${i}" title="删除这条规则">✕</button>
     </div>
-    <textarea class="input mono sc-code" rows="7" spellcheck="false" placeholder="onResponse(res => { res.headers['x-debug'] = '1'; })">${esc(
+    <div class="sc-match">
+      <label class="sc-field">
+        <span>方法</span>
+        <input class="input mono sc-method" value="${esc(r.method || '')}" placeholder="任意" maxlength="8" spellcheck="false" />
+      </label>
+      <label class="sc-field">
+        <span>域名</span>
+        <input class="input mono sc-host" value="${esc(r.host || '')}" placeholder="任意，* 通配" spellcheck="false" />
+      </label>
+      <label class="sc-field grow">
+        <span>URL 包含</span>
+        <input class="input mono sc-url" value="${esc(r.url || '')}" placeholder="任意" spellcheck="false" />
+      </label>
+    </div>
+    <textarea class="input mono sc-code" rows="8" spellcheck="false" placeholder="onResponse(res => { res.headers['x-debug'] = '1'; })">${esc(
       r.code || ''
     )}</textarea>
     <div class="sc-foot">
-      <label class="al-on"><input type="checkbox" class="sc-on"${r.enabled !== false ? ' checked' : ''} /> 启用</label>
       <span class="hint sc-state"></span>
       <span class="fill"></span>
       <button class="btn ghost sc-check" data-sc-check="${i}">检查语法</button>

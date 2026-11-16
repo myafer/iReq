@@ -1141,14 +1141,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             每次调用最多 50ms。响应阶段需要先收全响应体，命中规则的请求上限 4MB。
           </p>
           <div class="sc-rules" id="scRules"></div>
-          <div class="net-actions">
-            <button class="btn ghost" id="scAdd">+ 添加规则</button>
-            <select class="input sc-tpl" id="scTemplate" title="从现成模板开始，比对着空编辑器强">
-              <option value="">从模板开始…</option>
-            </select>
-            <button class="btn primary" id="scSave">保存并生效</button>
-          </div>
-          <details class="lp-details">
+          <details class="lp-details sc-examples">
             <summary>例子</summary>
             <ul class="steps">
               <li>给请求加头：<code>onRequest(req =&gt; { req.headers['x-debug'] = '1'; })</code></li>
@@ -1156,6 +1149,15 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <li>按内容判断：<code>onResponse(res =&gt; { if (res.body.includes('redis')) res.headers['x-hit'] = '1'; })</code></li>
             </ul>
           </details>
+        </div>
+        <div class="modal-foot sc-actions">
+          <button class="btn ghost" id="scAdd">+ 添加规则</button>
+          <select class="input sc-tpl" id="scTemplate" title="从现成模板开始，比对着空编辑器强">
+            <option value="">从模板开始…</option>
+          </select>
+          <span class="fill"></span>
+          <span class="hint sc-hint-dirty">改完记得保存</span>
+          <button class="btn primary" id="scSave">保存并生效</button>
         </div>
       </div>
     </div>

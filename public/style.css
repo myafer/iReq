@@ -7157,3 +7157,143 @@ body.resizing-v * {
   padding: 7px 10px;
   font-size: calc(12.5px * var(--ui-scale));
 }
+
+/* ------------------------------------------------------ 脚本面板排版（1.5.1） */
+/* 原来 6 个控件挤一行（名字 / 阶段 / 方法 / 域名 / URL / 删除），
+ * 域名和 URL 只剩六十来像素，占了位还看不清内容。改成两行分区：
+ * 第一行是「这条规则是什么」（序号 + 名字 + 阶段 + 启用 + 删除），
+ * 第二行是「什么时候命中」（方法 / 域名 / URL），代码单独占一块。 */
+.sc-dialog {
+  width: min(880px, 94vw);
+}
+
+.sc-rule {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  margin-bottom: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.sc-rule:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.sc-idx {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-head .sc-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.sc-head .sc-phase {
+  flex: none;
+  width: calc(108px * var(--ui-scale));
+}
+
+.sc-on-wrap {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sc-del {
+  flex: none;
+  color: var(--muted);
+}
+
+.sc-del:hover {
+  color: var(--err);
+}
+
+.sc-match {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 10px 0;
+}
+
+.sc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  width: calc(120px * var(--ui-scale));
+}
+
+.sc-field.grow {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+.sc-field > span {
+  color: var(--muted);
+  font-size: calc(10.5px * var(--ui-scale));
+  letter-spacing: 0.3px;
+}
+
+.sc-rule .sc-code {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 10px;
+  min-height: calc(120px * var(--ui-scale));
+  border-radius: 8px;
+  background: var(--bg);
+  tab-size: 2;
+}
+
+.sc-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 10px;
+  margin: 0;
+}
+
+.sc-foot .sc-state:empty::before {
+  content: '未校验';
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.sc-examples {
+  margin-top: 4px;
+}
+
+.sc-actions {
+  gap: 8px;
+}
+
+.sc-hint-dirty {
+  margin-left: auto;
+}
