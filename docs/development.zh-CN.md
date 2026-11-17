@@ -210,3 +210,18 @@ node tools/shots.js          # 产物写到 docs/shots/
 - 关掉进程名识别：否则详情里的「进程 / 可执行文件」会带出 `/Users/<用户名>` 路径
 - 顶栏地址先切到 `127.0.0.1`，避免把局域网 IP 拍进去
 - 截图前脚本会断言页面上没有局域网 IP、`/Users/` 路径、用户名、真实邮箱，命中就中止
+
+## 发版
+
+发版就是推一个 `v*` 附注标签，`.github/workflows/release.yml` 会自动打包并在 GitHub 上建 Release：
+
+```bash
+git tag -a v1.4.0 -F notes.md --cleanup=verbatim   # notes.md 就是 Release 正文
+git push origin main && git push origin v1.4.0
+```
+
+三条规矩（吃过亏）：
+
+1. **改 `package.json` 的版本号 = 这一版可以发**。要 bump 就顺手打标签发掉；不想发就别 bump，攒到下次发版再定号。曾经的坑：连续 8 个批次各自 bump 了版本却没打标签，最后一次发版直接跨了 1.3.19 → 1.6.0，版本线中间全是空的。
+2. **`-F` 必须配 `--cleanup=verbatim`**。默认 `cleanup=strip` 会把以 `#` 开头的行当注释删掉 —— changelog 里的小节标题会整行消失，Release 正文变成没有标题的一坨。
+3. **标签内容就是 Release 正文**。`notes` job 会把它前面拼上 Gatekeeper 安装提示、后面拼上 Full Changelog 链接，所以 tag message 里不用自己写这两段。

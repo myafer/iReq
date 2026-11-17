@@ -209,3 +209,18 @@ node tools/shots.js          # writes into docs/shots/
 - The top bar is switched to `127.0.0.1` so no LAN IP ends up in the picture
 - Before each shot the script asserts the page has no LAN IP, `/Users/` path, username or real email,
   and aborts if it finds one
+
+## Releasing
+
+Pushing an annotated `v*` tag is the release: `.github/workflows/release.yml` builds every package and creates the GitHub Release.
+
+```bash
+git tag -a v1.4.0 -F notes.md --cleanup=verbatim   # notes.md becomes the release body
+git push origin main && git push origin v1.4.0
+```
+
+Three rules we learned the hard way:
+
+1. **Bumping the version in `package.json` means "this one can ship"**. Bump and tag together, or don't bump at all — eight batched bumps without tags once produced a single 1.3.19 → 1.6.0 jump with nothing in between.
+2. **Pair `-F` with `--cleanup=verbatim`**. The default `cleanup=strip` treats `#` lines as comments, so every changelog heading silently disappears.
+3. **The tag message is the release body.** The `notes` job prepends the Gatekeeper note and appends the Full Changelog link; don't duplicate them.
