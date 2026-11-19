@@ -26,6 +26,33 @@ const { promisify } = require('util');
 const { isLocalClientIp } = require('./local-address');
 
 const execFileAsync = promisify(execFile);
+
+/*
+ * lsof 在非 UTF-8 locale 下会把 8 位字符打成 \xNN（Electron 从 Finder 启动时没有 LANG，
+ * 「汽水音乐」就变成 \xe6\xb1\xbd\xe6\xb0\xb4\xe9\x9f\xb3\xe4\xb9\x90）。
+ * 两手都做：给子进程补一个 UTF-8 locale；再留一个解码兜底，处理别处传进来的旧字符串。
+ */
+const UTF8_ENV = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' };
+
+/** 把 lsof 的 \xNN 字节序列还原成真正的 UTF-8 文本 */
+function decodeLsofEscapes(text) {
+  const s = String(text == null ? '' : text);
+  if (!s.includes('\\x')) return s;
+  const bytes = [];
+  for (let i = 0; i < s.length; ) {
+    const m = /^\\x([0-9a-fA-F]{2})/.exec(s.slice(i, i + 4));
+    if (m) {
+      bytes.push(parseInt(m[1], 16));
+      i += 4;
+      continue;
+    }
+    const cp = s.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    bytes.push(...Buffer.from(ch, 'utf8'));
+    i += ch.length;
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
 const MAX_BUFFER = 12 * 1024 * 1024;
 const PORT_TTL = 5 * 60 * 1000;
 const MAX_PORTS = 10000;
@@ -35,6 +62,7 @@ const MIN_REFRESH_GAP = 100; // 合并同一波连接，避免每个新连接都
 
 /** 从可执行路径里取 .app 名：/Applications/DingTalk.app/Contents/MacOS/DingTalk → DingTalk */
 function appNameFromPath(p) {
+  p = decodeLsofEscapes(p);
   const i = String(p || '').indexOf('.app/Contents/');
   if (i < 0) return null;
   const before = String(p).slice(0, i + 4);
@@ -43,7 +71,7 @@ function appNameFromPath(p) {
 
 /** 清洗 lsof 的 command：Chrome Helper / WebKit.WebContent 之类归到主应用 */
 function cleanCommand(command) {
-  let s = String(command || '').trim();
+  let s = decodeLsofEscapes(command).trim();
   if (!s) return '未知进程';
   s = s.replace(/\s*\((?:Renderer|GPU|Plugin|Network|Storage)\)\s*$/i, '');
   s = s.replace(/\s+Helper(?:\s*\(.*\))?\s*$/i, '');
@@ -177,7 +205,9 @@ class ProcessMap {
       const r = await execFileAsync('lsof', ['-nP', '-iTCP', '-F', 'pcn'], {
         maxBuffer: MAX_BUFFER,
         timeout: 3000,
-        env: { ...process.env, LC_ALL: 'C' },
+        // 原来这里锁 LC_ALL=C 图输出稳定，代价是非 ASCII 进程名被打成 \xNN；
+        // -F 字段模式本来就跟语言无关，直接给 UTF-8 locale 更省事（解码见 decodeLsofEscapes）
+        env: UTF8_ENV,
       });
       out = r.stdout;
     } catch (err) {
@@ -244,6 +274,7 @@ class ProcessMap {
       const r = await execFileAsync('lsof', ['-nP', '-p', String(pid), '-Fn'], {
         maxBuffer: MAX_BUFFER,
         timeout: 3000,
+        env: UTF8_ENV,
       });
       for (const line of String(r.stdout).split('\n')) {
         if (line[0] !== 'n' || !line.includes('.app/Contents/')) continue;
@@ -276,4 +307,4 @@ class ProcessMap {
   }
 }
 
-module.exports = { ProcessMap, parseLsof, cleanCommand, appNameFromPath };
+module.exports = { ProcessMap, parseLsof, cleanCommand, appNameFromPath, decodeLsofEscapes };

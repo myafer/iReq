@@ -19,7 +19,7 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const { parseAppAliases, aliasOf, appOf, clientPortOf } = require('../src/derive');
-const { ProcessMap, parseLsof, cleanCommand, appNameFromPath } = require('../src/process-map');
+const { ProcessMap, parseLsof, cleanCommand, appNameFromPath, decodeLsofEscapes } = require('../src/process-map');
 const { FlowStore } = require('../src/store');
 const { ProxyServer } = require('../src/proxy');
 
@@ -131,6 +131,17 @@ async function probe(base, tag) {
       cleanCommand('Google Chrome Helper (Renderer)') === 'Google Chrome' &&
         cleanCommand('com.apple.WebKit.WebContent') === 'Safari',
     ]);
+    // lsof 在没有 UTF-8 locale 时把中文进程名打成 \xNN（Electron 从 Finder 启动就是这个环境），
+    // 「汽水音乐」曾经显示成一串 \xe6\xb1\xbd…
+    const CN_ESCAPED = '\\xe6\\xb1\\xbd\\xe6\\xb0\\xb4\\xe9\\x9f\\xb3\\xe4\\xb9\\x90';
+    checks.push(['lsof 的转义字节还原成中文', decodeLsofEscapes(CN_ESCAPED) === '汽水音乐', decodeLsofEscapes(CN_ESCAPED)]);
+    checks.push(['清洗后的进程名保住中文', cleanCommand(CN_ESCAPED) === '汽水音乐', cleanCommand(CN_ESCAPED)]);
+    checks.push([
+      '转义过的 .app 路径也能取到中文名',
+      appNameFromPath('/Applications/' + CN_ESCAPED + '.app/Contents/MacOS/SodaMusic') === '汽水音乐',
+      appNameFromPath('/Applications/' + CN_ESCAPED + '.app/Contents/MacOS/SodaMusic'),
+    ]);
+
     checks.push([
       '.app 路径取应用名',
       appNameFromPath('/Applications/DingTalk.app/Contents/MacOS/DingTalk') === 'DingTalk',

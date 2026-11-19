@@ -1,5 +1,7 @@
 'use strict';
 
+const { decodeLsofEscapes } = require('./process-map');
+
 /**
  * 流量存储：内存环形队列 + 当日 JSONL 落盘（可选）。
  * 只保留展示需要的字段，body 超长会截断并打标。
@@ -26,6 +28,18 @@ const {
 const DAILY_KEEP = 7;
 /** 单日流量能到几百 MB，7 份叠起来就上 GB，份数之外再加一道总量线 */
 const DAILY_MAX_BYTES = 200 * 1024 * 1024;
+
+/**
+ * 老记录的 app 名可能是 lsof 转义过的（\xe6\xb1\xbd…），读回来顺手还原，
+ * 免得列表里同时出现「汽水音乐」和一串乱码两个应用。
+ */
+function normalizeAppName(flow) {
+  if (!flow) return flow;
+  const fix = (v) => (typeof v === 'string' && v.includes('\\x') ? decodeLsofEscapes(v) : v);
+  flow.app = fix(flow.app);
+  if (flow.process && flow.process.name) flow.process.name = fix(flow.process.name);
+  return flow;
+}
 
 class FlowStore extends EventEmitter {
   constructor({ dir, maxFlows = 2000, persist = true, loadRecent = 300 } = {}) {
@@ -67,6 +81,7 @@ class FlowStore extends EventEmitter {
             continue;
           }
           flow._restored = true;
+          normalizeAppName(flow);
           this.flows.push(flow);
           this.index.set(flow.id, flow);
         } catch (_) {
@@ -79,6 +94,7 @@ class FlowStore extends EventEmitter {
         flow.app = p.app;
         flow.appSource = p.appSource;
         flow.process = p.process;
+        normalizeAppName(flow);
       }
     } catch (_) {
       /* 读取失败不影响启动 */
@@ -87,6 +103,7 @@ class FlowStore extends EventEmitter {
 
   add(flow, { persist = true } = {}) {
     if (this.paused) return flow;
+    normalizeAppName(flow);
     this.flows.unshift(flow);
     this.index.set(flow.id, flow);
     if (this.flows.length > this.maxFlows) {
