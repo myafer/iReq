@@ -8052,6 +8052,7 @@ function bind() {
       btn.disabled = false;
     }
   });
+  bindConnectSteps();
   $('#localChip').addEventListener('click', openSettings);
   $('#lpToggle').addEventListener('click', toggleLocalProxy);
   $('#lpCopyOn').addEventListener('click', () => copyLocalCmd('on'));
@@ -8796,10 +8797,29 @@ function syncFilterMore() {
 }
 
 /** 三步连接向导：从「证书」进来直接高亮第 2 步，从「设置」进来常规打开 */
+/**
+ * 三步向导里只有第 1 步（复制代理地址）是每次都要看的；
+ * 证书和「接管本机」装一次就完事，默认折起来 —— 否则设置一打开就是 800px 的说明墙。
+ * 点标题展开；从「证书」入口进来时会自动展开第 2 步（focusConnectStep）。
+ */
+function bindConnectSteps() {
+  $$('.connect-step').forEach((step) => {
+    const n = Number(String(step.id || '').replace('connectStep', '')) || 1;
+    if (n > 1) step.classList.add('collapsed');
+    const head = step.querySelector('.cs-main > h3');
+    if (!head || head.dataset.foldBound) return;
+    head.dataset.foldBound = '1';
+    head.addEventListener('click', () => {
+      step.classList.toggle('collapsed');
+    });
+  });
+}
+
 function focusConnectStep(n) {
   $$('.connect-step').forEach((s) => s.classList.remove('focus'));
   const el = document.getElementById('connectStep' + n);
   if (!el) return;
+  el.classList.remove('collapsed'); // 定位到哪一步就把哪一步展开
   el.classList.add('focus');
   el.scrollIntoView({ block: 'nearest' });
   setTimeout(() => el.classList.remove('focus'), 2000);

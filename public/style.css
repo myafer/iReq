@@ -7331,3 +7331,57 @@ body.resizing-v * {
   border-color: var(--border-strong);
   background: var(--panel-2);
 }
+
+/* ------------------------------------------ 设置向导：证书 / 接管本机可折叠 */
+/* .cs-main 里的 h3 当折叠头：点一下展开/收起，右边一个箭头示意 */
+.connect-step.collapsed .cs-main > *:not(h3) {
+  display: none;
+}
+
+.connect-step.collapsed {
+  padding: 10px 14px;
+}
+
+.connect-step.collapsed .cs-num {
+  opacity: 0.75;
+}
+
+.cs-main > h3 {
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 0;
+}
+
+.connect-step:not(.collapsed) .cs-main > h3 {
+  margin-bottom: 8px;
+}
+
+.cs-main > h3::after {
+  content: '▴';
+  margin-left: auto;
+  color: var(--muted);
+  font-size: calc(10px * var(--ui-scale));
+  line-height: 1;
+}
+
+.connect-step.collapsed .cs-main > h3::after {
+  content: '▾';
+}
+
+.cs-main > h3:hover::after {
+  color: var(--text-2);
+}
+
+/* MCP 卡片：从折叠块变成常驻卡片，标题栏右侧直接给开关 */
+.mcp-card .addr-card-top {
+  align-items: center;
+}
+
+.mcp-card .mcp-head {
+  padding: 0;
+  gap: 10px;
+}
+
+.mcp-card .mcp-more {
+  margin-top: 8px;
+}

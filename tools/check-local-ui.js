@@ -37,7 +37,8 @@ const checks = [];
       toggle: document.querySelector('#lpToggle').textContent.trim(),
     }));
     console.log('设置面板:', JSON.stringify(panel));
-    checks.push(['面板状态已填充', panel.visible && panel.badge === '未开启' && panel.state.includes('网络服务')]);
+    // 本机若本来就有别的代理（Clash / 公司代理等），徽标是「被其它代理占用」而不是「未开启」
+    checks.push(['面板状态已填充', panel.visible && ['未开启', '被其它代理占用'].includes(panel.badge) && panel.state.includes('网络服务')]);
     checks.push(['网络服务下拉有选项', panel.services > 0 && panel.service === svc]);
     checks.push(['可复制命令已生成', panel.cmdOn.includes('setwebproxy') && panel.cmdOff.includes('proxystate')]);
     checks.push(['按钮文案正确', panel.toggle === '接管本机']);
@@ -65,8 +66,9 @@ const checks = [];
     }));
     const sysOff = sp.status(svc);
     console.log('释放后:', JSON.stringify({ ...afterOff, ours: sysOff.ours }));
-    checks.push(['点击后系统代理真的释放', !sysOff.ours && !sysOff.on]);
-    checks.push(['UI 同步为未接管', afterOff.badge === '未开启' && afterOff.chip === '本机未接管']);
+    // 只要求「不再是我们的代理」：释放后系统可能仍连着用户自己的代理，那是正常的
+    checks.push(['点击后系统代理真的释放', !sysOff.ours]);
+    checks.push(['UI 同步为未接管', ['未开启', '被其它代理占用'].includes(afterOff.badge) && afterOff.chip === '本机未接管']);
 
     checks.push(['无 JS 报错', errs.length === 0]);
   } catch (err) {

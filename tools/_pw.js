@@ -57,6 +57,28 @@ function decoratePage(page) {
   const origClick = page.click.bind(page);
   page.click = async (selector, options) => {
     try {
+      // 折叠的 <details>（高级设置 / MCP 面板 / 可折叠的向导步骤）：
+      // 点里面的东西之前先展开，免得 Playwright 一直等可见
+      await page.evaluate((s) => {
+        const el = document.querySelector(s);
+        if (!el) return;
+        let d = el.closest('details');
+        while (d) {
+          // 目标本身就是这个 details 的 summary（或 summary 里的元素）：
+          // 调用方想自己切开关，别替他提前打开，否则这一下点击恰好把它关掉
+          const sum = d.querySelector(':scope > summary');
+          const isSelfToggle = !!sum && (sum === el || sum.contains(el));
+          if (!d.open && !isSelfToggle) d.open = true;
+          const parent = d.parentElement;
+          d = parent ? parent.closest('details') : null;
+        }
+        const step = el.closest('.connect-step.collapsed');
+        if (step) {
+          const head = step.querySelector('.cs-main > h3');
+          if (head) head.click();
+        }
+      }, selector);
+
       // 从外到内的展开链：筛选条（默认收起）→ 更多菜单 → 菜单里的二级分组 → 详情「⋯」
       const chain = await page.evaluate((s) => {
         const el = document.querySelector(s);

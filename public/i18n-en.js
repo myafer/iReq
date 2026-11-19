@@ -677,7 +677,6 @@ window.ReqLiteI18N_EN = {
   "MCP 接入": "MCP access",
   "未开启": "Off",
   "允许 AI 客户端接入": "Allow AI clients",
-  "关闭后 /mcp 直接拒绝，现有令牌一并失效": "When off, /mcp rejects everything and every existing token stops working",
   "iReq 以 MCP（Model Context Protocol）服务的形式暴露抓包 / Mock / 弱网能力：AI 客户端可以读流量、建规则、改弱网。所有请求都要带访问令牌，令牌只在这里生成、只显示一次，落盘只存哈希。": "iReq exposes capture / mock / network-simulation as an MCP (Model Context Protocol) service, so AI clients can read traffic, create rules and shape the network. Every request must carry an access token; tokens are created here, shown once, and only their hash is stored.",
   "连接地址": "Endpoint",
   "复制地址": "Copy endpoint",
@@ -935,6 +934,7 @@ window.ReqLiteI18N_EN = {
   "接上之后帧会同时出现在控制台日志里": "Frames also show up in the console log",
 
   /* 握手失败 → 自动跳过解密 */
+  "连接地址、令牌与调用记录": "Endpoint, tokens and recent calls",
   "已跳过解密": "Decryption skipped",
   "重新尝试解密": "Retry decryption",
   "立即跳过解密": "Skip decryption now",
