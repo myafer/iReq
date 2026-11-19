@@ -423,6 +423,10 @@ function renderUpdate(u) {
     go.hidden = !(S.update && S.update.hasUpdate && S.update.latest);
     if (S.update && S.update.latest) go.href = S.update.latest.url;
   }
+  // 「自动检查更新」勾选框跟配置走：原来只渲染了文案，勾选状态没人管，
+  // 结果是明明开着也显示未勾选（设置卡片挪出折叠区后才被看见）
+  const auto = $('#updAuto');
+  if (auto && S.update && typeof S.update.enabled === 'boolean') auto.checked = S.update.enabled;
 }
 
 /* 一页取多少条：够填满一屏半，滚到底再要下一批，用户感觉不到在「翻页」 */

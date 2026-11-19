@@ -797,6 +797,19 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             </section>
           </div>
 
+          <div class="addr-card">
+            <div class="addr-card-top">
+              <h3>更新</h3>
+              <span class="lp-badge" id="updStateBadge">—</span>
+            </div>
+            <p class="hint" id="updStatusText">自动检查 GitHub Releases</p>
+            <div class="addr-card-row">
+              <label class="inline-field"><input type="checkbox" id="updAuto" /> 自动检查更新</label>
+              <button class="btn ghost" id="updCheckNow">检查更新</button>
+              <a class="btn primary" id="updGoRelease" hidden target="_blank" rel="noreferrer">前往下载</a>
+            </div>
+          </div>
+
           <details class="lp-details st-advanced">
             <summary>高级设置</summary>
             <div class="addr-card" data-no-i18n>
@@ -807,18 +820,6 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
                   <option value="en">English</option>
                   <option value="zh-CN">简体中文</option>
                 </select>
-              </div>
-            </div>
-            <div class="addr-card">
-              <div class="addr-card-top">
-                <h3>更新</h3>
-                <span class="lp-badge" id="updStateBadge">—</span>
-              </div>
-              <p class="hint" id="updStatusText">自动检查 GitHub Releases</p>
-              <div class="addr-card-row">
-                <label class="inline-field"><input type="checkbox" id="updAuto" /> 自动检查更新</label>
-                <button class="btn ghost" id="updCheckNow">检查更新</button>
-                <a class="btn primary" id="updGoRelease" hidden target="_blank" rel="noreferrer">前往下载</a>
               </div>
             </div>
             <div class="app-id">

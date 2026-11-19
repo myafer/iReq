@@ -177,6 +177,23 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     ok('更多菜单有二级分组（默认收起 / 可展开）', subClosed && subOpen, `${subClosed} / ${subOpen}`);
     await page.click('body', { position: { x: 5, y: 5 } });
 
+    // 更新卡片：不该藏在「高级设置」折叠里，自动勾选要跟配置一致，手动检查要能点
+    await page.evaluate(() => document.querySelector('#btnSettings').click());
+    await page.waitForTimeout(800);
+    const upd = await page.evaluate(() => {
+      const card = [...document.querySelectorAll('#modalSettings .addr-card')].find((c) => c.textContent.includes('更新'));
+      return {
+        visible: !!card && !!card.offsetParent,
+        inCollapsed: !!card && !!card.closest('details:not([open])'),
+        auto: document.querySelector('#updAuto').checked,
+        btn: !!document.querySelector('#updCheckNow'),
+        badge: (document.querySelector('#updStateBadge') || {}).textContent || '',
+      };
+    });
+    ok('更新卡片可见（不在折叠区）且自动检查已勾选', upd.visible && !upd.inCollapsed && upd.auto && upd.btn,
+      JSON.stringify(upd));
+    await page.evaluate(() => document.querySelector('#modalSettings [data-close]').click());
+
     ok('UI 无 JS 报错', errs.length === 0, JSON.stringify(errs.slice(0, 2)));
   } finally {
     await browser.close();
