@@ -299,8 +299,11 @@ class ConsoleServer {
       return {
         rule,
         key,
-        source: m.source || 'startup',
-        addedAt: m.addedAt || 0,
+        source: m.source || (m.auto ? 'auto' : 'startup'),
+        auto: !!m.auto,
+        reason: m.reason || '',
+        skippedAt: m.at || 0,
+        addedAt: m.addedAt || m.at || 0,
         hits: own.reduce((a, h) => a + h.count, 0),
         lastHitAt: own.reduce((a, h) => Math.max(a, h.lastAt || 0), 0),
         hosts: own.map((h) => h.host).slice(0, 8),
@@ -332,7 +335,13 @@ class ConsoleServer {
     for (const key of Object.keys(meta)) if (!seen.has(key)) delete meta[key];
     this.config.passthrough = next;
     if (this.proxy && typeof this.proxy.clearTlsFailures === 'function') {
-      for (const rule of next) this.proxy.clearTlsFailures(rule);
+      // 自动跳过的那条不清：列表里那一行就是「这个域名看不到明文」的唯一标记，
+      // 用户还要靠它点「重新尝试解密」。手动加白名单则照旧清掉诊断。
+      for (const rule of next) {
+        const m = meta[rule] || {};
+        if (m.auto) continue;
+        this.proxy.clearTlsFailures(rule);
+      }
     }
     const killed =
       this.proxy && typeof this.proxy.applyPassthrough === 'function'
@@ -409,6 +418,11 @@ class ConsoleServer {
       this.proxy.on('tls-remove', ({ hosts }) =>
         this._broadcast({ type: 'tls-remove', hosts })
       );
+      // 连续握手失败自动跳过解密：落盘 + 通知界面（那一行会改成「已跳过解密」）
+      this.proxy.on('passthrough-auto', (info) => {
+        if (this.dataDir) savePersistedConfig(this.dataDir, this.config);
+        this._broadcast({ type: 'passthrough-auto', ...info, passthrough: this.config.passthrough || [] });
+      });
       // 条件告警：规则命中时广播，所有打开的窗口都会弹提示
       this.proxy.on('alert', (alert) => this._broadcast({ type: 'alert', alert }));
       // 反代端口启停 / 失败时同步给界面（比如端口被占用）
@@ -946,8 +960,10 @@ class ConsoleServer {
       const asArray = (v) =>
         Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/).filter(Boolean);
       let rules;
+      let dropped = '';
       if (method === 'DELETE') {
         const key = normalizePassthroughRule(url.searchParams.get('rule') || '');
+        dropped = key;
         rules = key
           ? (this.config.passthrough || []).filter((r) => normalizePassthroughRule(r) !== key)
           : [];
@@ -957,6 +973,10 @@ class ConsoleServer {
         rules = asArray(body.rules);
       }
       const changed = this._setPassthrough(rules, String(body.source || 'manager'));
+      // 删掉某条规则 = 让这个域名重新试解密：诊断行（含「已跳过」标记）一起撤掉，计数从头开始
+      if (dropped && this.proxy && typeof this.proxy.clearTlsFailures === 'function') {
+        this.proxy.clearTlsFailures(dropped);
+      }
       return this._json(res, 200, { ok: true, ...changed, ...this._passthroughList() });
     }
 

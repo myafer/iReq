@@ -61,7 +61,7 @@ iReq 本身可以当一个 **MCP（Model Context Protocol）服务**：AI 客户
 | `mock_flow` | 拿一条真实请求当模板直接生成 Mock（等于界面里的「Mock 此请求」） |
 | `replay_flow` | 改 URL / 方法 / 头 / 体重放，结果作为新流量入库 |
 | `set_network_sim` | 开弱网、断网、超时，按应用 / 域名 / IP 加规则 |
-| `set_passthrough` | 管理「跳过解密的域名」 |
+| `set_passthrough` | 读 / 改「跳过解密的域名」（界面上已改为握手连续失败自动跳过，这个工具留给 AI 做批量调整与善后） |
 | `clear_flows` | 清空内存里的流量列表 |
 | `perf_summary` | 按接口 / 域名聚合 P50 / P95 / 平均 / 最大 / 错误率 / 传输量 + 最慢请求 |
 | `list_breakpoints` / `set_breakpoints` | 读 / 写断点规则（URL 包含、方法、阶段、超时）；命中会挂起等人放行 |

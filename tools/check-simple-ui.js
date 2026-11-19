@@ -172,7 +172,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForTimeout(200);
     const subOpen = await page.evaluate(() =>
       document.querySelector('#moreAdvanced').hidden === false &&
-      document.querySelectorAll('#moreAdvanced .more-item').length === 3);
+      !!document.querySelector('#moreAdvanced #btnImportHar') &&
+      !!document.querySelector('#moreAdvanced #btnCa'));
     ok('更多菜单有二级分组（默认收起 / 可展开）', subClosed && subOpen, `${subClosed} / ${subOpen}`);
     await page.click('body', { position: { x: 5, y: 5 } });
 

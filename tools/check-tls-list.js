@@ -88,7 +88,7 @@ async function api(pathname, options = {}) {
     await page.locator('.row.tls').first().click();
     await page.waitForTimeout(180);
     ok('详情显示失败原因', (await page.locator('#detail .tls-error').count()) === 1);
-    ok('详情有一键透传按钮', (await page.locator('#detail [data-block-host]').count()) === 1);
+    ok('详情有一键透传按钮', (await page.locator('#detail [data-pt-skip]').count()) === 1);
     ok('诊断行有忽略按钮', (await page.locator('.row.tls [data-tls-dismiss]').count()) === 1);
 
     await page.evaluate(() => window.ReqLiteI18N.setLang('en'));
@@ -111,10 +111,10 @@ async function api(pathname, options = {}) {
     );
 
     // 加入跳过解密 = 这个失败已被处理，诊断行必须从列表顶部和后端一起消失
-    await page.locator('#detail [data-block-host]').click();
+    await page.locator('#detail [data-pt-skip]').click();
     await page.waitForTimeout(350);
     const cfg = await api('/api/config');
-    ok('一键加入跳过解密生效', (cfg.passthrough || []).includes(HOST), JSON.stringify(cfg.passthrough));
+    ok('详情里点「立即跳过解密」生效', (cfg.passthrough || []).includes(HOST), JSON.stringify(cfg.passthrough));
     ok('诊断行立即消失', (await page.locator('.row.tls').count()) === 0);
     ok('「握手失败」视图同步变空', (await page.locator('#list .row').count()) === 0);
     ok('角标归零并隐藏', await page.locator('#tlsCount').isHidden());

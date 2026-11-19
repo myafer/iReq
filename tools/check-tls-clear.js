@@ -158,15 +158,15 @@ async function waitDiag(expect, timeout = 12000) {
     push('新域名的诊断行出现', diagDHosts.includes(HOST_D) && (await page.locator('.row.tls').count()) === 1, JSON.stringify(diagDHosts));
     await page.locator('.row.tls').first().click();
     await page.waitForTimeout(180);
-    push('选中后详情有透传按钮', (await page.locator('#detail [data-block-host]').count()) === 1);
-    await page.locator('#detail [data-block-host]').click();
+    push('选中后详情有「立即跳过解密」', (await page.locator('#detail [data-pt-skip]').count()) === 1);
+    await page.locator('#detail [data-pt-skip]').click();
     await page.waitForTimeout(450);
-    push('一键透传后诊断行消失', (await page.locator('.row.tls').count()) === 0);
-    push('一键透传后详情回到空状态', (await page.locator('#detail .tls-error').count()) === 0);
+    push('立即跳过解密后诊断行消失', (await page.locator('.row.tls').count()) === 0);
+    push('立即跳过解密后详情回到空状态', (await page.locator('#detail .tls-error').count()) === 0);
     const cfg2 = await api('/api/config');
-    push('一键透传写入了配置', (cfg2.passthrough || []).includes(HOST_D), JSON.stringify(cfg2.passthrough));
+    push('立即跳过解密写入了配置', (cfg2.passthrough || []).includes(HOST_D), JSON.stringify(cfg2.passthrough));
     const diag4 = await api('/api/diagnostics');
-    push('一键透传后端记录清空', (diag4.tlsFailures || []).length === 0);
+    push('立即跳过解密后端记录清空', (diag4.tlsFailures || []).length === 0);
 
     push('无 JS 报错', errs.length === 0, JSON.stringify(errs.slice(0, 2)));
   } finally {

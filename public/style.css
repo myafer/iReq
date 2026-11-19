@@ -7297,3 +7297,37 @@ body.resizing-v * {
 .sc-hint-dirty {
   margin-left: auto;
 }
+
+/* -------------------------- 握手失败 → 已自动跳过解密（不再报错色，改中性提示） */
+/* 这一行不是「出错了」，而是「这里我们主动不看明文」：左侧色条与底色都收掉，
+ * 只留一个「跳过解密」标签 + SKIP 状态，避免长期红着吓人。 */
+.row.tls.skipped {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  box-shadow: inset 3px 0 0 var(--border-strong);
+}
+
+.row.tls.skipped:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.row.tls.skipped.sel {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.row.tls.skipped .m.tls {
+  color: var(--muted);
+  border-color: var(--border-strong);
+}
+
+.tag.skip {
+  color: var(--muted);
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.st.skip {
+  color: var(--muted);
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}

@@ -63,7 +63,7 @@ A read-only token does not even see write tools in `tools/list`, and calls are r
 | `mock_flow` | Turn a captured request into a mock rule — the "Mock this request" action, scripted |
 | `replay_flow` | Replay with a different URL / method / headers / body; the result lands as a new flow |
 | `set_network_sim` | Weak network, offline, timeout, with per-app / host / IP rules |
-| `set_passthrough` | Manage the "skip decryption" allowlist |
+| `set_passthrough` | Read / change the "skip decryption" list (the UI now skips automatically after repeated handshake failures; the tool stays for bulk fixes and cleanup) |
 | `clear_flows` | Clear the in-memory flow list |
 | `perf_summary` | Aggregate by route / host: P50 / P95 / avg / max / error rate / bytes, plus the slowest requests |
 | `list_breakpoints` / `set_breakpoints` | Read / write breakpoint rules (URL contains, method, phase, timeout) |

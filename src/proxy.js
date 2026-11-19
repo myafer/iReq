@@ -174,6 +174,19 @@ function splitHostPort(value) {
 }
 
 /** 跳过解密规则的域名匹配：规则可写 example.com 或 *.example.com，命中自身与所有子域 */
+/*
+ * 握手连续失败到这个次数就自动跳过解密（原样透传）。
+ * 阈值取 2：第一次可能只是偶发（连接被掐、客户端重试），第二次还失败基本就是
+ * 「客户端不认我们的证书 / 只接受 h2」这类重试也没用的情况，继续解密只会让 App 一直连不上。
+ */
+const TLS_AUTO_SKIP_AFTER = 2;
+/**
+ * 哪些失败原因值得自动跳过：这四类都是「再怎么重试也解不开」的
+ * —— 不认证书、只接受 h2、握手完了没请求（客户端直接断开）、端口不是 HTTP。
+ * reset 不在此列：可能只是网络抖了一下，固化下来会白白丢掉明文。
+ */
+const AUTO_SKIP_REASONS = new Set(['untrusted', 'alpn', 'no-request', 'non-http']);
+
 function passthroughMatches(host, rules) {
   const h = String(host || '').toLowerCase();
   if (!h) return false;
@@ -566,7 +579,9 @@ class ProxyServer extends EventEmitter {
     if (matched) {
       // 兜底：白名单也可能来自启动配置 / 落盘文件，没经过 /api/config PUT。
       // 这里顺手清掉该域名遗留的握手失败诊断，避免「已加白名单还挂在列表顶部」。
-      this.clearTlsFailures(host);
+      // 例外：自动跳过的域名要留着那一行当标记（用户靠它知道「这里看不到明文，原因是什么」）。
+      const meta = (this.config.passthroughMeta || {})[matched];
+      if (!(meta && meta.auto)) this.clearTlsFailures(host);
       return { decrypt: false, reason: 'passthrough', rule: matched };
     }
 
@@ -990,6 +1005,37 @@ class ProxyServer extends EventEmitter {
     return hosts.length;
   }
 
+  /**
+   * 自动把某个域名加进「跳过解密」：不再给它签证书，之后原样透传。
+   * 诊断记录**保留**（带 skipped 标记），因为列表里那一行就是用户唯一能看到的
+   * 「这个域名为什么看不到明文」的入口 —— 处理完自己点「重新尝试解密」即可。
+   */
+  autoSkipDecrypt(host, rec) {
+    const key = String(host || '').toLowerCase();
+    if (!key) return false;
+    if (passthroughMatches(key, this.config.passthrough || [])) return false;
+    this.config.passthrough = [...(this.config.passthrough || []), key];
+    this.config.passthroughMeta = {
+      ...(this.config.passthroughMeta || {}),
+      [key]: { auto: true, reason: rec.reason || '', at: Date.now(), error: rec.error || '' },
+    };
+    // 还在解密的存量连接也一并断掉，否则客户端会拿着旧隧道继续报错
+    let killed = 0;
+    try {
+      killed = this.applyPassthrough([], [key]);
+    } catch (_) {
+      /* 断连接失败不影响后续判定 */
+    }
+    this.emit('passthrough-auto', {
+      host: key,
+      reason: rec.reason || '',
+      error: rec.error || '',
+      count: rec.count || 1,
+      killed,
+    });
+    return true;
+  }
+
   _noteTlsFailure(host, port, err, info = {}) {
     // 已加入跳过解密的域名不再解密，理论上不会再失败；但加白名单之前建立的
     // 旧 MITM 连接可能晚一点才报错，别让它把刚清掉的记录又顶回列表顶部。
@@ -1008,6 +1054,16 @@ class ProxyServer extends EventEmitter {
     this.tlsFailures.set(host, rec);
     // 实时推给控制台：握手失败直接出现在主列表，不必去设置页翻诊断区
     this.emit('tls-failure', { ...rec });
+
+    // 连续失败到阈值 → 自动跳过解密；再推一次带 skipped 的记录，界面据此改标记
+    if (!rec.skipped && rec.count >= TLS_AUTO_SKIP_AFTER && AUTO_SKIP_REASONS.has(rec.reason)) {
+      if (this.autoSkipDecrypt(host, rec)) {
+        rec.skipped = true;
+        rec.skippedAt = Date.now();
+        this.tlsFailures.set(host, rec);
+        this.emit('tls-failure', { ...rec });
+      }
+    }
   }
 
   /** 记一次「因为跳过解密规则而原样透传」的 CONNECT，管理列表里能看到规则是否真的生效 */
@@ -2589,4 +2645,5 @@ module.exports = {
   passthroughMatches,
   normalizePassthroughRule,
   classifyTlsFailure,
+  TLS_AUTO_SKIP_AFTER,
 };
