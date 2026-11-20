@@ -70,6 +70,30 @@ const checks = [];
     checks.push(['点击后系统代理真的释放', !sysOff.ours]);
     checks.push(['UI 同步为未接管', ['未开启', '被其它代理占用'].includes(afterOff.badge) && afterOff.chip === '本机未接管']);
 
+    // 另一个窗口（或终端 / Clash）改了系统代理，顶栏得自己跟上，不能等用户重开设置
+    const page2 = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    await page2.goto(UI, { waitUntil: 'domcontentloaded' });
+    await page2.waitForTimeout(700);
+    const chip2 = () => page2.evaluate(() => document.querySelector('#localChip').textContent.trim());
+    const waitChip = async (fn, ms = 4000) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        if (fn(await chip2())) return true;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return false;
+    };
+    // 外部改了系统代理（另一个窗口 / Clash / 终端）：任何一次状态读取都会发现漂移并广播，
+    // 这里用一次 GET 代替「另一个窗口的轮询」，再由 SSE 推给这个窗口
+    sp.enable(svc);
+    await fetch(UI + '/api/system-proxy?fast=1').catch(() => {});
+    const sawOn = await waitChip((t) => t.includes('已接管'));
+    sp.disable(svc);
+    await fetch(UI + '/api/system-proxy?fast=1').catch(() => {});
+    const sawOff = await waitChip((t) => t.includes('未接管'));
+    checks.push(['顶栏状态跟着外部改动更新（读取即广播 + SSE）', sawOn && sawOff], `${sawOn} / ${sawOff}`);
+    await page2.close();
+
     checks.push(['无 JS 报错', errs.length === 0]);
   } catch (err) {
     checks.push(['UI 流程无异常', false]);

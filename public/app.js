@@ -6956,9 +6956,15 @@ async function pasteTreeItem(from, targetDir, mode) {
 
 /* -------------------------------------------------- 本机系统代理接管 */
 
-async function loadLocalProxy() {
+/**
+ * 读本机代理状态。
+ * silent=true 用于后台轮询：走 ?fast=1（服务端缓存 1.5s、跳过强制证书检查），
+ * 只有「接管状态 / 网络服务 / 证书信任」真的变了才重绘，避免每 15 秒抖一下。
+ */
+async function loadLocalProxy({ silent = false, force = false } = {}) {
+  const prev = S.localProxy || {};
   try {
-    S.localProxy = await api('/api/system-proxy');
+    S.localProxy = await api('/api/system-proxy' + (silent && !force ? '?fast=1' : ''));
   } catch (err) {
     S.localProxy = {
       supported: false,
@@ -6968,8 +6974,18 @@ async function loadLocalProxy() {
       commands: { on: '', off: '' },
     };
   }
-  renderLocalProxy();
-  renderDock();
+  const cur = S.localProxy || {};
+  const changed =
+    prev.ours !== cur.ours ||
+    prev.on !== cur.on ||
+    prev.supported !== cur.supported ||
+    (prev.service || '') !== (cur.service || '') ||
+    ((prev.caTrust || {}).trusted !== (cur.caTrust || {}).trusted) ||
+    prev.safeMode !== cur.safeMode;
+  if (!silent || changed) {
+    renderLocalProxy();
+    renderDock();
+  }
 }
 
 function renderLocalProxy() {
@@ -8644,6 +8660,9 @@ function bind() {
       }
       // 这次清空刚好在磁盘上留了一条历史记录
       loadHistory();
+    } else if (msg.type === 'local-proxy') {
+      // 接管 / 释放（本窗口、别的窗口、终端命令、Clash 抢走代理）都会走到这里
+      loadLocalProxy({ silent: true, force: true });
     } else if (msg.type === 'history-changed') {
       // 任何窗口改名 / 删除 / 新增历史，侧栏一起同步
       loadHistory();
@@ -9518,6 +9537,13 @@ async function init() {
   syncSortUi();
   await loadStatus();
   loadLocalProxy(); // 只读探测，不阻塞首屏
+  // 顶栏那个「本机已接管 / 未接管」会漂：系统代理可能被 Clash / VPN / 终端命令改掉，
+  // 另一个窗口也可能刚点过。每 10 秒轻量对一次，切回窗口时立刻再对一次。
+  setInterval(() => loadLocalProxy({ silent: true }), 10000);
+  window.addEventListener('focus', () => loadLocalProxy({ silent: true }));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadLocalProxy({ silent: true });
+  });
   loadCaStatus(); // 预热证书状态卡：用户点开证书页时不用再等检测
   await loadTlsFailures();
   await loadPassthrough(); // 白名单角标 + 管理列表（服务端持久化）

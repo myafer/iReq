@@ -402,6 +402,15 @@ class ConsoleServer {
     this._recountTimer = setTimeout(tick, 150);
   }
 
+  /** 系统代理状态的短缓存：多个窗口轮询时只跑一次 networksetup */
+  _localProxyStatus(ttlMs = 1500) {
+    const now = Date.now();
+    if (this._lpCache && now - this._lpCache.at < ttlMs) return this._lpCache.st;
+    const st = this.systemProxy.status();
+    this._lpCache = { at: now, st };
+    return st;
+  }
+
   /** 老版本留下的偏小计数（等于内存上限的那些）启动后补数一遍 */
   _healHistoryCounts() {
     if (!this.history) return;
@@ -1080,11 +1089,19 @@ class ConsoleServer {
     if (parts[1] === 'system-proxy') {
       if (!this.systemProxy) return this._json(res, 404, { error: '系统代理模块未启用' });
       if (method === 'GET') {
-        const st = this.systemProxy.status();
+        // 界面会周期性轻量轮询（?fast=1）：状态缓存 1.5s，别让每个窗口都跑一遍 networksetup；
+        // 证书信任在 fast 模式下用缓存，不做强制检查
+        const fast = url.searchParams.get('fast') === '1';
+        const st = this._localProxyStatus();
+        const prev = Boolean(this.config.localProxyOurs);
         this.config.localProxyOurs = Boolean(st.ours);
+        // 别的地方改了系统代理（Clash / VPN / 终端命令）：让所有窗口都刷新顶栏那个状态
+        if (prev !== Boolean(st.ours)) {
+          this._broadcast({ type: 'local-proxy', ours: Boolean(st.ours) });
+        }
         return this._json(res, 200, {
           ...st,
-          caTrust: this._syncTrust(),
+          caTrust: fast ? this.caTrust && this.caTrust.status(false) : this._syncTrust(),
           safeMode: this._safeMode(),
           commands: this.systemProxy.commands(st.service),
         });
@@ -1097,7 +1114,9 @@ class ConsoleServer {
         // 接管时重新问一次系统：用户可能刚执行完信任命令。
         const caTrust = this._syncTrust(true);
         const st = r.status || this.systemProxy.status();
+        this._lpCache = { at: Date.now(), st };
         this.config.localProxyOurs = Boolean(st.ours);
+        this._broadcast({ type: 'local-proxy', ours: Boolean(st.ours) });
         const service = st.service || body.service || this.systemProxy.primaryService();
         return this._json(res, r.ok ? 200 : 400, {
           ...r,
