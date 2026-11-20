@@ -159,17 +159,26 @@ function viaProxy(hostPort, p) {
     const absFile = path.join(flowsDir, item.file);
     ok('磁盘上确实有这份归档', fs.existsSync(absFile) && /\.cleared-\d+$/.test(item.file), item.file);
     ok('历史索引已落盘', fs.existsSync(path.join(dataDir, 'history.json')));
-    ok(
-      '清空时记的是内存条数（后面会被校准）',
-      item.count <= beforeCount || item.count === beforeCount,
-      `count=${item.count} 内存=${beforeCount}`
-    );
+    // 清空那一刻只能记内存条数（这里是 3），文件里其实有 12 条；
+    // 服务端会立刻在后台重新数一遍，所以这里两种值都可能出现
+    ok('记录里带条数（内存条数，或已校准的真实条数）', item.count > 0 && item.count <= 12, `count=${item.count}`);
     createdIds.push(item.id);
 
     /* ---------------- ④ 回看 ---------------- */
     const h1 = (await jsonApi(`/api/history/${item.id}/flows?limit=4`)).body;
     ok('回看：第一页按 limit 返回', h1.flows.length === 4 && h1.hasMore === true);
     ok('回看：条数校准成文件里的真实条数', h1.total === 12, `total=${h1.total}`);
+
+    // 列表里的条数也要自己长到 12：内存上限 3 不该让它永远显示 3
+    let healed = item.count;
+    for (let i = 0; i < 30; i++) {
+      await wait(100);
+      const list = (await jsonApi('/api/history')).body;
+      const row = (list.items || []).find((x) => x.id === item.id);
+      healed = row ? row.count : healed;
+      if (healed === 12) break;
+    }
+    ok('后台把列表条数校准成真实条数（不被内存上限截断）', healed === 12, `count=${healed}`);
 
     const hp = [];
     let hcur = '';

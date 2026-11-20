@@ -377,6 +377,40 @@ class ConsoleServer {
     return st;
   }
 
+  /**
+   * 后台重新数归档条数（一次只跑一条，避免几个大文件同时解析把主线程占满）。
+   * 数完广播 history-changed，界面自己刷新那一行的「N 条」。
+   */
+  _queueHistoryRecount(id) {
+    if (!this.history || !id) return;
+    if (!this._recountQueue) this._recountQueue = [];
+    if (this._recountQueue.includes(id)) return;
+    this._recountQueue.push(id);
+    if (this._recountTimer) return;
+    const tick = () => {
+      this._recountTimer = null;
+      const next = this._recountQueue.shift();
+      if (next == null) return;
+      try {
+        const n = this.history.recount(next);
+        if (n != null) this._broadcast({ type: 'history-changed' });
+      } catch (_) {
+        /* 文件被删了就跳过 */
+      }
+      if (this._recountQueue.length) this._recountTimer = setTimeout(tick, 80);
+    };
+    this._recountTimer = setTimeout(tick, 150);
+  }
+
+  /** 老版本留下的偏小计数（等于内存上限的那些）启动后补数一遍 */
+  _healHistoryCounts() {
+    if (!this.history) return;
+    const cap = (this.store && this.store.maxFlows) || 2000;
+    for (const item of this.history.items) {
+      if (Number(item.count) >= cap) this._queueHistoryRecount(item.id);
+    }
+  }
+
   _safeMode() {
     return this.config.caTrusted === false && this.config.localProxyOurs === true;
   }
@@ -392,6 +426,7 @@ class ConsoleServer {
       this.server.listen(this.port, this.host, () => {
         this.port = this.server.address().port;
         this._bindEvents();
+        this._healHistoryCounts();
         resolve(this.port);
       });
     });
@@ -408,6 +443,9 @@ class ConsoleServer {
       if (!this.history) return;
       const item = this.history.add(info);
       this._broadcast({ type: 'history-changed', item });
+      // 清空那一刻记的是「内存里剩几条」，内存有上限（默认 2000），
+      // 文件里往往更多 —— 后台重新数一遍，别让列表看起来像只存了 2000 条
+      this._queueHistoryRecount(item.id);
     });
     // 握手失败是「连接层」事件，不是 HTTP flow，单独推给控制台的列表诊断行
     if (this.proxy && typeof this.proxy.on === 'function') {

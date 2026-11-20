@@ -246,6 +246,29 @@ class FlowHistory {
   }
 
   /**
+   * 重新数一遍归档里的真实条数。
+   * 清空那一刻只能记「内存里剩几条」，而内存有上限（默认 2000），超过的部分
+   * 照样写进了文件 —— 所以索引里的 count 会偏小，列表看起来像「只存了 2000 条」。
+   * 这里按 id 去重重新数，数完写回索引。
+   */
+  recount(id) {
+    const item = this.find(id);
+    if (!item) return null;
+    const abs = this._abs(item.file);
+    try {
+      if (!fs.statSync(abs).isFile()) return null;
+    } catch (_) {
+      return null;
+    }
+    const n = countMatching(abs, {});
+    if (n !== item.count) {
+      item.count = n;
+      this._save();
+    }
+    return n;
+  }
+
+  /**
    * 读一页（新→旧）。cursor 是「已经读到文件哪个字节位置」，不传表示从文件尾开始。
    * 返回的 nextCursor 直接回传给下一次请求，前端不用理解它是什么。
    */

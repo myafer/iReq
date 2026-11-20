@@ -902,9 +902,10 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <input id="stMitmPorts" class="input mono" placeholder="443, 8443" spellcheck="false" />
             </label>
             <div class="field-row">
-              <label class="inline-field">内存保留条数 <input id="stMax" class="input mono tiny" value="2000" /></label>
+              <label class="inline-field">列表保留条数 <input id="stMax" class="input mono tiny" value="2000" /></label>
               <label class="inline-field"><input type="checkbox" id="stH2" checked /> 协商 HTTP/2</label>
             </div>
+            <p class="hint">只影响列表里留多少条（省内存）；每条流量都会落盘，「清空」留下的历史记录里能翻到全部。</p>
             <p class="hint" id="stDiskUsage">数据目录占用 —</p>
             <details class="lp-details st-details">
               <summary>运行信息</summary>
