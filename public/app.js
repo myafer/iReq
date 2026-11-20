@@ -8809,7 +8809,9 @@ function bindConnectSteps() {
     const head = step.querySelector('.cs-main > h3');
     if (!head || head.dataset.foldBound) return;
     head.dataset.foldBound = '1';
-    head.addEventListener('click', () => {
+    head.addEventListener('click', (e) => {
+      // 标题行里现在放着「接管本机」按钮：点按钮/下拉不该顺手把折叠切了
+      if (e.target.closest('button, a, select, input, label')) return;
       step.classList.toggle('collapsed');
     });
   });

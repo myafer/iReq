@@ -180,6 +180,19 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     // 更新卡片：不该藏在「高级设置」折叠里，自动勾选要跟配置一致，手动检查要能点
     await page.evaluate(() => document.querySelector('#btnSettings').click());
     await page.waitForTimeout(800);
+
+    // 「接管本机」按钮放在步骤标题行：第 3 步收着的时候也该看得见、点得到
+    const lp = await page.evaluate(() => {
+      const step = document.querySelector('#connectStep3');
+      const btn = document.querySelector('#lpToggle');
+      const r = btn ? btn.getBoundingClientRect() : { width: 0, height: 0 };
+      return {
+        collapsed: !!step && step.classList.contains('collapsed'),
+        visible: !!btn && !!btn.offsetParent && r.width > 0 && r.height > 0,
+        inHead: !!btn && !!btn.closest('.cs-main > h3'),
+      };
+    });
+    ok('「接管本机」按钮在收起的步骤里也看得见（且位于标题行）', lp.collapsed && lp.visible && lp.inHead, JSON.stringify(lp));
     const upd = await page.evaluate(() => {
       const card = [...document.querySelectorAll('#modalSettings .addr-card')].find((c) => c.textContent.includes('更新'));
       return {

@@ -767,13 +767,14 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <section class="connect-step" id="connectStep3">
               <div class="cs-num">3</div>
               <div class="cs-main">
-                <h3>接管本机 <span class="lp-badge" id="lpBadge">检测中…</span> <span class="lp-badge trust" id="lpTrustBadge" hidden></span></h3>
+                <h3>接管本机 <span class="lp-badge" id="lpBadge">检测中…</span> <span class="lp-badge trust" id="lpTrustBadge" hidden></span>
+                  <button type="button" class="btn primary lp-head-btn" id="lpToggle" title="把系统代理指向 iReq（再点一次释放，原有配置会还原）">接管本机</button>
+                </h3>
                 <details class="lp-state-details">
                   <summary id="lpStateSummary">—</summary>
                   <div class="lp-state" id="lpState">—</div>
                 </details>
                 <div class="lp-actions">
-                  <button class="btn primary" id="lpToggle">接管本机</button>
                   <label class="inline-field">网络服务 <select id="lpService" class="input mono"></select></label>
                 </div>
                 <details class="lp-details">

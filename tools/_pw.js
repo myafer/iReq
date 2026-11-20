@@ -62,6 +62,8 @@ function decoratePage(page) {
       await page.evaluate((s) => {
         const el = document.querySelector(s);
         if (!el) return;
+        // 已经看得见就别动折叠状态（比如「接管本机」按钮就放在收起的步骤标题里）
+        if (el.offsetParent) return;
         let d = el.closest('details');
         while (d) {
           // 目标本身就是这个 details 的 summary（或 summary 里的元素）：

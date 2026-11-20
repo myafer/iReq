@@ -7356,6 +7356,10 @@ body.resizing-v * {
   margin-bottom: 8px;
 }
 
+.cs-main > h3::has(.lp-head-btn)::after {
+  margin-left: 8px;
+}
+
 .cs-main > h3::after {
   content: '▴';
   margin-left: auto;
@@ -7384,4 +7388,23 @@ body.resizing-v * {
 
 .mcp-card .mcp-more {
   margin-top: 8px;
+}
+
+/* 「接管本机」按钮放在步骤标题行：折叠时也能一眼看到、直接点 */
+.cs-main > h3 .lp-head-btn {
+  flex: none;
+  margin-left: auto;
+  height: calc(24px * var(--ui-scale));
+  padding: 0 10px;
+  font-size: calc(11.5px * var(--ui-scale));
+  border-radius: 7px;
+}
+
+/* 标题里已经有按钮占住右侧，箭头紧跟其后即可，不用再抢自动外边距 */
+.cs-main > h3 .lp-head-btn ~ * {
+  margin-left: 0;
+}
+
+.connect-step.collapsed .cs-main > h3::after {
+  margin-left: 8px;
 }
