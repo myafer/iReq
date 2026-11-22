@@ -276,19 +276,47 @@ function viaProxy(host, path, { method = 'GET', headers = {}, body = null } = {}
 
   // 性能 / 总览之外的第三张：详情概览（含耗时瀑布）
   // 列表会随新流量重绘，旧 handle 可能已经脱离 DOM：这里每次都重新查
-  if (await page.$('.row:has-text("/v1/lesson/4821/schedule")')) {
-    await page.click('.row:has-text("/v1/lesson/4821/schedule")');
-    await page.waitForSelector('#tabs');
-    // 页签也会随详情重绘被换掉，同样用选择器点（handle 会失效）
-    if (await page.$('#tabs button[data-tab="timing"]')) {
-      await page.click('#tabs button[data-tab="timing"]');
-      await page.waitForTimeout(500);
-    }
-    if (await page.$('.wf-row')) {
+  // 详情概览（含分段耗时瀑布）：列表 / 详情都会被新流量重绘，
+  // 每步都要确认「选中的确实是这条」，否则会拍到一个没有瀑布图的 WS 详情
+  let shotTiming = false;
+  for (let i = 0; i < 6 && !shotTiming; i++) {
+    try {
+      const clicked = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('#list .row')].filter((r) =>
+          r.textContent.includes('/v1/lesson/4821/schedule'));
+        const row = rows.find((r) => r.getBoundingClientRect().height > 0) || rows[0];
+        if (!row) return false;
+        row.click();
+        return true;
+      });
+      if (!clicked) {
+        await page.waitForTimeout(350);
+        continue;
+      }
+      await page.waitForSelector('#tabs', { timeout: 2000 });
+      const onSchedule = await page.evaluate(() =>
+        ((document.querySelector('#detail .durl') || {}).textContent || '').includes('schedule'));
+      if (!onSchedule) {
+        await page.waitForTimeout(350);
+        continue;
+      }
+      const tab = await page.$('#tabs button[data-tab="timing"]');
+      if (!tab) {
+        await page.waitForTimeout(350);
+        continue;
+      }
+      await tab.click();
+      await page.waitForSelector('#detail .wf-row', { timeout: 2000 });
+      await page.waitForTimeout(400);
       await page.locator('#detail').screenshot({ path: path.join(OUT, 'timing.png') });
       console.log('shot timing');
+      shotTiming = true;
+    } catch (err) {
+      console.log('timing retry ' + (i + 1) + ':', String((err && err.message) || err).split('\n')[0]);
+      await page.waitForTimeout(400);
     }
   }
+  if (!shotTiming) console.log('⚠️ 耗时截图跳过：没等到 #detail .wf-row');
 
   await browser.close();
   up.close(); sse.close(); ws.close();
