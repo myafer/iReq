@@ -39,6 +39,8 @@ const S = {
   ruleFromTree: false, /* 编辑器是否从规则工作区打开（关闭时回到工作区） */
   /* MCP 接入面板：/api/mcp 的视图（含令牌列表与最近审计，绝不含凭据） */
   mcp: null,
+  mcpEditing: '',
+
   mcpSnippet: '',
   /* VSCode 式多标签编辑区：{ key, id, name, dir, data, pane, dirty, fromWorkspace } */
   ruleTabs: [],
@@ -3334,6 +3336,8 @@ function openModal(id) {
 function closeModals() {
   // 引导弹窗不管从哪条路关掉（✕ / 遮罩 / Esc / 开始使用）都算看过，只弹一次
   if (!$('#modalWelcome').hidden) markOnboarded();
+  // 令牌明文只活到「关掉设置」为止：再打开时不该还能看到
+  hideMcpSecret();
   // 设置是自动保存的：关窗前把还没到 debounce 时间的改动落下去，避免「点了 ✕ 就等于没改」
   if (!$('#modalSettings').hidden && settingsDirty) flushSettingsSave();
   // 网络面板同理；只在真的编辑过时 flush，避免从没打开过的空面板把规则清空
@@ -7443,16 +7447,27 @@ function renderMcpTokens(tokens) {
     box.innerHTML = '<div class="mcp-empty">还没有令牌。生成一个之后，AI 客户端才能调用</div>';
     return;
   }
+  const editing = S.mcpEditing;
   box.innerHTML = tokens
     .map((t) => {
       const scope = t.scopes.includes('write') ? '读写' : '只读';
       const used = t.lastUsedAt ? timeAgo(t.lastUsedAt) : '从未使用';
+      // 名字点了就能改：重命名只改展示名，不动 hash 与权限
+      const nameCell =
+        editing === t.id
+          ? `<input class="input mcp-rename-input" data-rename-input="${esc(t.id)}" maxlength="40" value="${esc(t.name)}" />`
+          : `<button type="button" class="mcp-token-name" data-rename-open="${esc(t.id)}" title="点击改名">${esc(t.name)}</button>`;
+      const actions =
+        editing === t.id
+          ? `<button type="button" class="btn ghost" data-rename-save="${esc(t.id)}">保存</button>
+             <button type="button" class="btn ghost" data-rename-cancel="${esc(t.id)}">取消</button>`
+          : `<button type="button" class="btn ghost mcp-revoke" data-revoke="${esc(t.id)}" title="让这个令牌立刻失效">撤销</button>`;
       return `<div class="mcp-token-row" data-id="${esc(t.id)}">
-        <span class="mcp-token-name">${esc(t.name)}</span>
+        ${nameCell}
         <code class="mcp-token-key" data-no-i18n>${esc(t.masked)}</code>
         <span class="lp-badge ${t.scopes.includes('write') ? 'on' : ''}">${scope}</span>
         <span class="mcp-token-meta">${used} · 调用 ${t.calls || 0} 次</span>
-        <button type="button" class="btn ghost mcp-revoke" data-revoke="${esc(t.id)}" title="让这个令牌立刻失效">撤销</button>
+        ${actions}
       </div>`;
     })
     .join('');
@@ -7505,6 +7520,37 @@ function timeAgo(ts) {
   if (diff < 3600e3) return `${Math.floor(diff / 60e3)} 分钟前`;
   if (diff < 86400e3) return `${Math.floor(diff / 3600e3)} 小时前`;
   return `${Math.floor(diff / 86400e3)} 天前`;
+}
+
+/**
+ * 明文令牌只在「刚生成」这一小段时间留在界面上：
+ * 关掉设置、点「我已保存」、或者换成新令牌时立刻清掉。
+ * 之前只是把按钮文字写成「关掉就找不回来」，实际关掉再打开还在，等于骗人。
+ */
+function hideMcpSecret() {
+  S.mcpSnippet = '';
+  const box = $('#mcpSecret');
+  if (box) box.hidden = true;
+  const val = $('#mcpSecretValue');
+  if (val) val.textContent = '—';
+  const snip = $('#mcpSnippet');
+  if (snip) snip.textContent = '';
+}
+
+async function renameMcpToken(id, name) {
+  if (!id) return;
+  try {
+    const out = await api('/api/mcp/tokens/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: { name },
+    });
+    S.mcp = out;
+    S.mcpEditing = '';
+    renderMcp();
+    toast('令牌已改名');
+  } catch (err) {
+    toast('改名失败：' + err.message);
+  }
 }
 
 async function createMcpToken() {
@@ -7580,11 +7626,49 @@ function bindMcp() {
       toast('清空失败：' + err.message);
     }
   });
+  on('#mcpHideSecret', 'click', () => {
+    hideMcpSecret();
+    toast('明文已清掉，需要重新生成才能拿到新令牌');
+  });
   const list = $('#mcpTokens');
   if (list) {
     list.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-revoke]');
-      if (btn) revokeMcpToken(btn.getAttribute('data-revoke'));
+      const revoke = e.target.closest('[data-revoke]');
+      if (revoke) return revokeMcpToken(revoke.getAttribute('data-revoke'));
+      const open = e.target.closest('[data-rename-open]');
+      if (open) {
+        S.mcpEditing = open.getAttribute('data-rename-open');
+        renderMcp();
+        const input = list.querySelector('[data-rename-input]');
+        if (input) {
+          input.focus();
+          input.select();
+        }
+        return;
+      }
+      const save = e.target.closest('[data-rename-save]');
+      if (save) {
+        const id = save.getAttribute('data-rename-save');
+        const input = list.querySelector(`[data-rename-input="${id}"]`);
+        return renameMcpToken(id, input ? input.value : '');
+      }
+      const cancel = e.target.closest('[data-rename-cancel]');
+      if (cancel) {
+        S.mcpEditing = '';
+        renderMcp();
+      }
+    });
+    list.addEventListener('keydown', (e) => {
+      const input = e.target.closest('[data-rename-input]');
+      if (!input) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        renameMcpToken(input.getAttribute('data-rename-input'), input.value);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        S.mcpEditing = '';
+        renderMcp();
+      }
     });
   }
 }
@@ -7604,6 +7688,8 @@ async function renderDiskUsage() {
 
 async function openSettings() {
   // 打开时用服务端值覆盖输入框；直接赋值不触发 input，不会误判成用户改动
+  hideMcpSecret();
+  S.mcpEditing = '';
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = null;
   settingsDirty = false;

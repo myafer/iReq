@@ -934,6 +934,12 @@ window.ReqLiteI18N_EN = {
   "接上之后帧会同时出现在控制台日志里": "Frames also show up in the console log",
 
   /* 握手失败 → 自动跳过解密 */
+  "我已保存，隐藏": "Saved it — hide",
+  "点击改名": "Click to rename",
+  "令牌已改名": "Token renamed",
+  "明文已清掉，需要重新生成才能拿到新令牌": "Cleartext cleared — generate a new token if you need one again",
+  "列表保留条数": "Rows kept in the list",
+  "只影响列表里留多少条（省内存）；每条流量都会落盘，「清空」留下的历史记录里能翻到全部。": "Only affects how many rows stay in the list (to save memory). Every request is still written to disk — the history entries left by Clear let you browse all of them.",
   "连接地址、令牌与调用记录": "Endpoint, tokens and recent calls",
   "已跳过解密": "Decryption skipped",
   "重新尝试解密": "Retry decryption",

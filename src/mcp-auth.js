@@ -148,6 +148,17 @@ class McpAuth {
     return { token: raw, entry: this.listTokens().find((t) => t.id === entry.id) };
   }
 
+  /** 改令牌名（只改展示名，不影响 hash / 权限）；空名字退回「未命名令牌」 */
+  renameToken(id, name) {
+    const t = this.config.mcp.tokens.find((x) => x.id === id);
+    if (!t) return null;
+    const next = String(name || '').trim().slice(0, 40) || '未命名令牌';
+    if (next === t.name) return this.listTokens().find((x) => x.id === id) || null;
+    t.name = next;
+    this._save();
+    return this.listTokens().find((x) => x.id === id) || null;
+  }
+
   revokeToken(id) {
     const t = this.config.mcp.tokens.find((x) => x.id === id);
     if (!t) return false;

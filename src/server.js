@@ -1619,12 +1619,20 @@ class ConsoleServer {
    *   GET    /api/mcp                 → 状态 + 工具清单 + 令牌 + 最近审计
    *   PUT    /api/mcp                 → { enabled } 开关
    *   POST   /api/mcp/tokens          → { name, scopes, expiresInDays } 生成（明文只返回一次）
+   *   PATCH  /api/mcp/tokens/:id      → { name } 重命名
    *   DELETE /api/mcp/tokens/:id      → 撤销
    *   DELETE /api/mcp/audit           → 清空审计
    */
   async _apiMcp(req, res, parts, method, url) {
     const auth = this.mcpAuth;
     const endpoint = `http://127.0.0.1:${this.port}/mcp`;
+
+    if (parts[2] === 'tokens' && method === 'PATCH' && parts[3]) {
+      const body = (await this._body(req)) || {};
+      const entry = auth.renameToken(parts[3], body.name);
+      if (!entry) return this._json(res, 404, { error: '令牌不存在' });
+      return this._json(res, 200, { ok: true, token: entry, ...this._mcpView(endpoint) });
+    }
 
     if (parts[2] === 'tokens' && method === 'DELETE' && parts[3]) {
       const ok = auth.revokeToken(parts[3]);

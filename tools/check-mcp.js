@@ -183,6 +183,18 @@ function runBridge(args, lines, { timeout = 20000 } = {}) {
     ok('令牌列表只给掩码', !!row.masked && !String(row.masked).includes(TOKEN), row.masked);
     ok('/api/mcp 不含任何凭据字段', !JSON.stringify(listed.body).includes('hash') && !JSON.stringify(listed.body).includes('salt'));
 
+    // 重命名：只改展示名，hash / scope 不变，令牌继续可用
+    const renamed = await jsonApi('/api/mcp/tokens/' + encodeURIComponent(row.id), {
+      method: 'PATCH',
+      body: { name: 'check-rw-renamed' },
+    });
+    const renamedRow = (renamed.body.tokens || []).find((x) => x.id === row.id) || {};
+    ok('令牌可以重命名', renamedRow.name === 'check-rw-renamed', renamedRow.name);
+    ok('改名不动 scope 与掩码', renamedRow.masked === row.masked && renamedRow.scopes.join() === row.scopes.join());
+    const emptyName = await jsonApi('/api/mcp/tokens/' + encodeURIComponent(row.id), { method: 'PATCH', body: { name: '   ' } });
+    ok('空名字退回「未命名令牌」', ((emptyName.body.tokens || []).find((x) => x.id === row.id) || {}).name === '未命名令牌');
+    await jsonApi('/api/mcp/tokens/' + encodeURIComponent(row.id), { method: 'PATCH', body: { name: 'check-rw' } });
+
     const cfg = await jsonApi('/api/config');
     ok('/api/config 里 mcp 已脱敏', cfg.body.mcp && cfg.body.mcp.tokens === undefined && cfg.body.mcp.tokenCount >= 1, JSON.stringify(cfg.body.mcp));
 

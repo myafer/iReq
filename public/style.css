@@ -7408,3 +7408,33 @@ body.resizing-v * {
 .connect-step.collapsed .cs-main > h3::after {
   margin-left: 8px;
 }
+
+/* 令牌名可点改名：看起来是文字，hover 才提示可编辑 */
+button.mcp-token-name {
+  font-weight: 600;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  padding: 1px 5px;
+  margin: -1px -5px;
+  cursor: text;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.mcp-token-name:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.mcp-rename-input {
+  flex: 0 1 200px;
+  min-width: 120px;
+  height: calc(26px * var(--ui-scale));
+  font-size: calc(12px * var(--ui-scale));
+}
