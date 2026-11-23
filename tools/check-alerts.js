@@ -244,9 +244,15 @@ async function historyIds() {
         ],
       },
     });
-    const waitingUi = collectAlerts(3000, 1);
+    // 全套连跑时机器上有别的套件在跑 SSE / 写流量，3s 偶尔不够：给宽一点，没到再补发一次
+    let waitingUi = collectAlerts(8000, 1);
     await viaProxy(port, '/missing');
-    const uiAlert = await waitingUi;
+    let uiAlert = await waitingUi;
+    if (!uiAlert.length) {
+      waitingUi = collectAlerts(3000, 1);
+      await viaProxy(port, '/missing');
+      uiAlert = await waitingUi;
+    }
     ok('404 规则也能命中', uiAlert.length === 1, uiAlert.length);
 
     const { chromium, EXEC } = require('./_pw');

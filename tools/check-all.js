@@ -104,6 +104,19 @@ function probe() {
 }
 
 (async () => {
+  // 跑之前记下系统代理，跑完不管哪套漏了都拉回来 —— 不能让自检把用户机器留在
+  // 「所有流量发往 9090」的状态里（这个坑真踩过：一条断言失败就断了网）
+  const sysProxy = (() => {
+    try {
+      const { SystemProxy } = require('../src/system-proxy');
+      const sp = new SystemProxy({ proxyPort: Number(process.env.REQLITE_PROXY_PORT) || 9090 });
+      if (!sp.supported) return null;
+      const svc = sp.primaryService();
+      return { sp, svc, snap: sp.snapshot(svc) };
+    } catch (_) {
+      return null;
+    }
+  })();
   if (!(await probe())) {
     console.error(`✗ 控制台不可达：${UI}`);
     console.error('  先启动服务，或用 REQLITE_UI_PORT / REQLITE_PROXY_PORT 指向已运行的实例。');
@@ -141,6 +154,18 @@ function probe() {
       console.log(`   status=${r.status} signal=${r.signal || '-'} fails=${fails}`);
       console.log(out.split('\n').filter((l) => /❌|FAIL|Error|失败/.test(l)).slice(0, 4).join('\n'));
       console.log('   --- tail ---\n' + out.trim().split('\n').slice(-4).join('\n'));
+    }
+  }
+  // 跑完统一拉回系统代理：哪套漏了都不该把用户的机器留在「代理指向 9090」的状态
+  if (sysProxy) {
+    try {
+      const now = sysProxy.sp.snapshot(sysProxy.svc);
+      if (JSON.stringify(now) !== JSON.stringify(sysProxy.snap)) {
+        sysProxy.sp.restore(sysProxy.snap, sysProxy.svc);
+        console.log('\n⚠️ 系统代理被某个套件改动过，已还原成跑之前的样子');
+      }
+    } catch (_) {
+      /* 还原失败不阻塞结果输出 */
     }
   }
   const passed = results.filter((r) => r[1]).length;

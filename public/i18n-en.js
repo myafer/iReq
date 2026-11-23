@@ -945,7 +945,7 @@ window.ReqLiteI18N_EN = {
   "只抓下面这些域名": "Only capture these hosts",
   "只抓的域名": "Hosts to capture",
   "每行一个，支持 *.example.com": "One per line; *.example.com works",
-  "「只抓」模式下系统代理走 PAC：列表里的域名经 iReq 解密记录，其它域名直接连、完全不经过 iReq。列表为空时按全部抓包。切换后需要重新「接管本机」才生效。": "In “only these hosts” mode the system proxy uses a PAC file: listed hosts go through iReq and get decrypted, everything else connects directly without touching iReq. An empty list falls back to capturing everything. Take over the proxy again after switching.",
+  "「只抓」模式下系统代理走 PAC：列表里的域名经 iReq 解密记录，其它域名直接连、完全不经过 iReq。列表为空时按全部抓包。接管状态下改完立即生效。": "In “only these hosts” mode the system proxy uses a PAC file: listed hosts go through iReq and get decrypted, everything else connects directly without touching iReq. An empty list falls back to capturing everything. Changes apply immediately while the proxy is taken over.",
   "打开目录": "Open folder",
   "在 Finder / 资源管理器里打开（重装或备份前先看一眼）": "Open in Finder / Explorer (look before reinstalling or backing up)",
   "列表保留条数": "Rows kept in the list",

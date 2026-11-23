@@ -404,8 +404,15 @@ class ConsoleServer {
 
   /** 已经接管就按最新配置重放一遍（绕过名单 / 抓包范围改了要立刻生效） */
   _reapplyProxyIfOurs() {
-    if (!this.config.localProxyOurs || !this.systemProxy) return;
+    if (!this.systemProxy) return;
+    // 以系统里的真实状态为准：config.localProxyOurs 可能是旧的（别的窗口刚释放过），
+    // 信它会导致「改个配置又偷偷把代理接管回来」——自检里就是这么互相踩的
     const st = this._localProxyStatus(0);
+    if (!st.ours) {
+      this.config.localProxyOurs = false;
+      return;
+    }
+    this.config.localProxyOurs = true;
     const scope = this._captureScope();
     this.systemProxy.enable(st.service, {
       bypass: this._proxyBypass(),
