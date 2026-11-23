@@ -873,8 +873,13 @@ function renderList() {
           ? '客户端不信任根证书、或端口跑的不是 HTTP 时，连不上的域名会实时出现在这里。'
           : filtering
             ? '换个条件，或点上方已选筛选的 × 取消。'
-            : `<b>抓本机</b>：右上「设置 › 本机抓包」一键接管系统代理（顶栏也有快捷入口）；<br>` +
-              `<b>抓手机 / 其它设备</b>：Wi-Fi 代理指向 <code id="emptyProxy">${esc(addrFull(a))}</code>（IP / 端口可在顶栏分别复制），然后刷新页面。`;
+            : S.localProxy && S.localProxy.ours
+              // 已经接管却没流量，九成是「老连接还在跑」：代理只对新建连接生效，
+              // App 的连接池 / 长连接不会因为系统代理变了就切过去
+              ? `<b>代理已接管，但还没看到请求</b>：代理只对「新建连接」生效，App 里已有的 keep-alive / 长连接不会自动切过来 —— 把 App 杀掉重开（或切一次飞行模式 / Wi-Fi）再操作，模拟器里的 App 也一样。<br>` +
+                `<b>抓手机 / 其它设备</b>：Wi-Fi 代理指向 <code id="emptyProxy">${esc(addrFull(a))}</code>，然后重启那个 App。`
+              : `<b>抓本机</b>：右上「设置 › 本机抓包」一键接管系统代理（顶栏也有快捷入口）；<br>` +
+                `<b>抓手机 / 其它设备</b>：Wi-Fi 代理指向 <code id="emptyProxy">${esc(addrFull(a))}</code>（IP / 端口可在顶栏分别复制），然后刷新页面。`;
     }
   }
   const sel = list.querySelector(`.row[data-id="${S.selectedId}"]`);
