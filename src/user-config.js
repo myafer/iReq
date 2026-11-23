@@ -44,6 +44,11 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 接管系统代理时要跳过的域名 / IP（VPN 网关、内网面板…）：
+  // 不绕过的话 VPN 客户端自己连网关的请求会被解密拦下来，直接连不上。
+  if (Array.isArray(cfg.proxyBypass) && cfg.proxyBypass.length) {
+    out.proxyBypass = cfg.proxyBypass.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 60);
+  }
   // 反向代理：端口与上游是环境配置，落盘
   if (cfg.reverseProxy && typeof cfg.reverseProxy === 'object') {
     out.reverseProxy = {

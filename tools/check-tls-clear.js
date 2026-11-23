@@ -112,6 +112,10 @@ async function waitDiag(expect, timeout = 12000) {
     await api('/api/diagnostics', { method: 'DELETE' });
     await api('/api/flows', { method: 'DELETE' });
 
+    // 先清掉前面套件留下的诊断：否则「三条」会变成四条，断言随机失败
+    await fetch(UI + '/api/diagnostics', { method: 'DELETE' }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 150));
+
     // 三个域名各造一次握手失败
     await Promise.all([abruptHandshake(HOST_A), abruptHandshake(HOST_B), abruptHandshake(HOST_C)]);
     const diag0Hosts = await waitDiag((h) => h.length === 3);

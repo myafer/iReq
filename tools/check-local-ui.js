@@ -43,6 +43,13 @@ const checks = [];
     checks.push(['可复制命令已生成', panel.cmdOn.includes('setwebproxy') && panel.cmdOff.includes('proxystate')]);
     checks.push(['按钮文案正确', panel.toggle === '接管本机']);
 
+    // 绕过名单：VPN 网关这类地址必须直连，CIDR 的掩码也不能被吃掉
+    await fetch(UI + '/api/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proxyBypass: ['vpn.check.test', '172.31.0.0/16'] }),
+    });
+
     // 点「接管本机」
     await page.click('#lpToggle');
     await page.waitForTimeout(1200);
@@ -55,6 +62,11 @@ const checks = [];
     console.log('接管后:', JSON.stringify({ ...afterOn, ours: sysOn.ours, web: sysOn.web }));
     checks.push(['点击后系统代理真的接管', sysOn.ours && sysOn.web.port === PROXY_PORT]);
     checks.push(['UI 同步为已接管', afterOn.badge === '已接管' && afterOn.toggle === '释放本机代理' && afterOn.chip === '本机已接管']);
+    checks.push(
+      ['绕过名单写进系统代理（含 CIDR 掩码）',
+        (sysOn.bypass || []).includes('vpn.check.test') && (sysOn.bypass || []).includes('172.31.0.0/16')],
+      JSON.stringify(sysOn.bypass || [])
+    );
 
     // 点「释放本机代理」
     await page.click('#lpToggle');
@@ -99,6 +111,11 @@ const checks = [];
     checks.push(['UI 流程无异常', false]);
     console.error('异常:', err && err.stack ? err.stack : err);
   } finally {
+    await fetch(UI + '/api/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proxyBypass: [] }),
+    }).catch(() => {});
     // 先单独判定「服务自己有没有恢复干净」：只置 off 而残留 host/port / bypass
     // 也算不合格，用户下次手动开代理会连到已停掉的 reqLite。
     const beforeCleanup = sp.snapshot(svc);

@@ -402,6 +402,23 @@ class ConsoleServer {
     this._recountTimer = setTimeout(tick, 150);
   }
 
+  /** 用户配置的「不走代理」名单（VPN 网关、内网面板…），归一化后去重 */
+  _proxyBypass() {
+    const raw = Array.isArray(this.config.proxyBypass) ? this.config.proxyBypass : [];
+    const out = [];
+    for (const item of raw) {
+      let v = String(item || '').trim().toLowerCase();
+      // 贴 URL 就取主机部分；但 CIDR（10.0.0.0/8）里的斜杠要留着 —— 早先无脑 replace(/\/.*$/)
+      // 会把掩码吃掉，结果系统里只剩 10.0.0.0
+      if (/^https?:\/\//.test(v)) v = v.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      if (!v || v.length > 253) continue;
+      if (!/^[\w.*:\-\[\]/]+$/.test(v)) continue; // 只接受域名 / IP / CIDR
+      if (!out.includes(v)) out.push(v);
+      if (out.length >= 60) break;
+    }
+    return out;
+  }
+
   /** 系统代理状态的短缓存：多个窗口轮询时只跑一次 networksetup */
   _localProxyStatus(ttlMs = 1500) {
     const now = Date.now();
@@ -556,6 +573,7 @@ class ConsoleServer {
         onboarded: this.config.onboarded === true,
         passthrough: this.config.passthrough,
         mitmPorts: this.config.mitmPorts,
+        proxyBypass: this.config.proxyBypass || [],
         rules: this.rules.list().length,
         caPath: this.ca ? this.ca.caCertPath : null,
         caCreated: this.ca ? this.ca.created : false,
@@ -1103,13 +1121,13 @@ class ConsoleServer {
           ...st,
           caTrust: fast ? this.caTrust && this.caTrust.status(false) : this._syncTrust(),
           safeMode: this._safeMode(),
-          commands: this.systemProxy.commands(st.service),
+          commands: this.systemProxy.commands(st.service, this._proxyBypass()),
         });
       }
       if (method === 'POST') {
         const body = (await this._body(req)) || {};
         const r = body.enabled
-          ? this.systemProxy.enable(body.service)
+          ? this.systemProxy.enable(body.service, this._proxyBypass())
           : this.systemProxy.disable(body.service);
         // 接管时重新问一次系统：用户可能刚执行完信任命令。
         const caTrust = this._syncTrust(true);
@@ -1122,7 +1140,7 @@ class ConsoleServer {
           ...r,
           caTrust,
           safeMode: this._safeMode(),
-          commands: this.systemProxy.commands(service),
+          commands: this.systemProxy.commands(service, this._proxyBypass()),
         });
       }
     }
@@ -1271,6 +1289,19 @@ class ConsoleServer {
             .filter((a) => a.match && a.name);
         }
         if (Number(body.maxFlows) > 0) this.store.maxFlows = Number(body.maxFlows);
+        // 系统代理绕过名单（VPN 网关、内网面板…）：改了立即生效 —— 正在接管就重新应用一次
+        if (body.proxyBypass !== undefined) {
+          const list = (Array.isArray(body.proxyBypass) ? body.proxyBypass : String(body.proxyBypass || '').split('\n'))
+            .map((x) => String(x || '').trim())
+            .filter(Boolean)
+            .slice(0, 60);
+          this.config.proxyBypass = list;
+          if (this.config.localProxyOurs && this.systemProxy) {
+            const st = this._localProxyStatus(0);
+            this.systemProxy.enable(st.service, this._proxyBypass());
+            this._lpCache = { at: Date.now(), st: this.systemProxy.status() };
+          }
+        }
         if (typeof body.autoUpdate === 'boolean') this.config.autoUpdate = body.autoUpdate;
         // 首启引导「看过了」：只允许置 true，不给前端把它翻回去的口子
         if (body.onboarded === true) this.config.onboarded = true;

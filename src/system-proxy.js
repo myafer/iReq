@@ -139,6 +139,16 @@ class SystemProxy {
     }
   }
 
+  /** 快照是否已经指向我们（host+port 同时匹配 HTTP / HTTPS 才算） */
+  _isOurs(snap) {
+    const oursHost = (h) => ['127.0.0.1', 'localhost'].includes(String(h || '').toLowerCase());
+    return Boolean(
+      snap &&
+        snap.web && snap.web.enabled && Number(snap.web.port) === this.proxyPort && oursHost(snap.web.host) &&
+        snap.secure && snap.secure.enabled && Number(snap.secure.port) === this.proxyPort && oursHost(snap.secure.host)
+    );
+  }
+
   _backup() {
     try {
       return JSON.parse(fs.readFileSync(this.backupFile, 'utf8'));
@@ -199,20 +209,29 @@ class SystemProxy {
     }
   }
 
-  enable(service) {
+  /**
+   * 接管系统代理。
+   * extraBypass：用户配置的「不走代理」域名 / IP（VPN 网关、内网面板、需要直连的服务）。
+   * 不绕过的话，VPN 客户端自己连网关的请求也会被我们拦下来解密，证书对不上就直接连不上。
+   */
+  enable(service, extraBypass = []) {
     if (!this.supported) return { ok: false, error: '当前平台请改用命令行开启' };
     const svc = service || this.primaryService();
     if (!svc) return { ok: false, error: '没找到可用的网络服务' };
     try {
       const before = this.snapshot(svc);
-      // 已经是别的代理时先备份，关闭时可精确还原，避免覆盖用户原有配置
-      this._saveBackup(before);
+      // 备份只在「系统当前不是我们」时做：重新应用绕过名单会再走一次 enable()，
+      // 如果这时把 before（已经指向我们的 9090）存成备份，之后释放就会还原成死代理。
+      const weAlreadyOwn = this._isOurs(before);
+      if (!weAlreadyOwn) this._saveBackup(before);
+      // 备份已经有、但这次是纠正自己的配置：保留最早那份原始备份
+
       exec('networksetup', ['-setwebproxy', svc, LOCAL_HOST, String(this.proxyPort)]);
       exec('networksetup', ['-setsecurewebproxy', svc, LOCAL_HOST, String(this.proxyPort)]);
       exec('networksetup', ['-setwebproxystate', svc, 'on']);
       exec('networksetup', ['-setsecurewebproxystate', svc, 'on']);
-      // 保留用户原有的 bypass，再补上本机回环，避免控制台自环
-      const merged = [...new Set([...(before.bypass || []), ...BYPASS])];
+      // 保留用户原有的 bypass，再补上本机回环和用户配置的绕过项，避免控制台自环与 VPN 被拦
+      const merged = [...new Set([...(before.bypass || []), ...BYPASS, ...(extraBypass || [])])];
       exec('networksetup', ['-setproxybypassdomains', svc, ...merged]);
       return { ok: true, status: this.status(svc) };
     } catch (e) {
@@ -261,15 +280,16 @@ class SystemProxy {
   }
 
   /** 给用户复制的命令（跨平台；失败时可在终端手动执行） */
-  commands(service) {
+  commands(service, extraBypass = []) {
     const svc = service || this.primaryService() || 'Wi-Fi';
     const port = this.proxyPort;
+    const bypass = [...BYPASS, ...(extraBypass || [])].map((x) => `'${x}'`).join(' ');
     if (this.platform === 'darwin') {
       return {
         on: [
           `networksetup -setwebproxy "${svc}" 127.0.0.1 ${port}`,
           `networksetup -setsecurewebproxy "${svc}" 127.0.0.1 ${port}`,
-          `networksetup -setproxybypassdomains "${svc}" localhost 127.0.0.1 ::1 '*.local'`,
+          `networksetup -setproxybypassdomains "${svc}" ${bypass}`,
         ].join('\n'),
         off: [
           `networksetup -setwebproxystate "${svc}" off`,

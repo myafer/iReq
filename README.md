@@ -95,6 +95,7 @@ ireq ca                  # print the root CA path
 | The list stays empty | Traffic isn't going through iReq: check the phone's Wi-Fi proxy, or that *Take over this machine* is on. |
 | One domain keeps failing | It pins certificates or only speaks h2. iReq skips decryption for it automatically after two failures and keeps a row labelled *decryption skipped*. |
 | Certificate error only inside one app | That app pins certificates — capture a debug build instead. |
+| VPN drops after *Take over this machine* | The VPN client's own connection to its gateway is being intercepted. Add the gateway (e.g. `vpn.example.com`) and your internal ranges under *Take over this machine › Hosts / IPs that bypass the proxy*, then take over again. |
 
 ## Known limits
 

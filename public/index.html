@@ -777,6 +777,11 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
                 <div class="lp-actions">
                   <label class="inline-field">网络服务 <select id="lpService" class="input mono"></select></label>
                 </div>
+                <label class="field">
+                  <span>不走代理的域名 / IP <em>每行一个，VPN 网关和内网面板填这里</em></span>
+                  <textarea id="stProxyBypass" class="input mono" rows="3" spellcheck="false" placeholder="vpn.example.com&#10;10.0.0.0/8"></textarea>
+                </label>
+                <p class="hint">接管系统代理时这些地址会直连，不经 iReq —— 否则 VPN 客户端连自己网关的请求会被拦下来解密，直接连不上。</p>
                 <details class="lp-details">
                   <summary>命令与说明</summary>
                   <div class="addr-card-row">

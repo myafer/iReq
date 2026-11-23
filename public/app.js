@@ -7364,6 +7364,10 @@ var settingsSaveTimer = null;
 
 function settingsPayload() {
   return {
+    proxyBypass: ($('#stProxyBypass').value || '')
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean),
     mitmPorts: $('#stMitmPorts')
       .value.split(',')
       .map((s) => Number(s.trim()))
@@ -7703,6 +7707,7 @@ async function openSettings() {
     renderUpdate(st.update);
   }
   $('#stMitmPorts').value = (st.mitmPorts || [443]).join(', ');
+  $('#stProxyBypass').value = (st.proxyBypass || []).join('\n');
   $('#stUaAppMap').value = (st.uaAppMap || []).map((a) => `${a.match}=${a.name}`).join('\n');
   const pm = st.processMap || {};
   $('#appIdBadge').textContent = pm.enabled ? '本机进程识别已启用' : pm.supported ? '已关闭，仅 UA 推断' : '仅 UA 推断';
@@ -8172,7 +8177,7 @@ function bind() {
     importCaP12(e.target.files && e.target.files[0]);
     e.target.value = '';
   });
-  ['stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
+  ['stProxyBypass', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
   $('#stOpenDataDir')?.addEventListener('click', async () => {
