@@ -1127,6 +1127,21 @@ class ConsoleServer {
       }
     }
 
+    /* 在文件管理器里打开数据目录 / 证书目录：重装、备份、手动清理前先看得见 */
+    if (parts[1] === 'reveal-dir' && method === 'POST') {
+      const body = (await this._body(req)) || {};
+      const which = body.which === 'ca' ? 'ca' : 'data';
+      const dir = which === 'ca' ? (this.ca ? this.ca.dir : '') : this.dataDir;
+      if (!dir) return this._json(res, 400, { error: '目录未启用' });
+      const open = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+      try {
+        require('child_process').spawn(open, [dir], { detached: true, stdio: 'ignore' }).unref();
+        return this._json(res, 200, { ok: true, dir });
+      } catch (err) {
+        return this._json(res, 500, { error: String((err && err.message) || err) });
+      }
+    }
+
     if (parts[1] === 'facets' && method === 'GET') {
       const flows = this.store.flows.length;
       // 应用勾选（可多选，逗号分隔）后域名 / 接口结构级联：
@@ -1750,7 +1765,8 @@ class ConsoleServer {
       }
     };
     walk(this.dataDir, 0);
-    return { bytes, files };
+    // 把真实路径一起给界面：重装 / 备份前总得知道数据在哪
+    return { bytes, files, dir: this.dataDir };
   }
 
   _caFile(res, format = 'pem') {

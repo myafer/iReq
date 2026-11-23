@@ -938,6 +938,8 @@ window.ReqLiteI18N_EN = {
   "点击改名": "Click to rename",
   "令牌已改名": "Token renamed",
   "明文已清掉，需要重新生成才能拿到新令牌": "Cleartext cleared — generate a new token if you need one again",
+  "打开目录": "Open folder",
+  "在 Finder / 资源管理器里打开（重装或备份前先看一眼）": "Open in Finder / Explorer (look before reinstalling or backing up)",
   "列表保留条数": "Rows kept in the list",
   "只影响列表里留多少条（省内存）；每条流量都会落盘，「清空」留下的历史记录里能翻到全部。": "Only affects how many rows stay in the list (to save memory). Every request is still written to disk — the history entries left by Clear let you browse all of them.",
   "连接地址、令牌与调用记录": "Endpoint, tokens and recent calls",

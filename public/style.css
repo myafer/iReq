@@ -7438,3 +7438,12 @@ button.mcp-token-name:hover {
   height: calc(26px * var(--ui-scale));
   font-size: calc(12px * var(--ui-scale));
 }
+
+/* 数据目录那一行：路径可能很长，允许折行，按钮跟着文字走 */
+.st-disk-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  word-break: break-all;
+}

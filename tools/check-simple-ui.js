@@ -193,6 +193,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       };
     });
     ok('「接管本机」按钮在收起的步骤里也看得见（且位于标题行）', lp.collapsed && lp.visible && lp.inHead, JSON.stringify(lp));
+
+    // 数据目录要能看见、能打开：重装 / 备份前用户得知道数据在哪
+    await page.evaluate(() => document.querySelector('.st-advanced')?.setAttribute('open', ''));
+    await page.waitForTimeout(300);
+    const dir = await page.evaluate(() => ({
+      text: (document.querySelector('#stDiskUsage') || {}).textContent || '',
+      btn: !!document.querySelector('#stOpenDataDir'),
+    }));
+    ok('设置里能看到数据目录路径与「打开目录」', /\//.test(dir.text) && dir.btn, JSON.stringify(dir));
     const upd = await page.evaluate(() => {
       const card = [...document.querySelectorAll('#modalSettings .addr-card')].find((c) => c.textContent.includes('更新'));
       return {

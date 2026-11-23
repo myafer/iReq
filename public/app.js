@@ -7680,7 +7680,9 @@ async function renderDiskUsage() {
   try {
     const cfg = await api('/api/config');
     const du = cfg && cfg.diskUsage;
-    el.textContent = du ? `数据目录占用 ${fmtSize(du.bytes)} · ${du.files} 个文件` : '数据目录占用 —';
+    el.textContent = du
+      ? `数据目录占用 ${fmtSize(du.bytes)} · ${du.files} 个文件${du.dir ? ' · ' + du.dir : ''}`
+      : '数据目录占用 —';
   } catch {
     el.textContent = '数据目录占用 —';
   }
@@ -8173,6 +8175,14 @@ function bind() {
   ['stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
+  $('#stOpenDataDir')?.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/reveal-dir', { method: 'POST', body: { which: 'data' } });
+      if (!r.ok) toast('打不开：' + (r.error || '未知错误'));
+    } catch (err) {
+      toast('打不开：' + err.message);
+    }
+  });
   $('#stProcessMap').addEventListener('change', queueSettingsSave);
   $('#stH2').addEventListener('change', queueSettingsSave);
 
