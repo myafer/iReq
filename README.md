@@ -86,6 +86,7 @@ ireq ca                  # print the root CA path
 
 - **Phone**: Wi-Fi proxy = the `LAN-IP:9090` from the top bar (not `127.0.0.1` — that points at the phone itself).
 - **This machine**: ⋯ More → *Take over this machine* (or `ireq local on`). Your original proxy settings are restored when you release it.
+  To capture only some hosts, switch to *Only capture these hosts* in the same place: it uses a system PAC file, so everything else connects directly and never touches iReq.
 
 ## When it doesn't work
 

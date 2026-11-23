@@ -7363,7 +7363,15 @@ var settingsDirty = false;
 var settingsSaveTimer = null;
 
 function settingsPayload() {
+  const scopeMode = document.querySelector('#stScopeList')?.checked ? 'list' : 'all';
   return {
+    captureScope: {
+      mode: scopeMode,
+      domains: ($('#stScopeDomains').value || '')
+        .split('\n')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    },
     proxyBypass: ($('#stProxyBypass').value || '')
       .split('\n')
       .map((x) => x.trim())
@@ -7708,6 +7716,11 @@ async function openSettings() {
   }
   $('#stMitmPorts').value = (st.mitmPorts || [443]).join(', ');
   $('#stProxyBypass').value = (st.proxyBypass || []).join('\n');
+  const scope = (S.localProxy && S.localProxy.captureScope) || st.captureScope || { mode: 'all', domains: [] };
+  const wantList = scope.mode === 'list';
+  if ($('#stScopeList')) $('#stScopeList').checked = wantList;
+  if ($('#stScopeAll')) $('#stScopeAll').checked = !wantList;
+  $('#stScopeDomains').value = (scope.domains || []).join('\n');
   $('#stUaAppMap').value = (st.uaAppMap || []).map((a) => `${a.match}=${a.name}`).join('\n');
   const pm = st.processMap || {};
   $('#appIdBadge').textContent = pm.enabled ? '本机进程识别已启用' : pm.supported ? '已关闭，仅 UA 推断' : '仅 UA 推断';
@@ -8177,9 +8190,11 @@ function bind() {
     importCaP12(e.target.files && e.target.files[0]);
     e.target.value = '';
   });
-  ['stProxyBypass', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
+  ['stScopeDomains', 'stProxyBypass', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
+  // 单选框用 change：某些浏览器对 radio 不派发 input
+  ['stScopeAll', 'stScopeList'].forEach((id) => $(`#${id}`).addEventListener('change', queueSettingsSave));
   $('#stOpenDataDir')?.addEventListener('click', async () => {
     try {
       const r = await api('/api/reveal-dir', { method: 'POST', body: { which: 'data' } });

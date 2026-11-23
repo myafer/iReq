@@ -38,8 +38,10 @@ function parseKeyValue(out) {
 }
 
 class SystemProxy {
-  constructor({ proxyPort = 9090, dataDir }) {
+  constructor({ proxyPort = 9090, dataDir, pacUrl = '' }) {
     this.proxyPort = proxyPort;
+    /** 「只抓指定域名」用的 PAC 地址；由 server 生成（指向控制台端口的 /proxy.pac） */
+    this.pacUrl = pacUrl;
     this.platform = process.platform;
     this.backupFile = path.join(dataDir || path.join(process.cwd(), 'data'), 'system-proxy-backup.json');
   }
@@ -79,6 +81,16 @@ class SystemProxy {
     };
   }
 
+  _readAuto(service) {
+    try {
+      const out = exec('networksetup', ['-getautoproxyurl', service]);
+      const kv = parseKeyValue(out);
+      return { url: kv.url && kv.url !== '(null)' ? kv.url : '', enabled: /^yes$/i.test(kv.enabled || '') };
+    } catch (_) {
+      return { url: '', enabled: false };
+    }
+  }
+
   _readBypass(service) {
     try {
       const out = exec('networksetup', ['-getproxybypassdomains', service]);
@@ -95,6 +107,7 @@ class SystemProxy {
       web: this._readProxy(service, false),
       secure: this._readProxy(service, true),
       bypass: this._readBypass(service),
+      auto: this._readAuto(service),
     };
   }
 
@@ -119,19 +132,17 @@ class SystemProxy {
     if (!svc) return { ...base, error: '没找到可用的网络服务' };
     try {
       const snap = this.snapshot(svc);
-      const ours =
-        snap.web.enabled && snap.secure.enabled &&
-        snap.web.port === this.proxyPort && snap.secure.port === this.proxyPort &&
-        ['127.0.0.1', 'localhost'].includes(snap.web.host.toLowerCase()) &&
-        ['127.0.0.1', 'localhost'].includes(snap.secure.host.toLowerCase());
+      const ours = this._isOurs(snap);
       const b = this._backup();
       return {
         ...base,
         web: snap.web,
         secure: snap.secure,
+        auto: snap.auto,
         bypass: snap.bypass,
-        on: snap.web.enabled || snap.secure.enabled,
+        on: snap.web.enabled || snap.secure.enabled || snap.auto.enabled,
         ours,
+        mode: ours && snap.auto.enabled && snap.auto.url === this.pacUrl ? 'list' : 'all',
         managed: !!(b && b.managedByUs && b.service === svc),
       };
     } catch (e) {
@@ -142,6 +153,8 @@ class SystemProxy {
   /** 快照是否已经指向我们（host+port 同时匹配 HTTP / HTTPS 才算） */
   _isOurs(snap) {
     const oursHost = (h) => ['127.0.0.1', 'localhost'].includes(String(h || '').toLowerCase());
+    // 「只抓指定域名」模式用的是 PAC：URL 指向我们就等于我们接管着
+    if (snap && snap.auto && snap.auto.enabled && this.pacUrl && snap.auto.url === this.pacUrl) return true;
     return Boolean(
       snap &&
         snap.web && snap.web.enabled && Number(snap.web.port) === this.proxyPort && oursHost(snap.web.host) &&
@@ -188,6 +201,27 @@ class SystemProxy {
     apply(snap.web, false);
     apply(snap.secure, true);
     this._restoreBypass(svc, snap.bypass || []);
+    // PAC（自动代理配置）也要还原：只抓指定域名时走的是这条路。
+    // 两条命令分开 try：`-setautoproxyurl ''` 在部分 macOS 上会报错，
+    // 一旦和 state 放同一个 try 里，报错会连「关掉 PAC」一起跳过，用户就上不了网了。
+    const auto = snap.auto || { url: '', enabled: false };
+    try {
+      exec('networksetup', ['-setautoproxyurl', svc, auto.url || '']);
+    } catch (_) {
+      /* 空 URL 不被接受时忽略，下面照样把开关关掉 */
+    }
+    try {
+      exec('networksetup', ['-setautoproxystate', svc, auto.enabled ? 'on' : 'off']);
+    } catch (_) {
+      /* 忽略 */
+    }
+    if (!auto.enabled) {
+      try {
+        exec('networksetup', ['-setautoproxystate', svc, 'off']);
+      } catch (_) {
+        /* 已经关掉了 */
+      }
+    }
     const now = this.snapshot(svc);
     return (
       now.web.enabled === snap.web.enabled &&
@@ -196,7 +230,8 @@ class SystemProxy {
       now.secure.enabled === snap.secure.enabled &&
       now.secure.host === snap.secure.host &&
       now.secure.port === snap.secure.port &&
-      JSON.stringify(now.bypass) === JSON.stringify(snap.bypass || [])
+      JSON.stringify(now.bypass) === JSON.stringify(snap.bypass || []) &&
+      (!snap.auto || (now.auto.url === snap.auto.url && now.auto.enabled === snap.auto.enabled))
     );
   }
 
@@ -214,10 +249,12 @@ class SystemProxy {
    * extraBypass：用户配置的「不走代理」域名 / IP（VPN 网关、内网面板、需要直连的服务）。
    * 不绕过的话，VPN 客户端自己连网关的请求也会被我们拦下来解密，证书对不上就直接连不上。
    */
-  enable(service, extraBypass = []) {
+  enable(service, opts = []) {
     if (!this.supported) return { ok: false, error: '当前平台请改用命令行开启' };
     const svc = service || this.primaryService();
     if (!svc) return { ok: false, error: '没找到可用的网络服务' };
+    // 兼容老签名 enable(svc, ['a.com'])：第二个参数既可以是绕过数组，也可以是 { bypass, pac }
+    const { bypass: extraBypass = [], pac = '' } = Array.isArray(opts) ? { bypass: opts } : opts || {};
     try {
       const before = this.snapshot(svc);
       // 备份只在「系统当前不是我们」时做：重新应用绕过名单会再走一次 enable()，
@@ -226,10 +263,20 @@ class SystemProxy {
       if (!weAlreadyOwn) this._saveBackup(before);
       // 备份已经有、但这次是纠正自己的配置：保留最早那份原始备份
 
-      exec('networksetup', ['-setwebproxy', svc, LOCAL_HOST, String(this.proxyPort)]);
-      exec('networksetup', ['-setsecurewebproxy', svc, LOCAL_HOST, String(this.proxyPort)]);
-      exec('networksetup', ['-setwebproxystate', svc, 'on']);
-      exec('networksetup', ['-setsecurewebproxystate', svc, 'on']);
+      if (pac) {
+        // 「只抓指定域名」：系统代理交给 PAC，未命中的域名由 PAC 返回 DIRECT，压根不经过我们。
+        // 这里只关掉 HTTP/HTTPS 代理的开关，别去清 host/port —— 清了会留下残值，释放时还原不干净。
+        exec('networksetup', ['-setwebproxystate', svc, 'off']);
+        exec('networksetup', ['-setsecurewebproxystate', svc, 'off']);
+        exec('networksetup', ['-setautoproxyurl', svc, pac]);
+        exec('networksetup', ['-setautoproxystate', svc, 'on']);
+      } else {
+        exec('networksetup', ['-setautoproxystate', svc, 'off']);
+        exec('networksetup', ['-setwebproxy', svc, LOCAL_HOST, String(this.proxyPort)]);
+        exec('networksetup', ['-setsecurewebproxy', svc, LOCAL_HOST, String(this.proxyPort)]);
+        exec('networksetup', ['-setwebproxystate', svc, 'on']);
+        exec('networksetup', ['-setsecurewebproxystate', svc, 'on']);
+      }
       // 保留用户原有的 bypass，再补上本机回环和用户配置的绕过项，避免控制台自环与 VPN 被拦
       const merged = [...new Set([...(before.bypass || []), ...BYPASS, ...(extraBypass || [])])];
       exec('networksetup', ['-setproxybypassdomains', svc, ...merged]);
@@ -247,6 +294,7 @@ class SystemProxy {
       if (backup) {
         const restored = this.restore(backup, svc);
         this._clearBackup();
+        this._forceReleaseIfStuck(svc);
         return { ok: true, restored, status: this.status(svc) };
       }
       // 没有备份（例如直接执行 `ireq local off`）：按「全空快照」恢复，
@@ -257,12 +305,34 @@ class SystemProxy {
           web: { enabled: false, host: '', port: 0 },
           secure: { enabled: false, host: '', port: 0 },
           bypass: [],
+          auto: { url: '', enabled: false },
         },
         svc
       );
+      this._forceReleaseIfStuck(svc);
       return { ok: true, restored, status: this.status(svc) };
     } catch (e) {
       return { ok: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  /**
+   * 兜底：还原之后如果系统代理或 PAC 仍指向我们，直接关掉，
+   * 宁可让用户手动重设代理，也不能把他留在「所有流量发往一个已经停掉的端口」上。
+   */
+  _forceReleaseIfStuck(svc) {
+    try {
+      const st = this.status(svc);
+      if (!st.ours) return;
+      for (const cmd of ['-setautoproxystate', '-setwebproxystate', '-setsecurewebproxystate']) {
+        try {
+          exec('networksetup', [cmd, svc, 'off']);
+        } catch (_) {
+          /* 单条失败不影响其它 */
+        }
+      }
+    } catch (_) {
+      /* 状态都读不出来就算了 */
     }
   }
 

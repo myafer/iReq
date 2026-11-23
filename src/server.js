@@ -402,6 +402,67 @@ class ConsoleServer {
     this._recountTimer = setTimeout(tick, 150);
   }
 
+  /** 已经接管就按最新配置重放一遍（绕过名单 / 抓包范围改了要立刻生效） */
+  _reapplyProxyIfOurs() {
+    if (!this.config.localProxyOurs || !this.systemProxy) return;
+    const st = this._localProxyStatus(0);
+    const scope = this._captureScope();
+    this.systemProxy.enable(st.service, {
+      bypass: this._proxyBypass(),
+      pac: scope.mode === 'list' ? this._pacUrl() : '',
+    });
+    this._lpCache = { at: Date.now(), st: this.systemProxy.status() };
+  }
+
+  _pacFile(res) {
+    const body = this._pacScript();
+    res.writeHead(200, {
+      'content-type': 'application/x-ns-proxy-autoconfig; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(body);
+  }
+
+  /** 控制台端口上的 PAC 地址（PAC 由本机进程拉取，绑回环即可） */
+  _pacUrl() {
+    return `http://127.0.0.1:${this.port}/proxy.pac`;
+  }
+
+  /** 抓包范围：mode 'all' | 'list'，list 模式下只有这些域名走 iReq */
+  _captureScope() {
+    const scope = this.config.captureScope || {};
+    const mode = scope.mode === 'list' ? 'list' : 'all';
+    const domains = (Array.isArray(scope.domains) ? scope.domains : [])
+      .map((d) => String(d || '').trim().toLowerCase())
+      .map((d) => d.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, ''))
+      .filter((d) => d && /^[\w.*\-]+$/.test(d))
+      .slice(0, 200);
+    return { mode: mode === 'list' && !domains.length ? 'all' : mode, domains };
+  }
+
+  /** 生成 PAC：命中列表 → PROXY，其余 → DIRECT */
+  _pacScript() {
+    const { domains } = this._captureScope();
+    const proxy = `PROXY 127.0.0.1:${this.proxy ? this.proxy.port : 9090}; DIRECT`;
+    const tests = domains.map((d) => {
+      if (d.startsWith('*.')) {
+        const base = d.slice(1); // ".example.com"
+        return `dnsDomainIs(host, ${JSON.stringify(base)})`;
+      }
+      return `(host === ${JSON.stringify(d)} || dnsDomainIs(host, ${JSON.stringify('.' + d)}))`;
+    });
+    return [
+      '// iReq 生成：只让列表里的域名走抓包，其余直连',
+      'function FindProxyForURL(url, host) {',
+      '  host = (host || "").toLowerCase();',
+      '  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "DIRECT";',
+      tests.length ? `  if (${tests.join(' ||\n      ')}) return ${JSON.stringify(proxy)};` : '',
+      '  return "DIRECT";',
+      '}',
+      '',
+    ].filter(Boolean).join('\n');
+  }
+
   /** 用户配置的「不走代理」名单（VPN 网关、内网面板…），归一化后去重 */
   _proxyBypass() {
     const raw = Array.isArray(this.config.proxyBypass) ? this.config.proxyBypass : [];
@@ -451,6 +512,7 @@ class ConsoleServer {
       this.server.on('error', reject);
       this.server.listen(this.port, this.host, () => {
         this.port = this.server.address().port;
+        if (this.systemProxy) this.systemProxy.pacUrl = this._pacUrl();
         this._bindEvents();
         this._healHistoryCounts();
         resolve(this.port);
@@ -525,6 +587,8 @@ class ConsoleServer {
     if (pathname.startsWith('/api/')) return this._api(req, res, pathname, url);
     if (pathname === '/ca.pem' || pathname === '/ireq-ca.pem') return this._caFile(res, 'pem');
     if (pathname === '/ca.cer' || pathname === '/ca.crt') return this._caFile(res, 'der');
+    /* 「只抓指定域名」用的 PAC：命中的域名走代理端口，其余 DIRECT（真直连，不过我们） */
+    if (pathname === '/proxy.pac') return this._pacFile(res);
     if (pathname.startsWith('/app-icon/')) {
       if (!this.appIcons) {
         res.writeHead(404);
@@ -574,6 +638,7 @@ class ConsoleServer {
         passthrough: this.config.passthrough,
         mitmPorts: this.config.mitmPorts,
         proxyBypass: this.config.proxyBypass || [],
+        captureScope: this._captureScope(),
         rules: this.rules.list().length,
         caPath: this.ca ? this.ca.caCertPath : null,
         caCreated: this.ca ? this.ca.created : false,
@@ -1119,6 +1184,7 @@ class ConsoleServer {
         }
         return this._json(res, 200, {
           ...st,
+          captureScope: this._captureScope(),
           caTrust: fast ? this.caTrust && this.caTrust.status(false) : this._syncTrust(),
           safeMode: this._safeMode(),
           commands: this.systemProxy.commands(st.service, this._proxyBypass()),
@@ -1126,8 +1192,13 @@ class ConsoleServer {
       }
       if (method === 'POST') {
         const body = (await this._body(req)) || {};
+        const scope = this._captureScope();
         const r = body.enabled
-          ? this.systemProxy.enable(body.service, this._proxyBypass())
+          ? this.systemProxy.enable(body.service, {
+              bypass: this._proxyBypass(),
+              // 只抓指定域名时用 PAC：未命中的域名根本不会连到我们
+              pac: scope.mode === 'list' ? this._pacUrl() : '',
+            })
           : this.systemProxy.disable(body.service);
         // 接管时重新问一次系统：用户可能刚执行完信任命令。
         const caTrust = this._syncTrust(true);
@@ -1138,6 +1209,9 @@ class ConsoleServer {
         const service = st.service || body.service || this.systemProxy.primaryService();
         return this._json(res, r.ok ? 200 : 400, {
           ...r,
+          // 把状态字段平铺出来：界面和自检都要直接读 ours / mode
+          ...st,
+          captureScope: this._captureScope(),
           caTrust,
           safeMode: this._safeMode(),
           commands: this.systemProxy.commands(service, this._proxyBypass()),
@@ -1289,6 +1363,16 @@ class ConsoleServer {
             .filter((a) => a.match && a.name);
         }
         if (Number(body.maxFlows) > 0) this.store.maxFlows = Number(body.maxFlows);
+        // 抓包范围：全部 / 只抓列表里的域名（改完若正在接管，立即重新应用）
+        if (body.captureScope && typeof body.captureScope === 'object') {
+          const mode = body.captureScope.mode === 'list' ? 'list' : 'all';
+          const domains = (Array.isArray(body.captureScope.domains) ? body.captureScope.domains : String(body.captureScope.domains || '').split('\n'))
+            .map((d) => String(d || '').trim())
+            .filter(Boolean)
+            .slice(0, 200);
+          this.config.captureScope = { mode, domains };
+          this._reapplyProxyIfOurs();
+        }
         // 系统代理绕过名单（VPN 网关、内网面板…）：改了立即生效 —— 正在接管就重新应用一次
         if (body.proxyBypass !== undefined) {
           const list = (Array.isArray(body.proxyBypass) ? body.proxyBypass : String(body.proxyBypass || '').split('\n'))
@@ -1296,11 +1380,7 @@ class ConsoleServer {
             .filter(Boolean)
             .slice(0, 60);
           this.config.proxyBypass = list;
-          if (this.config.localProxyOurs && this.systemProxy) {
-            const st = this._localProxyStatus(0);
-            this.systemProxy.enable(st.service, this._proxyBypass());
-            this._lpCache = { at: Date.now(), st: this.systemProxy.status() };
-          }
+          this._reapplyProxyIfOurs();
         }
         if (typeof body.autoUpdate === 'boolean') this.config.autoUpdate = body.autoUpdate;
         // 首启引导「看过了」：只允许置 true，不给前端把它翻回去的口子

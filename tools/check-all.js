@@ -57,6 +57,8 @@ const SUITES = [
   ['筛选条', 'check-filterbar.js'],
   ['证书档案与一键信任', 'check-ca-persist.js'],
   ['代理地址', 'check-address.js'],
+  // 会短暂切系统代理到 PAC 模式，脚本结束自己还原
+  ['抓包范围（只抓指定域名）', 'check-scope.js'],
   ['精简交互', 'check-simple-ui.js'],
   // 会清空流量 / 诊断数据，必须排最后
   ['握手失败列表', 'check-tls-list.js'],

@@ -44,6 +44,14 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 抓包范围：'all' 全抓 / 'list' 只抓 domains 里的域名（走 PAC，其余直连）
+  if (cfg.captureScope && typeof cfg.captureScope === 'object') {
+    const mode = cfg.captureScope.mode === 'list' ? 'list' : 'all';
+    const domains = Array.isArray(cfg.captureScope.domains)
+      ? cfg.captureScope.domains.map((d) => String(d || '').trim()).filter(Boolean).slice(0, 200)
+      : [];
+    if (mode === 'list' || domains.length) out.captureScope = { mode, domains };
+  }
   // 接管系统代理时要跳过的域名 / IP（VPN 网关、内网面板…）：
   // 不绕过的话 VPN 客户端自己连网关的请求会被解密拦下来，直接连不上。
   if (Array.isArray(cfg.proxyBypass) && cfg.proxyBypass.length) {
