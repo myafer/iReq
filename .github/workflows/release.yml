@@ -53,14 +53,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 固定 node22.23.4：pkg-fetch v3.6 缓存里五平台 base 二进制齐全，
-          # 用 "node22" 这种大版本号会解析到没有预编译二进制的最新版，触发源码编译直接失败
+          # 固定 node22.22.3：pkg-fetch v3.6 的 release 里有这版的五平台 base 二进制
+          # （https://github.com/yao-pkg/pkg-fetch/releases/tag/v3.6）。
+          # 别写 "node22" 大版本号 —— 它会解析到最新的 patch，而 pkg-fetch 往往还没出那版的
+          # 预编译包（v1.5.0 就是这么挂的：22.23.4 不在缓存里，直接 "No available node version"）。
+          # 升级 Node 时先确认目标版本在 pkg-fetch 的 assets 里再改这里。
           # darwin-x64 用 arm64 runner 交叉编译：macos-13(Intel) 免费额度排队极长
-          - { os: darwin,  arch: arm64, runner: macos-latest, target: node22.23.4-macos-arm64 }
-          - { os: darwin,  arch: x64,   runner: macos-latest, target: node22.23.4-macos-x64 }
-          - { os: linux,   arch: x64,   runner: ubuntu-22.04, target: node22.23.4-linux-x64 }
-          - { os: linux,   arch: arm64, runner: ubuntu-22.04, target: node22.23.4-linux-arm64 }
-          - { os: win,     arch: x64,   runner: windows-latest, target: node22.23.4-win-x64 }
+          - { os: darwin,  arch: arm64, runner: macos-latest, target: node22.22.3-macos-arm64 }
+          - { os: darwin,  arch: x64,   runner: macos-latest, target: node22.22.3-macos-x64 }
+          - { os: linux,   arch: x64,   runner: ubuntu-22.04, target: node22.22.3-linux-x64 }
+          - { os: linux,   arch: arm64, runner: ubuntu-22.04, target: node22.22.3-linux-arm64 }
+          - { os: win,     arch: x64,   runner: windows-latest, target: node22.22.3-win-x64 }
     steps:
       - uses: actions/checkout@v4
 
