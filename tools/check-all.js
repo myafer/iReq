@@ -60,6 +60,7 @@ const SUITES = [
   // 会短暂切系统代理到 PAC 模式，脚本结束自己还原
   ['抓包范围（只抓指定域名）', 'check-scope.js'],
   ['精简交互', 'check-simple-ui.js'],
+  ['详情页（URL 折叠 / 搜索）', 'check-detail.js'],
   // 会清空流量 / 诊断数据，必须排最后
   ['握手失败列表', 'check-tls-list.js'],
   ['握手失败处理后清除', 'check-tls-clear.js'],

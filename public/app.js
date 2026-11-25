@@ -16,6 +16,8 @@ const S = {
   selectedId: null,
   selected: null,
   detailTab: 'overview',
+  detailSearch: '',
+  detailUrlOpen: false,
   /* 详情面板按需打开：没选中请求时不占位，列表吃满宽度 */
   detailOpen: false,
   filter: { q: '', status: '', mocked: false, host: '', ip: '', app: [], route: '' },
@@ -2172,6 +2174,8 @@ async function selectFlow(id) {
     if (!rec) return;
     S.selected = { kind: 'tls', ...rec };
     S.detailTab = 'overview';
+    S.detailSearch = '';
+    S.detailUrlOpen = false;
     renderDetail();
     return;
   }
@@ -2184,6 +2188,8 @@ async function selectFlow(id) {
     );
     S.selected = flow;
     S.detailTab = 'overview';
+    S.detailSearch = '';
+    S.detailUrlOpen = false;
     renderDetail();
   } catch (err) {
     toast('读取详情失败: ' + err.message);
@@ -2362,7 +2368,9 @@ function renderDetail() {
     <div class="dhead">
       <div class="dline">
         <span class="dmethod">${esc(f.method)}</span>
-        <span class="durl">${urlHtml(f)}</span>
+        <span class="durl${S.detailUrlOpen ? '' : ' clamp2'}" id="detailUrl">${urlHtml(f)}</span>
+        <button type="button" class="durl-more" id="detailUrlMore" hidden>展开</button>
+        <button class="btn icon ghost durl-copy" id="copyUrl" title="复制完整 URL" aria-label="复制完整 URL">⧉</button>
         <button class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
       </div>
       <div class="dmeta">
@@ -2400,10 +2408,60 @@ function renderDetail() {
           )
           .join('')}
         <span class="spacer"></span>
+        <span class="dsearch">
+          <input id="detailSearch" class="input tiny" placeholder="在详情里搜索" value="${esc(S.detailSearch)}" spellcheck="false" />
+          <span class="dsearch-count" id="detailSearchCount"></span>
+        </span>
         <button data-tab="copy-body" class="hint">复制响应体</button>
       </div>
     </div>
     <div class="dbody${splitTab ? ' can-split' : ''}">${bodyHtml}</div>`;
+
+  // URL 超过两行才给「展开」；展开后可以收起
+  const urlEl = $('#detailUrl');
+  const urlMore = $('#detailUrlMore');
+  const syncUrlClamp = () => {
+    if (!urlEl || !urlMore) return;
+    if (S.detailUrlOpen) {
+      urlMore.hidden = false;
+      urlMore.textContent = '收起';
+      return;
+    }
+    urlMore.textContent = '展开';
+    urlMore.hidden = urlEl.scrollHeight <= urlEl.clientHeight + 2;
+  };
+  requestAnimationFrame(syncUrlClamp);
+  window.addEventListener('resize', syncUrlClamp, { once: true });
+  if (urlMore) {
+    urlMore.addEventListener('click', (e) => {
+      e.stopPropagation();
+      S.detailUrlOpen = !S.detailUrlOpen;
+      renderDetail();
+    });
+  }
+  $('#copyUrl')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    copyText(f.url || '', '已复制完整 URL');
+  });
+
+  // 详情内搜索：不改结构，只把命中的文本包成 <mark>，并滚到第一处
+  const search = $('#detailSearch');
+  if (search) {
+    search.addEventListener('input', () => {
+      S.detailSearch = search.value;
+      applyDetailSearch();
+    });
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        search.value = '';
+        S.detailSearch = '';
+        applyDetailSearch();
+        search.blur();
+      }
+    });
+  }
+  applyDetailSearch();
 
   $('#tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
@@ -2464,6 +2522,63 @@ function renderDetail() {
     renderMsgList(f);
     startMsgPoll(f);
   }
+}
+
+/**
+ * 在当前详情页签里搜索：把命中的文本包成 <mark class="dhit">，其余结构不动。
+ * 请求头 / 响应头 / 正文 / 原始报文都能搜 —— 它们都是文本节点。
+ */
+function applyDetailSearch() {
+  const body = document.querySelector('.dbody');
+  const counter = document.getElementById('detailSearchCount');
+  if (!body) return;
+  for (const m of body.querySelectorAll('mark.dhit')) {
+    m.replaceWith(document.createTextNode(m.textContent));
+  }
+  const q = String(S.detailSearch || '').trim();
+  if (!q) {
+    if (counter) counter.textContent = '';
+    return;
+  }
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const testRe = new RegExp(esc, 'i');
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const v = node.nodeValue;
+      if (!v || !v.trim()) return NodeFilter.FILTER_REJECT;
+      const p = node.parentElement;
+      if (!p || p.closest('mark,input,textarea,select,button,script,style')) return NodeFilter.FILTER_REJECT;
+      return testRe.test(v) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  let total = 0;
+  const re = new RegExp(esc, 'gi');
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    re.lastIndex = 0;
+    if (!re.test(text)) continue;
+    re.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const mark = document.createElement('mark');
+      mark.className = 'dhit';
+      mark.textContent = m[0];
+      frag.appendChild(mark);
+      total += 1;
+      last = m.index + m[0].length;
+      if (!m[0].length) re.lastIndex += 1;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  }
+  if (counter) counter.textContent = total ? `${total} 处` : '无匹配';
+  const first = body.querySelector('mark.dhit');
+  if (first) first.scrollIntoView({ block: 'center' });
 }
 
 function urlHtml(f) {

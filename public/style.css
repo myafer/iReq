@@ -7447,3 +7447,61 @@ button.mcp-token-name:hover {
   flex-wrap: wrap;
   word-break: break-all;
 }
+
+/* 详情头部：URL 最多两行，超出折叠，点「展开」看全 */
+.durl.clamp2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.durl-more {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: calc(11.5px * var(--ui-scale));
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.durl-more:hover { text-decoration: underline; }
+
+.durl-copy {
+  flex: none;
+  align-self: flex-start;
+  margin-top: -1px;
+}
+
+/* 详情内搜索：页签行右侧的小输入框 + 命中数 */
+.dsearch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+}
+
+.dsearch .input {
+  width: calc(150px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  padding: 0 8px;
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.dsearch-count {
+  color: var(--muted);
+  font-size: calc(11px * var(--ui-scale));
+  min-width: 34px;
+}
+
+mark.dhit {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}

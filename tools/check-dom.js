@@ -30,6 +30,8 @@ const DYNAMIC = new Set([
   'detailClose', 'dSplit', 'btnFlowMore', 'flowMoreMenu',
   // 「消息」页签（WebSocket 帧 / SSE 消息）整块由 tabMessages() 现渲染
   'msgList', 'msgCount', 'msgDirBar', 'msgDropped', 'msgBytes', 'msgComments',
+  // 详情头部的完整 URL（两行折叠 + 展开）、复制按钮，以及页签行的搜索框
+  'detailUrl', 'detailUrlMore', 'copyUrl', 'detailSearch', 'detailSearchCount',
 ]);
 
 const missing = [...usedIds].filter((id) => !htmlIds.has(id) && !DYNAMIC.has(id));
