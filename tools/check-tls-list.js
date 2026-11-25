@@ -47,6 +47,9 @@ async function api(pathname, options = {}) {
   page.on('pageerror', (e) => errs.push(e.message));
 
   try {
+    // 先清掉前面套件留下的诊断：否则「三条」「角标 3」这类断言会随执行顺序飘
+    await fetch(UI + '/api/diagnostics', { method: 'DELETE' }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 120));
     await page.goto(UI + '/', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () => typeof S !== 'undefined' && !!document.querySelector('#tlsCount'),

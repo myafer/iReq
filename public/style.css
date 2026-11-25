@@ -7512,3 +7512,93 @@ mark.dhit {
   border-radius: 3px;
   padding: 0 1px;
 }
+
+/* ---------------------------------------------------------------
+ * 三角箭头用 CSS 画，不用字形。
+ *
+ * 原因：▾/▸ 这些几何符号在系统字体里只占 0.27em —— 16px 字号量出来墨迹只有 4.3px，
+ * 比同字号汉字小一大截，这就是「哪儿哪儿箭头都小」的根因。放大 font-size 治不了
+ * （20px 也才 5px），换成 border 画的三角后尺寸由像素决定，跟字体/字号/缩放无关。
+ *
+ * !important 只用来盖掉前面各处给这些图标设的 9~11px 字号；这些元素里没有别的文字。
+ * --------------------------------------------------------------- */
+.sgroup-head .caret,
+.rtree .rhead .caret,
+.more-group .more-caret,
+.rt-caret,
+.addr-act,
+#detailUrlMore,
+.tri {
+  font-size: 0 !important;
+  line-height: 0;
+}
+
+.sgroup-head .caret::before,
+.rtree .rhead .caret::before,
+.more-group .more-caret::before,
+.rt-caret::before,
+.addr-act::before,
+#detailUrlMore::before,
+.tri::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: calc(4.5px * var(--ui-scale)) solid transparent;
+  border-right: calc(4.5px * var(--ui-scale)) solid transparent;
+  border-top: calc(6px * var(--ui-scale)) solid currentColor;
+  transform-origin: 50% 45%;
+  transition: transform 0.15s;
+}
+
+/* 树节点：默认朝右，展开朝下（原来是字形 ▸ / ▾） */
+.rtree .rhead .caret::before { transform: rotate(-90deg); }
+.rtree .rnode.open > .rhead .caret::before { transform: rotate(0deg); }
+.rtree .rnode.open > .rhead .caret { transform: none; }
+
+/* 侧栏分组：默认朝下，收起朝右（原来靠 rotate(-90deg) 转字形） */
+.sgroup.closed .caret { transform: none; }
+.sgroup.closed .caret::before { transform: rotate(-90deg); }
+
+/* 「导入与证书」二级菜单：默认朝右，展开朝下 */
+.more-group .more-caret::before { transform: rotate(-90deg); }
+.more-group.open .more-caret::before { transform: rotate(0deg); }
+.more-group.open .more-caret { transform: none; }
+
+/* 详情头部：展开时朝上 */
+#detailUrlMore[aria-expanded='true']::before { transform: rotate(180deg); }
+
+/* 连接步骤标题：默认朝下，展开时朝上（原来 ▾ / ▴） */
+.connect-step .cs-main > h3::after {
+  content: '';
+  display: inline-block;
+  margin-left: auto;
+  width: 0;
+  height: 0;
+  border-left: calc(4.5px * var(--ui-scale)) solid transparent;
+  border-right: calc(4.5px * var(--ui-scale)) solid transparent;
+  border-top: calc(6px * var(--ui-scale)) solid var(--muted);
+  transition: transform 0.15s;
+}
+
+.connect-step:not(.collapsed) .cs-main > h3::after { transform: rotate(180deg); }
+.connect-step.collapsed .cs-main > h3::after { color: var(--muted); }
+
+/* JSON / 表单树：原来是 content: '▸' 字形 */
+.jt-node > summary::before,
+.jf-node > summary::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: calc(5.5px * var(--ui-scale)) solid var(--muted);
+  border-top: calc(4px * var(--ui-scale)) solid transparent;
+  border-bottom: calc(4px * var(--ui-scale)) solid transparent;
+  margin-right: calc(4px * var(--ui-scale));
+}
+
+.jt-node[open] > summary::before,
+.jf-node[open] > summary::before { transform: rotate(90deg); }
+
+/* 标题行右侧有「接管本机」按钮时，三角紧跟在按钮后面，别再抢自动外边距 */
+.connect-step .cs-main > h3:has(.lp-head-btn)::after { margin-left: 8px; }

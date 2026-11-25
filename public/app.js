@@ -5648,7 +5648,7 @@ function setTmplPicker(open) {
   if (!p) return;
   p.hidden = !open;
   const btn = $('#ruTmplPick');
-  if (btn) btn.textContent = open ? '▴ 我的模板' : '▾ 我的模板';
+  if (btn) btn.innerHTML = open ? '<span class="tri">▴</span> 我的模板' : '<span class="tri">▾</span> 我的模板';
   if (!open) {
     const row = $('#ruTmplSave');
     if (row) row.hidden = true;
