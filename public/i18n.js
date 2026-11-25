@@ -152,6 +152,10 @@
     [/^已导出 (\d+) 条$/, function (m, a) { return 'Exported ' + a + (a === '1' ? ' flow' : ' flows'); }],
     // 跳过解密管理列表：条数 / 命中数 / 域名是动态的，必须抢在通用「X 条」「匹配 X」之前
     [/^已加入 (\d+) 条规则$/, function (m, a) { return a + (a === '1' ? ' rule' : ' rules') + ' added'; }],
+    // 诊断行：空闲连接超时 / 握手失败的次数（带数字，只能靠正则翻）
+    [/^(\d+) 次空闲连接超时（非故障）$/, function (m, a) { return a + ' idle connection timeout' + (a === '1' ? '' : 's') + ' (not a failure)'; }],
+    [/^(\d+) 次握手失败$/, function (m, a) { return a + ' handshake failure' + (a === '1' ? '' : 's'); }],
+    [/^(\d+) 次失败后自动透传$/, function (m, a) { return a + (a === '1' ? ' failure' : ' failures') + ', now passed through'; }],
     [/^已透传 (\d+) 次连接$/, function (m, a) { return a + (a === '1' ? ' connection' : ' connections') + ' passed through'; }],
     [/^已透传 (\d+) 次$/, function (m, a) { return a + (a === '1' ? ' hit' : ' hits'); }],
     [/^最近变更已切断 (\d+) 条解密连接$/, function (m, a) { return 'Last change closed ' + a + ' decrypting connection(s)'; }],

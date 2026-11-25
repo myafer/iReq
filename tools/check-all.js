@@ -136,6 +136,7 @@ function probe() {
   }
   const results = [];
   for (const [label, file] of SUITES) {
+    const sysBefore = sysProxy ? sysProxy.sp.snapshot(sysProxy.svc) : null;
     const r = spawnSync(process.execPath, [path.join(__dirname, file)], {
       encoding: 'utf8',
       // 个别脚本跑完输出后仍挂着 SSE 连接，超时收尾按输出判定
@@ -148,6 +149,13 @@ function probe() {
     const ok = r.status === 0 || timedOutButClean;
     const m = out.match(/(\d+)\s*\/\s*(\d+)\s*通过/);
     const detail = m ? `${m[1]}/${m[2]}` : ok ? '通过' : `失败(${fails})`;
+    // 哪个套件动了系统代理就当场点名，别等到跑完才发现「代理没了」
+    if (sysProxy && sysBefore) {
+      const sysAfter = sysProxy.sp.snapshot(sysProxy.svc);
+      if (JSON.stringify(sysAfter) !== JSON.stringify(sysBefore)) {
+        console.log(`   ⚠️ ${file} 改动了系统代理（${sysBefore.web.port || '关'} → ${sysAfter.web.port || '关'}）`);
+      }
+    }
     results.push([label, ok, detail]);
     console.log(`${ok ? '✅' : '❌'} ${label.padEnd(14)} ${detail}${timedOutButClean ? ' (超时收尾)' : ''}`);
     if (!ok) {
@@ -163,6 +171,14 @@ function probe() {
       if (JSON.stringify(now) !== JSON.stringify(sysProxy.snap)) {
         sysProxy.sp.restore(sysProxy.snap, sysProxy.svc);
         console.log('\n⚠️ 系统代理被某个套件改动过，已还原成跑之前的样子');
+      }
+      // 还指着我们的代理端口？说明还原没兜住（或开跑前本来就是脏的）——
+      // 直接关掉，宁可让用户自己重设代理，也不能把他留在「流量发往死端口」的状态
+      const after = sysProxy.sp.snapshot(sysProxy.svc);
+      const port = Number(process.env.REQLITE_PROXY_PORT) || 9090;
+      if (after.web && after.web.enabled && Number(after.web.port) === port) {
+        sysProxy.sp.disable(sysProxy.svc);
+        console.log('⚠️ 跑完系统代理仍指向本工具，已强制释放');
       }
     } catch (_) {
       /* 还原失败不阻塞结果输出 */

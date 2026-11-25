@@ -67,7 +67,7 @@ async function api(pathname, options = {}) {
     const rows = await page.locator('.row.tls').count();
     ok('SSE 实时出现诊断行（无需刷新）', rows === 1, 'rows=' + rows);
     const text = rows ? await page.locator('.row.tls').first().innerText() : '';
-    ok('诊断行按域名聚合并显示次数', /3 次握手失败/.test(text), JSON.stringify(text.replace(/\n/g, ' ')));
+    ok('诊断行按域名聚合并显示次数', /3 次空闲连接超时（非故障）/.test(text), JSON.stringify(text.replace(/\n/g, ' ')));
     const badge = Number((await page.locator('#tlsCount').innerText()).trim());
     ok('筛选按钮角标显示数量', badge >= 1, 'badge=' + badge);
     const countText = (await page.locator('#count').innerText()).trim();

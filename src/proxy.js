@@ -218,6 +218,9 @@ function classifyTlsFailure(err, info = {}) {
   if (/tls 握手失败/.test(msg)) return 'no-request'; // 握手没完成、一个请求都没发出来
   if (/no application protocol|tls_handle_alpn|alert number 120|alpn/.test(msg)) return 'alpn';
   if (/certificate|unknown ca|self.signed|cert verify|unable to verify/.test(msg)) return 'untrusted';
+  // 客户端连上后一直不说话（没发 ClientHello）→ Node 的 ERR_TLS_HANDSHAKE_TIMEOUT。
+  // Apple 系 App 的「预连接 / 探测」很常见，本质不是解密失败，不能算进自动跳过的分母。
+  if (/tls handshake timeout|handshake timeout/.test(msg)) return 'idle';
   if (/econnreset|connection reset|socket hang up|client network socket disconnected|epipe|broken pipe/.test(msg)) return 'reset';
   if (/wrong version number|unknown protocol|first record|http request|parse/.test(msg)) return 'non-http';
   return 'other';
@@ -2646,4 +2649,5 @@ module.exports = {
   normalizePassthroughRule,
   classifyTlsFailure,
   TLS_AUTO_SKIP_AFTER,
+  classifyTlsFailure,
 };

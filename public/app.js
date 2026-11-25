@@ -993,9 +993,13 @@ const TLS_REASONS = {
     short: '握手未完成，也没有 HTTP 请求',
     detail: '客户端在 TLS 握手阶段就断开了，一个 HTTP 请求都没发出来。最常见是它不信任代理签发的证书（证书固定 / 系统服务自带校验）；连续失败两次后会自动改为原样透传。',
   },
+  idle: {
+    short: '空闲连接超时（没开始握手）',
+    detail: '客户端连上代理后一直没发 ClientHello 就超时了 —— Apple 系 App 的「预连接 / 探测」很常见，不是解密失败，也不会自动跳过（真跳过反而会让这个域名以后都看不到明文）。同一个域名如果正常请求能抓到，这一条可以点 ✕ 忽略。',
+  },
   other: {
-    short: '客户端不认证书，或端口不是 HTTP',
-    detail: '连接层就失败了，没产生任何 HTTP 请求。连续失败两次后会自动改为原样透传：App 能连上，但看不到明文。',
+    short: '其它连接层失败',
+    detail: '没能归到具体原因。它不会自动跳过解密 —— 自动跳过只针对「重试也没用」的几类（不认证书 / 只接受 h2 / 握手完没请求 / 非 HTTP），免得把一次网络抖动固化成「这个域名永远看不到明文」。一直失败的话，可以手动点「跳过解密」。',
   },
 };
 
@@ -1014,6 +1018,8 @@ function tlsInDefaultView() {
 function syncTlsBadge() {
   const b = $('#tlsCount');
   if (!b) return;
+  // 角标仍然数全部记录（它是「有多少条诊断」的入口），但行内文案会区分
+  // 「空闲连接超时（非故障）」，用户点进去不会误以为域名坏了
   b.hidden = S.tlsFailures.length === 0;
   b.textContent = String(S.tlsFailures.length);
 }
@@ -1021,9 +1027,12 @@ function syncTlsBadge() {
 function tlsRowHtml(f) {
   const skipped = !!f.skipped;
   const badge = skipped ? `<span class="tag skip">${esc(netTr('跳过解密'))}</span>` : '';
+  const n = Number(f.count) || 1;
   const head = skipped
-    ? `${Number(f.count) || 1} 次失败后自动透传`
-    : `${Number(f.count) || 1} 次握手失败`;
+    ? `${n} 次失败后自动透传`
+    : f.reason === 'idle'
+      ? `${n} 次空闲连接超时（非故障）`
+      : `${n} 次握手失败`;
   return `<div class="row tls${skipped ? ' skipped' : ''}" data-id="${esc(TLS_ROW_PREFIX + f.host)}">
     <span class="m tls">TLS</span>
     <span class="cellurl">
