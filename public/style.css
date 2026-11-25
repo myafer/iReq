@@ -7456,27 +7456,34 @@ button.mcp-token-name:hover {
   overflow: hidden;
 }
 
-.durl-more {
+/* 详情头部右侧的动作按钮：展开 / 复制 / 关闭 必须同高同顶，别一个浮一个沉 */
+.dhead-actions {
   flex: none;
   align-self: flex-start;
-  margin-top: 2px;
-  padding: 0 2px;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: calc(11.5px * var(--ui-scale));
-  cursor: pointer;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
 }
 
-.durl-more:hover { text-decoration: underline; }
-
-.durl-copy {
-  flex: none;
-  align-self: flex-start;
-  margin-top: -1px;
+.dhead-actions .btn.icon {
+  width: calc(24px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--muted);
 }
+
+.dhead-actions .btn.icon:hover {
+  color: var(--fg);
+  background: var(--panel-2);
+}
+
+.dhead-actions #detailUrlMore[hidden] { display: none; }
 
 /* 详情内搜索：页签行右侧的小输入框 + 命中数 */
 .dsearch {

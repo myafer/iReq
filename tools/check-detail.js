@@ -73,10 +73,22 @@ function longUrlFlow() {
     const opened = await page.evaluate(() => ({
       clamped: document.querySelector('#detailUrl').classList.contains('clamp2'),
       text: document.querySelector('#detailUrlMore').textContent.trim(),
+      expanded: document.querySelector('#detailUrlMore').getAttribute('aria-expanded'),
       h: Math.round(document.querySelector('#detailUrl').getBoundingClientRect().height),
     }));
     ok('点展开后不再截断', !opened.clamped && opened.h > head.h, `${head.h}px → ${opened.h}px`);
-    ok('展开后按钮变「收起」', opened.text === '收起', opened.text);
+    ok('展开后图标变成 ▴ 且 aria-expanded=true', opened.text === '▴' && opened.expanded === 'true', `${opened.text} / ${opened.expanded}`);
+
+    // 展开 / 复制 / 关闭 要在同一条线上（用户明确提过这个）
+    const align = await page.evaluate(() => {
+      const r = ['detailUrlMore', 'copyUrl', 'detailClose'].map((id) => {
+        const el = document.getElementById(id);
+        const b = el.getBoundingClientRect();
+        return { id, top: Math.round(b.top), h: Math.round(b.height), w: Math.round(b.width) };
+      });
+      return { tops: new Set(r.map((x) => x.top)).size, sizes: r };
+    });
+    ok('三个按钮在同一水平线上', align.tops === 1, JSON.stringify(align.sizes));
 
     /* ---------- 详情内搜索 ---------- */
     await page.click('#tabs button[data-tab="request"]');

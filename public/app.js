@@ -2369,9 +2369,12 @@ function renderDetail() {
       <div class="dline">
         <span class="dmethod">${esc(f.method)}</span>
         <span class="durl${S.detailUrlOpen ? '' : ' clamp2'}" id="detailUrl">${urlHtml(f)}</span>
-        <button type="button" class="durl-more" id="detailUrlMore" hidden>展开</button>
-        <button class="btn icon ghost durl-copy" id="copyUrl" title="复制完整 URL" aria-label="复制完整 URL">⧉</button>
-        <button class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
+        <span class="dhead-actions">
+          <button type="button" class="btn icon ghost" id="detailUrlMore" hidden
+            title="展开完整 URL" aria-label="展开完整 URL" aria-expanded="false">▾</button>
+          <button type="button" class="btn icon ghost" id="copyUrl" title="复制完整 URL" aria-label="复制完整 URL">⧉</button>
+          <button type="button" class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
+        </span>
       </div>
       <div class="dmeta">
         <span class="st ${statusClass(f.status)}">${esc(f.error ? 'ERR' : f.status || '—')} ${esc(f.statusText || '')}</span>
@@ -2424,10 +2427,16 @@ function renderDetail() {
     if (!urlEl || !urlMore) return;
     if (S.detailUrlOpen) {
       urlMore.hidden = false;
-      urlMore.textContent = '收起';
+      urlMore.textContent = '▴';
+      urlMore.title = '收起完整 URL';
+      urlMore.setAttribute('aria-label', '收起完整 URL');
+      urlMore.setAttribute('aria-expanded', 'true');
       return;
     }
-    urlMore.textContent = '展开';
+    urlMore.textContent = '▾';
+    urlMore.title = '展开完整 URL';
+    urlMore.setAttribute('aria-label', '展开完整 URL');
+    urlMore.setAttribute('aria-expanded', 'false');
     urlMore.hidden = urlEl.scrollHeight <= urlEl.clientHeight + 2;
   };
   requestAnimationFrame(syncUrlClamp);
