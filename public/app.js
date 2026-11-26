@@ -7929,6 +7929,76 @@ async function openSettings() {
   openModal('#modalSettings');
 }
 
+/* ---------------------------------------------------------------- 全局快捷键
+ * 「不顺手」很大一部分是：看列表只能用鼠标点，选下一条要来回移动。
+ * 这里加最小集合，全部避开输入框 / 弹窗，不跟已有的编辑器键位打架：
+ *   ↑ / ↓  上一条 / 下一条（按当前列表顺序）
+ *   Esc    关闭详情
+ *   /      聚焦筛选框（再按 Esc 退出）
+ *   ?      列出快捷键（轻提示）
+ */
+function globalKeyTargetIsEditable(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+function anyModalOpen() {
+  return [...document.querySelectorAll('.modal, .modal-backdrop, dialog')].some(
+    (m) => !m.hidden && m.offsetParent !== null
+  );
+}
+
+function moveSelection(step) {
+  const rows = [...document.querySelectorAll('#list .row[data-id]')].filter((r) => r.offsetParent !== null);
+  if (!rows.length) return;
+  const ids = rows.map((r) => r.dataset.id);
+  const cur = ids.indexOf(S.selectedId);
+  const next = cur === -1 ? (step > 0 ? 0 : ids.length - 1) : Math.max(0, Math.min(ids.length - 1, cur + step));
+  if (next === cur) return;
+  const id = ids[next];
+  const row = rows[next];
+  row.scrollIntoView({ block: 'nearest' });
+  // 诊断行不是 flow，交给它自己的处理器
+  if (id.startsWith(TLS_ROW_PREFIX)) {
+    row.click();
+    return;
+  }
+  selectFlow(id);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (globalKeyTargetIsEditable(e.target)) return;
+  if (anyModalOpen()) return;
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!S.flows.length) return;
+    e.preventDefault();
+    moveSelection(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (e.key === 'Escape') {
+    // 详情里还有别的「全屏 / 编辑器」上下文时，Esc 先交给它们（各面板自己有处理器），
+    // 否则这里一关详情，后面的操作就没对象了
+    if (document.querySelector('#detail .body-fs, .dbody .fullscreen, #ruBodyWrap.fullscreen')) return;
+    if (S.selected || S.selectedId) {
+      e.preventDefault();
+      closeDetail();
+    }
+    return;
+  }
+  if (e.key === '/') {
+    const box = $('#search');
+    if (box) {
+      e.preventDefault();
+      box.focus();
+      box.select?.();
+    }
+    return;
+  }
+});
+
 /* ---------------------------------------------------------------- 事件 */
 
 function bind() {

@@ -7602,3 +7602,92 @@ mark.dhit {
 
 /* 标题行右侧有「接管本机」按钮时，三角紧跟在按钮后面，别再抢自动外边距 */
 .connect-step .cs-main > h3:has(.lp-head-btn)::after { margin-left: 8px; }
+
+/* ---------------------------------------------------------------
+ * 顶栏降噪（第一轮）：把「代理地址」整合成一块，弱化低频按钮。
+ * 结构不动（id / 行为都保留，自检不受影响），只调视觉层级：
+ *   · 地址胶囊：内部不再有分隔线，▾ / ⧉ 默认淡出，hover 整块才亮起来；
+ *   · 「规则」「清空」降为 ghost，跟主操作（接管 / 抓包）拉开层级；
+ *   · 右侧操作组加一条细分割线，状态区 ↔ 操作区一眼分得清。
+ * --------------------------------------------------------------- */
+.addr {
+  background: var(--panel);
+  border-color: var(--border);
+  gap: 2px;
+  padding: 2px 2px 2px 9px;
+}
+
+.addr-sep {
+  color: var(--border-strong);
+  margin: 0 1px;
+}
+
+.addr-div { display: none; }
+
+.addr-act {
+  width: calc(18px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.45;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.addr:hover .addr-act,
+.addr-act:focus-visible {
+  opacity: 1;
+}
+
+.addr-act:hover {
+  opacity: 1;
+}
+
+.addr-part {
+  padding: 1px 2px;
+}
+
+/* 顶栏右侧：状态与操作之间拉一条细线 */
+.topbar .actions {
+  gap: 8px;
+}
+
+.topbar .actions::before {
+  content: '';
+  width: 1px;
+  height: calc(18px * var(--ui-scale));
+  background: var(--border);
+  margin-right: 2px;
+}
+
+#btnRules,
+#btnClear {
+  color: var(--muted);
+}
+
+#btnRules b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* 详情页签：主三页（概览 / 请求 / 响应）正常，低频页压小一号 */
+#tabs button[data-tab='timing'],
+#tabs button[data-tab='raw'],
+#tabs button[data-tab='messages'],
+#tabs button[data-tab='diff'] {
+  color: var(--muted);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+#tabs button[data-tab='diff']::before,
+#tabs button[data-tab='messages']::before {
+  content: '·';
+  margin-right: 4px;
+  color: var(--border-strong);
+}
+
+/* 详情搜索框再瘦一点，别跟页签抢横向空间 */
+.dsearch .input {
+  width: calc(120px * var(--ui-scale));
+}
