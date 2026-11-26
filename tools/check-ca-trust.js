@@ -81,7 +81,8 @@ function probeWith(port, url) {
         ca,
         store: new FlowStore({ dir: path.join(tmp, 'flows'), persist: false }),
         rules: new RuleEngine(path.join(tmp, 'rules')),
-        config: { capture: true, passthrough: [], mitmPorts: [443], ...cfg },
+        // 这一套验的是「未信任 CA / 端口 / 白名单」的分支，跟解密范围无关：显式全解
+        config: { capture: true, passthrough: [], mitmPorts: [443], mitmScope: { mode: 'all', domains: [], apps: [] }, ...cfg },
         processMap: new ProcessMap({ enabled: false }),
       });
     const p = mkProxy({ caTrusted: false, localProxyOurs: true });

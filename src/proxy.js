@@ -186,6 +186,54 @@ const TLS_AUTO_SKIP_AFTER = 2;
  * reset 不在此列：可能只是网络抖了一下，固化下来会白白丢掉明文。
  */
 const AUTO_SKIP_REASONS = new Set(['untrusted', 'alpn', 'no-request', 'non-http']);
+/**
+ * 「空闲连接超时」（客户端连上不发 ClientHello）单独一档：
+ * Apple 系统 App 的预连接会大量刷出这种记录，本身不是解密失败，所以门槛更高（3 次），
+ * 而且**只有这个域名从未解密成功过**才会自动跳过 —— 不然偶尔一次空闲超时就把一个
+ * 本来能看到明文的域名永久关掉了。
+ */
+const TLS_IDLE_SKIP_AFTER = 3;
+
+/**
+ * 解密范围（默认「只解密你指定的」）。
+ *
+ * 默认全解的老做法有个致命副作用：Apple 系统 App、银行 App、游戏客户端普遍做证书固定，
+ * 被 MITM 之后必然连不上（表现为「一开抓包，某些 App 就废了」）。而大部分时候用户只想
+ * 看自己那几个接口。所以默认改成白名单：只有命中域名 / 应用才解密，其余原样隧道。
+ *
+ * scope.domains 支持 example.com / *.example.com；scope.apps 按应用名或进程名做包含匹配。
+ */
+const MITM_SCOPE_DEFAULT = { mode: 'list', domains: [], apps: [] };
+
+function mitmScopeOf(cfg) {
+  const raw = (cfg && cfg.mitmScope) || {};
+  const mode = raw.mode === 'all' ? 'all' : 'list';
+  const norm = (arr) =>
+    (Array.isArray(arr) ? arr : [])
+      .map((x) => String(x || '').trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 200);
+  return { mode, domains: norm(raw.domains), apps: norm(raw.apps) };
+}
+
+/** 这条连接要不要解密：mode=all 全解；mode=list 只解命中域名或应用的 */
+function matchesMitmScope(host, appName, scope) {
+  const s = scope || MITM_SCOPE_DEFAULT;
+  if (s.mode === 'all') return true;
+  const h = String(host || '').toLowerCase();
+  if (h && passthroughMatches(h, s.domains || [])) return true;
+  const a = String(appName || '').toLowerCase();
+  if (a) {
+    const process = a;
+    if ((s.apps || []).some((p) => process.includes(p))) return true;
+  }
+  return false;
+}
+
+/** 判定要不要因为空闲超时跳过解密：连续 3 次且该域名没有成功记录 */
+function shouldSkipIdle(rec, hasOk) {
+  return Boolean(rec && rec.reason === 'idle' && (rec.count || 0) >= TLS_IDLE_SKIP_AFTER && !hasOk);
+}
 
 function passthroughMatches(host, rules) {
   const h = String(host || '').toLowerCase();
@@ -327,6 +375,8 @@ class ProxyServer extends EventEmitter {
     this.config = cfg;
     this.connections = new Set();
     this.stats = { total: 0, mocked: 0, errors: 0, bytes: 0, tunneled: 0, tlsFailed: 0, safeTunneled: 0, simulated: 0 };
+    /** 解密成功过的域名（host → 时间）。空闲超时要不要自动跳过靠它兜住误判 */
+    this._okHosts = new Map();
     // 握手失败的域名：客户端不认我们的证书（证书固定 / App 自带校验），提示用户加白名单
     this.tlsFailures = new Map();
     // 每条跳过解密规则实际拦下多少 CONNECT，管理列表里用来证明「规则真的生效了」
@@ -577,7 +627,7 @@ class ProxyServer extends EventEmitter {
    *
    * 只限制「本机 + 系统代理接管」：手机流量不受影响，显式 --proxy 的自检/开发流量也不受影响。
    */
-  _shouldDecrypt(host, port, clientIp) {
+  _shouldDecrypt(host, port, clientIp, appName) {
     const matched = (this.config.passthrough || []).find((p) => passthroughMatches(host, [p]));
     if (matched) {
       // 兜底：白名单也可能来自启动配置 / 落盘文件，没经过 /api/config PUT。
@@ -586,6 +636,12 @@ class ProxyServer extends EventEmitter {
       const meta = (this.config.passthroughMeta || {})[matched];
       if (!(meta && meta.auto)) this.clearTlsFailures(host);
       return { decrypt: false, reason: 'passthrough', rule: matched };
+    }
+
+    // 解密范围：默认只解密用户指定的域名 / 应用，其余原样隧道
+    const scope = mitmScopeOf(this.config);
+    if (!matchesMitmScope(host, appName, scope)) {
+      return { decrypt: false, reason: 'scope' };
     }
 
     // 只有 443（或显式配置的端口）才尝试解密，其余端口原样透传。
@@ -734,7 +790,16 @@ class ProxyServer extends EventEmitter {
       return this._simBlockConnect(req, clientSocket, host, port, sim);
     }
 
-    const decision = this._shouldDecrypt(host, port, clientSocket.remoteAddress);
+    const scopeCfg = mitmScopeOf(this.config);
+    let appForScope = '';
+    if (scopeCfg.mode === 'list' && scopeCfg.apps.length) {
+      try {
+        appForScope = this._appMeta(req).app || '';
+      } catch (_) {
+        /* 拿不到应用名就只按域名判定 */
+      }
+    }
+    const decision = this._shouldDecrypt(host, port, clientSocket.remoteAddress, appForScope);
     if (!decision.decrypt) {
       if (decision.reason === 'untrusted-ca') {
         this.stats.safeTunneled += 1;
@@ -767,8 +832,34 @@ class ProxyServer extends EventEmitter {
         }
       }
       this.stats.tunneled += 1;
-      // 只有「用户加了跳过解密规则」才算命中：安全模式 / 非 443 端口的自动透传不计
+      // 只有「用户加了跳过解密规则」才算命中：安全模式 / 非 443 端口 / 范围外的自动透传不计
       if (decision.reason === 'passthrough') this.notePassthroughHit(host, decision.rule);
+      // 范围外的连接也留一行（标 tunneled + note），用户才知道这条经过了代理只是没解密，
+      // 详情里能一键把这个域名 / 应用加进解密范围
+      if (decision.reason === 'scope' && this.config.capture !== false) {
+        try {
+          this._record({
+            method: 'CONNECT',
+            url: `https://${host}${port === 443 ? '' : ':' + port}/`,
+            scheme: 'https',
+            host,
+            path: '/',
+            status: 0,
+            duration: 0,
+            reqHeaders: { ...(req.headers || {}) },
+            resHeaders: {},
+            reqBody: '',
+            resBody: '',
+            ...this._appMeta(req),
+            route: 'CONNECT /',
+            tunneled: true,
+            outOfScope: true,
+            note: '不在解密范围内，已原样隧道。详情里可以「解密这个域名 / 应用」后再看明文。',
+          });
+        } catch (_) {
+          /* 记录失败不影响转发 */
+        }
+      }
       const establish = () => {
         const upstream = net.connect(port, host, () => {
           clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
@@ -1058,8 +1149,13 @@ class ProxyServer extends EventEmitter {
     // 实时推给控制台：握手失败直接出现在主列表，不必去设置页翻诊断区
     this.emit('tls-failure', { ...rec });
 
-    // 连续失败到阈值 → 自动跳过解密；再推一次带 skipped 的记录，界面据此改标记
-    if (!rec.skipped && rec.count >= TLS_AUTO_SKIP_AFTER && AUTO_SKIP_REASONS.has(rec.reason)) {
+    // 连续失败到阈值 → 自动跳过解密；再推一次带 skipped 的记录，界面据此改标记。
+    // 空闲超时单独判定：这个域名从没解密成功过才跳（Apple 系 App 的预连接就是这样，
+    // 跳过之后它们走隧道，App 恢复正常，其它域名照样抓明文）。
+    const wantSkip =
+      (!rec.skipped && rec.count >= TLS_AUTO_SKIP_AFTER && AUTO_SKIP_REASONS.has(rec.reason)) ||
+      (!rec.skipped && shouldSkipIdle(rec, this._okHosts.has(String(host).toLowerCase())));
+    if (wantSkip) {
       if (this.autoSkipDecrypt(host, rec)) {
         rec.skipped = true;
         rec.skippedAt = Date.now();
@@ -2611,6 +2707,9 @@ class ProxyServer extends EventEmitter {
   }
 
   _record(fields, ctx) {
+    // 这条请求真的走通了解密链路：记下域名，空闲超时判定时不至于把它误跳过
+    const okHost = String((fields && fields.host) || (ctx && ctx.flow && ctx.flow.host) || '').toLowerCase();
+    if (okHost && fields && fields.status) this._okHosts.set(okHost, Date.now());
     if (ctx && ctx.flow) {
       // 主链路一定已有占位记录。它可能刚被「清空」或被挤出环形队列：
       // 这时只丢弃，绝不退化成新增——否则点完清空，在途请求的收尾会把行带回来。
@@ -2648,6 +2747,11 @@ module.exports = {
   passthroughMatches,
   normalizePassthroughRule,
   classifyTlsFailure,
+  shouldSkipIdle,
+  mitmScopeOf,
+  matchesMitmScope,
+  MITM_SCOPE_DEFAULT,
+  TLS_IDLE_SKIP_AFTER,
   TLS_AUTO_SKIP_AFTER,
   classifyTlsFailure,
 };

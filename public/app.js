@@ -875,6 +875,8 @@ function renderList() {
           ? '客户端不信任根证书、或端口跑的不是 HTTP 时，连不上的域名会实时出现在这里。'
           : filtering
             ? '换个条件，或点上方已选筛选的 × 取消。'
+            : S.config && S.config.mitmScope && S.config.mitmScope.mode !== 'all'
+              ? `<b>默认只解密你指定的域名 / 应用</b>：现在还没命中，所以 HTTPS 都是隧道（列表里能看到域名，但没有明文）。<br>在「设置 › 高级设置 › 解密范围」里加上要抓的域名或应用，或者点隧道那行详情里的「解密这个域名」。HTTP 明文不受此限制。`
             : S.localProxy && S.localProxy.ours
               // 已经接管却没流量，九成是「老连接还在跑」：代理只对新建连接生效，
               // App 的连接池 / 长连接不会因为系统代理变了就切过去
@@ -997,7 +999,7 @@ const TLS_REASONS = {
   },
   idle: {
     short: '空闲连接超时（没开始握手）',
-    detail: '客户端连上代理后一直没发 ClientHello 就超时了 —— Apple 系 App 的「预连接 / 探测」很常见，不是解密失败，也不会自动跳过（真跳过反而会让这个域名以后都看不到明文）。同一个域名如果正常请求能抓到，这一条可以点 ✕ 忽略。',
+    detail: '客户端连上代理后一直没发 ClientHello 就超时了 —— Apple 系 App 的「预连接 / 探测」很常见，本质上不是解密失败。这个域名**从没解密成功过**的话，连续 3 次后会自动改成原样透传（App 恢复正常，只是看不到它的明文）；如果同一域名平时能正常抓到明文，就永远不会自动跳过，这一条点 ✕ 忽略即可。',
   },
   other: {
     short: '其它连接层失败',
@@ -2385,6 +2387,8 @@ function renderDetail() {
         ${f.replayOf ? '<span class="tag replay">REPLAY</span>' : ''}
         ${f.mapped ? `<span class="tag mapped" title="这条请求被域名映射改发到 ${esc(f.mapped)}">→ ${esc(f.mapped)}</span>` : ''}
         <span class="dactions">
+          ${f.tunneled ? `<button class="btn" id="actDecryptHost" title="只解密这一个域名：加入解密范围，之后重开 App 就能看到明文">解密这个域名</button>` : ''}
+          ${f.tunneled && f.app ? `<button class="btn ghost" id="actDecryptApp" title="把这个应用的所有域名都解密">解密 ${esc(String(f.app).slice(0, 12))}</button>` : ''}
           <button class="btn" id="actReplay">重放</button>
           <button class="btn" id="actMock">Mock 此请求</button>
           <button class="btn ghost" id="actStar" title="收藏这条请求的「应用 + 接口」，下次一点就筛回来">☆ 收藏</button>
@@ -2448,6 +2452,32 @@ function renderDetail() {
       renderDetail();
     });
   }
+  const addToScope = async (kind, value) => {
+    try {
+      const cfg = await api('/api/config');
+      const ms = cfg.mitmScope || { mode: 'list', domains: [], apps: [] };
+      const key = kind === 'app' ? 'apps' : 'domains';
+      const v = String(value || '').trim();
+      if (!v) return;
+      const list = Array.from(new Set([...(ms[key] || []), v]));
+      await api('/api/config', { method: 'PUT', body: { mitmScope: { ...ms, mode: 'list', [key]: list } } });
+      toast(kind === 'app' ? `已把 ${v} 加入解密范围，重开这个应用后生效` : `已把 ${v} 加入解密范围，重开这个 App 后生效`);
+      S.selected = null;
+      renderDetail();
+      renderList();
+    } catch (err) {
+      toast('操作失败：' + err.message);
+    }
+  };
+  $('#actDecryptHost')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    addToScope('host', f.host);
+  });
+  $('#actDecryptApp')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    addToScope('app', f.app);
+  });
+
   $('#copyUrl')?.addEventListener('click', (e) => {
     e.stopPropagation();
     copyText(f.url || '', '已复制完整 URL');
@@ -7501,8 +7531,14 @@ var settingsDirty = false;
 var settingsSaveTimer = null;
 
 function settingsPayload() {
+  const mitmMode = document.querySelector('#msAll')?.checked ? 'all' : 'list';
   const scopeMode = document.querySelector('#stScopeList')?.checked ? 'list' : 'all';
   return {
+    mitmScope: {
+      mode: mitmMode,
+      domains: ($('#msDomains').value || '').split('\n').map((x) => x.trim()).filter(Boolean),
+      apps: ($('#msApps').value || '').split('\n').map((x) => x.trim()).filter(Boolean),
+    },
     captureScope: {
       mode: scopeMode,
       domains: ($('#stScopeDomains').value || '')
@@ -7530,7 +7566,8 @@ async function saveSettings({ silent = false, close = true } = {}) {
   settingsSaveTimer = null;
   settingsDirty = false;
   try {
-    await api('/api/config', { method: 'PUT', body: settingsPayload() });
+    const saved = await api('/api/config', { method: 'PUT', body: settingsPayload() });
+    if (saved && typeof saved === 'object') S.config = { ...(S.config || {}), ...saved };
     if (close) closeModals();
     if (!silent) toast('设置已保存');
     return true;
@@ -7846,6 +7883,7 @@ async function openSettings() {
   settingsSaveTimer = null;
   settingsDirty = false;
   const st = await loadStatus();
+  S.config = st; // 解密范围等配置在空状态提示里要用
   // 更新卡片：打开设置时拿最新状态（自动检查可能刚在后台跑完）
   try {
     renderUpdate(await api('/api/update'));
@@ -7859,6 +7897,11 @@ async function openSettings() {
   if ($('#stScopeList')) $('#stScopeList').checked = wantList;
   if ($('#stScopeAll')) $('#stScopeAll').checked = !wantList;
   $('#stScopeDomains').value = (scope.domains || []).join('\n');
+  const ms = st.mitmScope || { mode: 'list', domains: [], apps: [] };
+  if ($('#msAll')) $('#msAll').checked = ms.mode === 'all';
+  if ($('#msList')) $('#msList').checked = ms.mode !== 'all';
+  $('#msDomains').value = (ms.domains || []).join('\n');
+  $('#msApps').value = (ms.apps || []).join('\n');
   $('#stUaAppMap').value = (st.uaAppMap || []).map((a) => `${a.match}=${a.name}`).join('\n');
   const pm = st.processMap || {};
   $('#appIdBadge').textContent = pm.enabled ? '本机进程识别已启用' : pm.supported ? '已关闭，仅 UA 推断' : '仅 UA 推断';
@@ -8328,11 +8371,47 @@ function bind() {
     importCaP12(e.target.files && e.target.files[0]);
     e.target.value = '';
   });
-  ['stScopeDomains', 'stProxyBypass', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
+  ['msDomains', 'msApps', 'stScopeDomains', 'stProxyBypass', 'stMitmPorts', 'stMax', 'stUaAppMap'].forEach((id) =>
     $(`#${id}`).addEventListener('input', queueSettingsSave)
   );
   // 单选框用 change：某些浏览器对 radio 不派发 input
-  ['stScopeAll', 'stScopeList'].forEach((id) => $(`#${id}`).addEventListener('change', queueSettingsSave));
+  ['stScopeAll', 'stScopeList', 'msAll', 'msList'].forEach((id) => $(`#${id}`).addEventListener('change', queueSettingsSave));
+  // Apple 系统服务一键绕过：这些域名普遍证书固定，解密后 App 直接连不上
+  const APPLE_BYPASS = [
+    '*.apple.com',
+    '*.icloud.com',
+    '*.icloud.com.cn',
+    '*.mzstatic.com',
+    '*.itunes.com',
+    '*.apple-cloudkit.com',
+    '*.cdn-apple.com',
+    '*.aaplimg.com',
+    '*.me.com',
+  ];
+  $('#stBypassApple')?.addEventListener('click', async () => {
+    try {
+      const cfg = await api('/api/config');
+      const have = new Set((cfg.passthrough || []).map((x) => String(x).toLowerCase()));
+      const mid = APPLE_BYPASS.map((r) => r.replace(/^\*\./, ''));
+      const missing = mid.filter((r) => !have.has(r));
+      if (!missing.length) {
+        toast('Apple 系统服务已经在跳过解密名单里了');
+        return;
+      }
+      await api('/api/config', {
+        method: 'PUT',
+        body: { passthrough: [...(cfg.passthrough || []), ...missing] },
+      });
+      await loadPassthrough();
+      if (typeof renderDetail === 'function' && S.selected) renderDetail();
+      toast(`已绕过 ${missing.length} 个 Apple 域名（这些连接不再解密，App 恢复正常）`);
+      const el = $('#stBypassState');
+      if (el) el.textContent = '已加入：' + mid.join('、').slice(0, 60) + '…';
+    } catch (err) {
+      toast('操作失败：' + err.message);
+    }
+  });
+
   $('#stOpenDataDir')?.addEventListener('click', async () => {
     try {
       const r = await api('/api/reveal-dir', { method: 'POST', body: { which: 'data' } });

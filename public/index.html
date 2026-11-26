@@ -913,6 +913,18 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               </label>
               <p class="hint" id="appIdStat" style="margin: 4px 0 0">—</p>
             </div>
+            <div class="field">
+              <span>解密范围 <em>默认只解密你指定的，其余原样隧道</em></span>
+              <div class="field-row" style="margin-bottom:8px">
+                <label class="inline-field"><input type="radio" name="mitmScope" id="msList" value="list" /> 只解密下面的域名 / 应用</label>
+                <label class="inline-field"><input type="radio" name="mitmScope" id="msAll" value="all" /> 全部解密</label>
+              </div>
+              <textarea id="msDomains" class="input mono" rows="3" spellcheck="false"
+                placeholder="api.example.com&#10;*.mycompany.com"></textarea>
+              <textarea id="msApps" class="input mono" rows="2" spellcheck="false" style="margin-top:6px"
+                placeholder="应用名 / 进程名，如 WeChat、Chrome、demo-app"></textarea>
+              <p class="hint">默认「只解密」是为了不让证书固定的 App（App Store、Apple 音乐、银行、游戏）因为被解密而连不上。改完对**新连接**生效，老的 keep-alive 需要重启 App。HTTP 明文不受这个限制。</p>
+            </div>
             <label class="field">
               <span>需要解密的端口 <em>默认 443</em></span>
               <input id="stMitmPorts" class="input mono" placeholder="443, 8443" spellcheck="false" />
@@ -922,6 +934,11 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
               <label class="inline-field"><input type="checkbox" id="stH2" checked /> 协商 HTTP/2</label>
             </div>
             <p class="hint">只影响列表里留多少条（省内存）；每条流量都会落盘，「清空」留下的历史记录里能翻到全部。</p>
+            <div class="field-row" style="align-items:center">
+              <button type="button" class="btn ghost" id="stBypassApple"
+                title="Apple 系统 App（App Store / Apple ID / 音乐 / 推送）普遍做证书固定，解密后必然连不上。加进跳过解密后这些流量走隧道，App 恢复正常，其它域名照样抓。">+ 绕过 Apple 系统服务</button>
+              <span class="hint" id="stBypassState"></span>
+            </div>
             <p class="hint st-disk-line">
               <span id="stDiskUsage">数据目录占用 —</span>
               <button type="button" class="btn ghost tiny" id="stOpenDataDir" title="在 Finder / 资源管理器里打开（重装或备份前先看一眼）">打开目录</button>

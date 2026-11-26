@@ -85,6 +85,7 @@ ireq ca                  # print the root CA path
 **2. Point traffic at it**
 
 - **Phone**: Wi-Fi proxy = the `LAN-IP:9090` from the top bar (not `127.0.0.1` — that points at the phone itself).
+- **Decryption is allow-list by default**: list hosts / apps under Settings › Advanced › Decryption scope; only those get decrypted, everything else is tunnelled as-is (visible in the list, no plaintext). Pinned apps (App Store, Apple Music, banking, games) no longer break when capture is on. Any tunnelled row has a one-click *Decrypt this host / app* in its detail pane.
 - **This machine**: ⋯ More → *Take over this machine* (or `ireq local on`). Your original proxy settings are restored when you release it.
   To capture only some hosts, switch to *Only capture these hosts* in the same place: it uses a system PAC file, so everything else connects directly and never touches iReq.
 

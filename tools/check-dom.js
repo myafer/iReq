@@ -32,6 +32,8 @@ const DYNAMIC = new Set([
   'msgList', 'msgCount', 'msgDirBar', 'msgDropped', 'msgBytes', 'msgComments',
   // 详情头部的完整 URL（两行折叠 + 展开）、复制按钮，以及页签行的搜索框
   'detailUrl', 'detailUrlMore', 'copyUrl', 'detailSearch', 'detailSearchCount',
+  // 隧道流量详情里的「解密这个域名 / 应用」快捷按钮
+  'actDecryptHost', 'actDecryptApp',
 ]);
 
 const missing = [...usedIds].filter((id) => !htmlIds.has(id) && !DYNAMIC.has(id));

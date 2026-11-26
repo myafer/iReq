@@ -61,7 +61,8 @@ async function api(pathname, options = {}) {
     ok('初始没有诊断行', (await page.locator('.row.tls').count()) === 0);
     ok('初始角标隐藏', await page.locator('#tlsCount').isHidden());
 
-    await Promise.all([abruptHandshake(), abruptHandshake(), abruptHandshake()]);
+    // 只造 2 次：满 3 次会触发「空闲超时自动跳过」，这一套要验的是「没跳过时的诊断行」
+    await Promise.all([abruptHandshake(), abruptHandshake()]);
     // 握手完成前的 EOF 会被 Node 静默吞掉，要等 handshakeTimeout(8s) 兜底报 tlsClientError 才有记录
     await page
       .waitForFunction(() => document.querySelectorAll('.row.tls').length > 0, null, { timeout: 12000 })
@@ -70,7 +71,7 @@ async function api(pathname, options = {}) {
     const rows = await page.locator('.row.tls').count();
     ok('SSE 实时出现诊断行（无需刷新）', rows === 1, 'rows=' + rows);
     const text = rows ? await page.locator('.row.tls').first().innerText() : '';
-    ok('诊断行按域名聚合并显示次数', /3 次空闲连接超时（非故障）/.test(text), JSON.stringify(text.replace(/\n/g, ' ')));
+    ok('诊断行按域名聚合并显示次数', /2 次空闲连接超时（非故障）/.test(text), JSON.stringify(text.replace(/\n/g, ' ')));
     const badge = Number((await page.locator('#tlsCount').innerText()).trim());
     ok('筛选按钮角标显示数量', badge >= 1, 'badge=' + badge);
     const countText = (await page.locator('#count').innerText()).trim();
@@ -84,7 +85,7 @@ async function api(pathname, options = {}) {
     const diag = await api('/api/diagnostics');
     ok(
       '后端按域名聚合、重试不刷屏',
-      (diag.tlsFailures || []).length === 1 && diag.tlsFailures[0].count >= 3,
+      (diag.tlsFailures || []).length === 1 && diag.tlsFailures[0].count >= 2,
       JSON.stringify(diag.tlsFailures)
     );
 

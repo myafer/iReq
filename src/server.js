@@ -430,6 +430,14 @@ class ConsoleServer {
     res.end(body);
   }
 
+  /** 解密范围：默认 list（只解密命中的域名 / 应用） */
+  _mitmScope() {
+    const raw = this.config.mitmScope || {};
+    const norm = (v) =>
+      (Array.isArray(v) ? v : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 200);
+    return { mode: raw.mode === 'all' ? 'all' : 'list', domains: norm(raw.domains), apps: norm(raw.apps) };
+  }
+
   /** 控制台端口上的 PAC 地址（PAC 由本机进程拉取，绑回环即可） */
   _pacUrl() {
     return `http://127.0.0.1:${this.port}/proxy.pac`;
@@ -646,6 +654,7 @@ class ConsoleServer {
         mitmPorts: this.config.mitmPorts,
         proxyBypass: this.config.proxyBypass || [],
         captureScope: this._captureScope(),
+        mitmScope: this._mitmScope(),
         rules: this.rules.list().length,
         caPath: this.ca ? this.ca.caCertPath : null,
         caCreated: this.ca ? this.ca.created : false,
@@ -1370,6 +1379,16 @@ class ConsoleServer {
             .filter((a) => a.match && a.name);
         }
         if (Number(body.maxFlows) > 0) this.store.maxFlows = Number(body.maxFlows);
+        // 解密范围：默认只解密指定域名 / 应用（影响之后新建的连接）
+        if (body.mitmScope && typeof body.mitmScope === 'object') {
+          const mode = body.mitmScope.mode === 'all' ? 'all' : 'list';
+          const pick = (v) =>
+            (Array.isArray(v) ? v : String(v || '').split('\n'))
+              .map((x) => String(x || '').trim())
+              .filter(Boolean)
+              .slice(0, 200);
+          this.config.mitmScope = { mode, domains: pick(body.mitmScope.domains), apps: pick(body.mitmScope.apps) };
+        }
         // 抓包范围：全部 / 只抓列表里的域名（改完若正在接管，立即重新应用）
         if (body.captureScope && typeof body.captureScope === 'object') {
           const mode = body.captureScope.mode === 'list' ? 'list' : 'all';
@@ -1852,6 +1871,8 @@ class ConsoleServer {
     }
     // 设置页要显示 data 目录占了多大：用户不会自己跑去 Application Support 里数文件，
     // 而 flows 一旦失控（清空归档堆积）能涨到几百 MB。
+    // 解密范围始终归一化后返回：前端拿它回填设置页、判断空状态提示
+    out.mitmScope = this._mitmScope();
     out.diskUsage = this._diskUsage();
     return out;
   }

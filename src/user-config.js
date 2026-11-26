@@ -44,6 +44,12 @@ function savePersistedConfig(dataDir, cfg) {
         : [],
     };
   }
+  // 解密范围：'list'（默认）只解密命中的域名 / 应用，其余原样隧道；'all' 全解
+  if (cfg.mitmScope && typeof cfg.mitmScope === 'object') {
+    const mode = cfg.mitmScope.mode === 'all' ? 'all' : 'list';
+    const arr = (v) => (Array.isArray(v) ? v.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 200) : []);
+    out.mitmScope = { mode, domains: arr(cfg.mitmScope.domains), apps: arr(cfg.mitmScope.apps) };
+  }
   // 抓包范围：'all' 全抓 / 'list' 只抓 domains 里的域名（走 PAC，其余直连）
   if (cfg.captureScope && typeof cfg.captureScope === 'object') {
     const mode = cfg.captureScope.mode === 'list' ? 'list' : 'all';

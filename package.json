@@ -13,7 +13,7 @@
     "start:cli": "node bin/ireq.js start",
     "ca": "node bin/ireq.js ca",
     "icon": "node tools/gen-icon.js",
-    "check": "node tools/check-all.js",
+    "check": "REQLITE_MITM_SCOPE=all node tools/check-all.js",
     "dist": "electron-builder --publish never"
   },
   "repository": {

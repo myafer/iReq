@@ -81,6 +81,10 @@ async function createApp({
     ...loadPersistedConfig(dataDir),
     ...config,
   };
+  // 自检要跑「解密链路」本身：默认范围是「只解密指定」，测试里统一用 env 切成全解
+  if (process.env.REQLITE_MITM_SCOPE === 'all') {
+    runtimeConfig.mitmScope = { mode: 'all', domains: [], apps: [] };
+  }
   // 版本与仓库信息来自 package.json（repository url 解析出 owner/repo）
   const pkg = require('../package.json');
   const repoMatch = String((pkg.repository && pkg.repository.url) || pkg.repository || '').match(

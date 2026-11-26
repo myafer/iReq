@@ -118,6 +118,20 @@ function probe() {
       return null;
     }
   })();
+  // 大部分套件验证的是「解密链路」，而默认解密范围是「只解密指定」：
+  // 跑之前统一切到「全部解密」，跑完再还原，免得默认值变化让一堆套件假失败
+  let scopeBefore = null;
+  try {
+    const cfg = await (await fetch(UI + '/api/config')).json();
+    scopeBefore = cfg.mitmScope || null;
+    await fetch(UI + '/api/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mitmScope: { mode: 'all' } }),
+    });
+  } catch (_) {
+    /* 起不来服务时下面会报不可达 */
+  }
   if (!(await probe())) {
     console.error(`✗ 控制台不可达：${UI}`);
     console.error('  先启动服务，或用 REQLITE_UI_PORT / REQLITE_PROXY_PORT 指向已运行的实例。');
@@ -163,6 +177,18 @@ function probe() {
       console.log(`   status=${r.status} signal=${r.signal || '-'} fails=${fails}`);
       console.log(out.split('\n').filter((l) => /❌|FAIL|Error|失败/.test(l)).slice(0, 4).join('\n'));
       console.log('   --- tail ---\n' + out.trim().split('\n').slice(-4).join('\n'));
+    }
+  }
+  // 还原解密范围
+  if (scopeBefore) {
+    try {
+      await fetch(UI + '/api/config', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mitmScope: scopeBefore }),
+      });
+    } catch (_) {
+      /* 忽略 */
     }
   }
   // 跑完统一拉回系统代理：哪套漏了都不该把用户的机器留在「代理指向 9090」的状态

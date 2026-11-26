@@ -21,11 +21,15 @@ const tls = require('tls');
 const path = require('path');
 const { UI, PROXY_PORT } = require('./_env');
 const { chromium, EXEC } = require('./_pw');
+const { ensureMitmAll, restoreScope } = require('./_scope');
 const {
   passthroughMatches,
   normalizePassthroughRule,
   classifyTlsFailure,
   TLS_AUTO_SKIP_AFTER,
+  TLS_IDLE_SKIP_AFTER,
+  shouldSkipIdle,
+  matchesMitmScope,
 } = require('../src/proxy');
 
 const HOST = 'gsa-gpk.apple.com'; /* 手动白名单用：验证接口语义 */
@@ -122,6 +126,8 @@ const diagOf = async (host) => {
 };
 
 (async () => {
+  // 默认解密范围是「只解密指定」，这些套件验证的是解密链路本身：先切全解，结束还原
+  const scopeBefore = await ensureMitmAll();
   /* ------------------------------------------------------------ 纯函数 */
   push('规则归一化：协议 / 端口 / 路径 / 通配前缀', normalizePassthroughRule('https://*.GSa-GpK.Apple.com:443/foo') === HOST);
   push('规则归一化：空白与大小写', normalizePassthroughRule('  EXAMPLE.com ') === 'example.com');
@@ -133,6 +139,24 @@ const diagOf = async (host) => {
   push('原因分类：非 HTTP 协议', classifyTlsFailure(new Error('wrong version number')) === 'non-http');
   push('子域匹配：自身 / 子域 / 不误伤', passthroughMatches('a.example.com', ['example.com']) && passthroughMatches('example.com', ['*.example.com']) && !passthroughMatches('notexample.com', ['example.com']));
   push('自动跳过阈值是 2 次', TLS_AUTO_SKIP_AFTER === 2, String(TLS_AUTO_SKIP_AFTER));
+  // 解密范围：默认只解密命中的域名 / 应用
+  {
+    const scope = { mode: 'list', domains: ['demo.com'], apps: ['wechat'] };
+    push('解密范围：all 模式全解', matchesMitmScope('any.test', '', { mode: 'all' }));
+    push('解密范围：域名命中（含子域）', matchesMitmScope('a.demo.com', '', scope));
+    push('解密范围：域名不命中就不解密', matchesMitmScope('apple.com', '', scope) === false);
+    push('解密范围：应用名命中', matchesMitmScope('apple.com', 'WeChat Helper', scope));
+    push('解密范围：默认配置只解密显式配置的', matchesMitmScope('apple.com', 'Music', { mode: 'list', domains: [], apps: [] }) === false);
+  }
+  // 空闲连接超时（Apple 系统 App 的预连接）：3 次起跳，但域名解密成功过就永不跳
+  push('原因分类：握手超时 → idle', classifyTlsFailure(new Error('TLS handshake timeout')) === 'idle');
+  push('空闲超时阈值是 3 次', TLS_IDLE_SKIP_AFTER === 3, String(TLS_IDLE_SKIP_AFTER));
+  push(
+    '空闲超时：2 次不跳 / 3 次无成功记录才跳 / 有成功记录不跳',
+    shouldSkipIdle({ reason: 'idle', count: 2 }, false) === false &&
+      shouldSkipIdle({ reason: 'idle', count: 3 }, false) === true &&
+      shouldSkipIdle({ reason: 'idle', count: 9 }, true) === false
+  );
 
   push('隔离服务可达', await waitUi());
   dataDir = (await api('/api/status')).dataDir || '';
@@ -269,6 +293,8 @@ const diagOf = async (host) => {
 
     push('页面无 JS 报错', errs.length === 0, errs.slice(0, 2).join(' | '));
   } finally {
+    await restoreScope(scopeBefore);
+
     await api('/api/passthrough', { method: 'DELETE' }).catch(() => {});
     await api('/api/diagnostics', { method: 'DELETE' }).catch(() => {});
     await api('/api/config', { method: 'PUT', body: { h2Enabled: true } }).catch(() => {});
