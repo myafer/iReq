@@ -928,6 +928,8 @@ function rowHtml(f) {
   const appName = f.imported ? '' : f.app && f.app !== f.host ? f.app : '';
   const hostPart = esc(f.host);
   const appPart = appName ? ` · ${ICONS().iconHtml(appName, 'xs')}${esc(appName)}` : '';
+  // 单行列表里域名被省略号截断是常态：完整值在 title 里（悬停即看），
+  // 不再做「点域名展开」—— 行中间就是域名，一点就展开会让人选不中行。
   const sub = `<span class="hl">${hostPart}${appPart}</span>`;
   const markCls = f.color ? ` mark-${esc(f.color)}` : '';
   const pin = f.pinned ? '<span class="pin" title="已标记重点">★</span>' : '';
@@ -954,8 +956,10 @@ function rowHtml(f) {
 /* ---------------------------------------------- 列表行里的长域名：折叠 / 展开 */
 
 /** 真被截断了才允许展开（用 scrollWidth 判定，换字体 / 缩放都准） */
+/** 单行列表里域名可能被省略号截断：只标记 data-trunc 供样式/排查用，
+ *  完整值在 .h 的 title 上（悬停即看）。不再提供点击展开，避免误触选不中行。 */
 function markHostOverflow(row) {
-  if (!row || row.classList.contains('host-open')) return;
+  if (!row) return;
   const hl = row.querySelector('.cellurl .h .hl');
   if (!hl) return;
   if (hl.scrollWidth > hl.clientWidth + 1) row.dataset.trunc = '1';
@@ -8075,11 +8079,7 @@ function bind() {
     }
     const row = e.target.closest('.row');
     if (!row) return;
-    // 域名被折成省略号时，点这行小字是「展开看全 / 再点收起」，不是选中
-    if (row.dataset.trunc === '1' && e.target.closest('.cellurl .h')) {
-      toggleHostExpand(row);
-      return;
-    }
+    // 单行列表里点哪儿都是选中（域名截断的完整值在 title 悬浮提示里）
     selectFlow(row.dataset.id);
   });
   // 只有真被截断的行才给「可展开」的手感（用 scrollWidth 判，别猜字符数）

@@ -7691,3 +7691,190 @@ mark.dhit {
 .dsearch .input {
   width: calc(120px * var(--ui-scale));
 }
+
+/* ---------------------------------------------------------------
+ * 第二轮：整体往「一行状态 + 一行工具 + 密一点的列表」收。
+ * 参考的是 Reqable 那种克制感：顶栏只有状态和一个主按钮，
+ * 其余操作都压成图标；行高整体降 2px，信息密度上来，视觉噪音下去。
+ * 只动尺寸/间距，不动结构，避免把交互和自检打散。
+ * --------------------------------------------------------------- */
+:root {
+  --row-h: calc(26px * var(--ui-scale));
+}
+
+.topbar {
+  height: calc(42px * var(--ui-scale));
+  padding: 0 12px;
+  gap: 10px;
+}
+
+.brand .logo {
+  font-size: calc(14px * var(--ui-scale));
+  letter-spacing: 0.2px;
+}
+
+.brand .conn #connText {
+  font-size: calc(11px * var(--ui-scale));
+}
+
+/* 地址：不再做成胶囊，直接一行状态文字，点开菜单才展开复制项 */
+.addr {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  gap: 1px;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-2);
+}
+
+.addr:hover {
+  background: var(--accent-soft);
+  border-radius: 6px;
+}
+
+.addr-part {
+  color: var(--text-2);
+}
+
+.addr-act {
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+}
+
+/* 右侧：图标化 + 收紧 */
+.topbar .actions {
+  gap: 4px;
+}
+
+.topbar .actions .btn,
+.topbar .actions .more-trigger {
+  height: calc(26px * var(--ui-scale));
+  min-width: calc(26px * var(--ui-scale));
+  padding: 0 calc(7px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.topbar .switch {
+  margin-right: 2px;
+}
+
+.topbar .switch-label {
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+/* 工具栏与筛选条：低一点，别顶到主内容 */
+.toolbar {
+  padding: 6px 10px;
+  gap: 8px;
+}
+
+.toolbar .search input {
+  font-size: calc(12px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+}
+
+.toolbar .count {
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
+}
+
+.chips .chip,
+.chips button {
+  height: calc(22px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+}
+
+/* 侧栏：行更紧、分组标题更轻 */
+.sgroup-head {
+  height: calc(24px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-2);
+  letter-spacing: 0.2px;
+}
+
+.sitem {
+  height: calc(23px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+/* 列表：行高与表头各降一档，扫视更快 */
+/* 表头/分组栏共用的 --head-h 统一压到 30px（两栏底边仍然同一条线） */
+.stage,
+.split {
+  --head-h: calc(30px * var(--ui-scale));
+}
+
+.listhead {
+  font-size: calc(11px * var(--ui-scale));
+}
+
+#list .row {
+  min-height: calc(var(--row-h));
+}
+
+#list .row .p,
+#list .row .h {
+  line-height: 1.35;
+}
+
+/* 列表行改单行：方法 | 路径（占满剩余，超长省略）| 域名·应用 | 状态 | 耗时
+ * 参考图就是这种一行一条的密度：同样一屏能多看 40% 的请求。
+ * 二级信息（域名 / 应用 / 徽标）靠右并省略，鼠标悬停有完整 title。 */
+/* 行仍然是 grid（和表头同一套列宽，位置才对得上），只是把行高压下来、
+ * 让「路径 + 域名」这两块在同一个单元格里横向排，一行看完。 */
+#list .row {
+  align-items: center;
+  min-height: calc(26px * var(--ui-scale));
+  padding-top: calc(2px * var(--ui-scale));
+  padding-bottom: calc(2px * var(--ui-scale));
+}
+
+#list .row .cellurl {
+  display: flex;
+  align-items: baseline;
+  gap: calc(8px * var(--ui-scale));
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+#list .row .cellurl .p {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#list .row .cellurl .h {
+  flex: 0 1 auto;
+  max-width: 44%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+#list .row .cellurl .h .tag {
+  margin-left: 2px;
+}
+
+/* 域名被截断时的展开按钮：只在真的截断时出现，不占常态视觉 */
+.h-more {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(10px * var(--ui-scale));
+  line-height: 1.4;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+
+.h-more:hover {
+  color: var(--fg);
+  background: var(--accent-soft);
+}

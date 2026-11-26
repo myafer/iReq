@@ -256,35 +256,21 @@ function viaProxy(host, path) {
     ok('长域名行判定为可展开', trunc.longTrunc === '1', `${trunc.longHl && trunc.longHl.scroll} > ${trunc.longHl && trunc.longHl.client}`);
     ok('短域名行不给展开入口', trunc.shortTrunc === '' || trunc.shortHl.scroll <= trunc.shortHl.client + 1, trunc.shortTrunc);
 
-    // 先选中另一条（短域名行），这样能验证「展开域名不会把选中挪走」
-    await page.click(`.row:has-text("${SHORT_HOST}")`, { position: { x: 5, y: 5 } });
-    await wait(400);
-    await page.click(`.row:has-text("${LONG_HOST}") .cellurl .h`);
-    await wait(300);
-    const opened = await page.evaluate(() => {
-      const rows = [...document.querySelectorAll('.row')];
-      const row = rows.find((r) => (r.textContent || '').includes('assets-cdn-eu-west-1'));
-      const short = rows.find((r) => (r.textContent || '').includes('cdn.demo.example') && !(r.textContent || '').includes('assets-cdn'));
-      const hl = row.querySelector('.cellurl .h .hl');
-      return {
-        open: row.classList.contains('host-open'),
-        h: Math.round(row.getBoundingClientRect().height),
-        clipped: hl.scrollWidth > hl.clientWidth + 1,
-        selected: row.classList.contains('sel'),
-        shortStillSelected: short ? short.classList.contains('sel') : false,
-      };
-    });
-    ok('点域名展开显示全部', opened.open && !opened.clipped, `h=${opened.h}`);
-    ok('展开时不会顺手选中这条', !opened.selected && opened.shortStillSelected);
-
-    await page.click(`.row:has-text("${LONG_HOST}") .cellurl .h`);
-    await wait(300);
-    const reclosed = await page.evaluate(() => {
+    // 单行列表里域名靠 title 看全（不再有点击展开），这里验证：
+    // ① 长域名确实被省略号截断；② title 带完整域名；③ 点这一行能选中，不会误触别的动作
+    const longTitle = await page.evaluate(() => {
       const row = [...document.querySelectorAll('.row')].find((r) => (r.textContent || '').includes('assets-cdn-eu-west-1'));
-      const hl = row.querySelector('.cellurl .h .hl');
-      return { open: row.classList.contains('host-open'), clipped: hl.scrollWidth > hl.clientWidth + 1 };
+      return row && row.querySelector('.cellurl .h') ? row.querySelector('.cellurl .h').title : '';
     });
-    ok('再点收起', !reclosed.open && reclosed.clipped);
+    ok('长域名行 title 带完整域名', longTitle.includes('assets-cdn-eu-west-1.very-long-subdomain'), longTitle.slice(0, 60));
+
+    await page.click(`.row:has-text("${LONG_HOST}")`, { position: { x: 120, y: 8 } });
+    await wait(300);
+    const picked = await page.evaluate(() => {
+      const row = [...document.querySelectorAll('.row')].find((r) => (r.textContent || '').includes('assets-cdn-eu-west-1'));
+      return { sel: row && row.classList.contains('sel'), id: S.selectedId };
+    });
+    ok('点被截断的行仍然能选中', picked.sel === true, JSON.stringify(picked));
 
     // 没截断的行：点域名那行还是「选中」
     await page.setViewportSize({ width: 1600, height: 900 });
