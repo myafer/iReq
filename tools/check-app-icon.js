@@ -217,8 +217,11 @@ async function main() {
     ok('详情加图标后文字没丢', false, '没有可点请求');
   }
 
-  // 深色主题：图标仍然可见，真实图标不被重绘弄丢
-  await page.click('#btnTheme');
+  // 深色主题：图标仍然可见，真实图标不被重绘弄丢。
+  // 默认主题现已改为 dark，这里显式切到 dark 再验，不依赖「默认是 light」的假设。
+  await page.evaluate(() => {
+    if (document.documentElement.dataset.theme !== 'dark') document.querySelector('#btnTheme').click();
+  });
   await page.waitForTimeout(500);
   const dark = await page.evaluate(() => {
     const el = document.querySelector('.app-icon');

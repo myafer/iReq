@@ -4,68 +4,73 @@
   --ui-scale: 1.04;
   /* 顶栏/筛选行独立略缩：整体比正文再小一档 */
   --hd: calc(var(--ui-scale) * 0.85);
-  /* 配色：Trae 风格 —— 中性灰阶（不带蓝味）+ 紫色强调 + 品牌绿点睛。
-   * 浅色对应 SOLO 的白灰底 / 紫蓝按钮，深色对应 IDE 的 #181818 编辑器。
-   * 方法色、状态码、标签、耗时条全走语义变量，改一处即全站同步。 */
-  --bg: #f8f8fa;
+  /* 配色：Trae 官网同款 —— 近黑底 + 唯一一支荧光绿 #32F08C + 中性白灰。
+   * 依据 trae.cn 实测：body #0A0B0D、文字 #F5F9FE、面板 rgba(237,239,242,.04/.08)，
+   * 主按钮与 logo 均为 #32F08C；官网没有紫色强调，也没有浅色主题。
+   * 本块是「浅色可切换版」：白底 + 深绿（荧光绿在白底只有 1.5:1，文字态必须压深）；
+   * 默认深色见 [data-theme="dark"]。方法色/状态码/标签/耗时条全走语义变量。 */
+  --bg: #f7f8f8;
   --panel: #ffffff;
-  --panel-2: #fafafa;
-  --border: #e8e8ed;
-  --border-strong: #d8d8e0;
-  --text: #18181b;
-  --text-2: #52525b;
-  --muted: #8e8e99;
-  --accent: #6d43d9;
-  --accent-soft: #f2edfd;
+  --panel-2: #fafbfb;
+  --border: #e5e9e9;
+  --border-strong: #d2d8d8;
+  --text: #101314;
+  --text-2: #4b5559;
+  --muted: #828d92;
+  --accent: #0d8a55;
+  --accent-on: #ffffff;   /* 深绿底上的文字 */
+  --accent-soft: #e6f6ee;
   --ok: #12855f;
   --warn: #a9761f;
   --err: #c4534e;
-  --mock: #4a6fd0;
+  --mock: #64727f;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(24, 24, 27, 0.05), 0 8px 24px rgba(24, 24, 27, 0.07);
   /* 图标中性配色：默认首字母色块 / 设备图标，避免五颜六色 */
-  --ic-def-bg: #ececf1;
-  --ic-def-fg: #64646f;
-  --ic-device: #9a9aa5;
+  --ic-def-bg: #eceeef;
+  --ic-def-fg: #5d676b;
+  --ic-device: #99a2a6;
   /* 耗时分解各段配色：列表微条与详情瀑布图共用一套，同一段永远同一个颜色 */
-  --ph-dns: #9b8ad6;
-  --ph-tcp: #6d8fd0;
-  --ph-tls: #c2a05f;
-  --ph-wait: #6d43d9;
-  --ph-dl: #2f9c82;
-  --ph-other: #c0c0c9;
+  /* 耗时分解：同一绿相的明暗阶梯 + 中性灰，不再出现紫/蓝彩虹条 */
+  --ph-dns: #6e9c8a;
+  --ph-tcp: #4d9c80;
+  --ph-tls: #a8bfae;
+  --ph-wait: #0d8a55;
+  --ph-dl: #3f9c7c;
+  --ph-other: #c8cfcf;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #181818;
-  --panel: #1e1e1e;
-  --panel-2: #242424;
-  --border: #333333;
-  --border-strong: #454545;
-  --text: #e8e8e8;
-  --text-2: #b4b4b4;
-  --muted: #909090;
-  --accent: #a78bfa;
-  --accent-soft: #2a2340;
-  --ok: #32f08c;
-  --warn: #e0b256;
-  --err: #f07a72;
-  --mock: #7aa2f7;
+  --bg: #0a0b0d;
+  --panel: #131619;
+  --panel-2: #1b1e22;
+  --border: #272b30;
+  --border-strong: #363b42;
+  --text: #f5f9fe;
+  --text-2: #b6bec9;
+  --muted: #7c8591;
+  --accent: #32f08c;
+  --accent-on: #0a0b0d;   /* 官网绿底按钮用的是深色文字 */
+  --accent-soft: #102a1c;
+  --ok: #2ac27b;
+  --warn: #d9a75d;
+  --err: #e8837b;
+  --mock: #8b98a8;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
-  --ic-def-bg: #2e2e2e;
-  --ic-def-fg: #b8b8b8;
-  --ic-device: #5c5c5c;
+  --ic-def-bg: #22262a;
+  --ic-def-fg: #b8c0ca;
+  --ic-device: #525860;
   /* 深色下同样按色相区分，但提亮一档保证在深底上看得清 */
-  --ph-dns: #b9a0f5;
-  --ph-tcp: #7aa2f7;
-  --ph-tls: #d9b877;
-  --ph-wait: #a78bfa;
-  --ph-dl: #32f08c;
-  --ph-other: #4a4a4a;
+  --ph-dns: #3e6f5c;
+  --ph-tcp: #4e8e78;
+  --ph-tls: #7fa89a;
+  --ph-wait: #32f08c;
+  --ph-dl: #259c68;
+  --ph-other: #3a4046;
 }
 
 * {
@@ -459,12 +464,12 @@ pre {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
 }
 
 .btn.primary:hover {
   filter: brightness(1.06);
-  color: #fff;
+  color: var(--accent-on);
 }
 
 .btn.ghost {
@@ -2254,8 +2259,8 @@ pre.code {
   bottom: 22px;
   left: 50%;
   transform: translateX(-50%) translateY(8px);
-  background: #262626;
-  color: #f2f2f2;
+  background: #141619;
+  color: #f5f9fe;
   padding: 8px 15px;
   border-radius: 999px;
   font-size: calc(12.5px * var(--ui-scale));
@@ -2982,7 +2987,7 @@ pre.code {
   font-size: calc(10px * var(--ui-scale));
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #fff;
+  color: var(--accent-on);
   background: var(--mock);
   padding: 3px 7px;
   border-radius: 5px;
@@ -3039,7 +3044,7 @@ pre.code {
 }
 .re-tabs button.on i {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
 }
 .re-valid {
   font-size: calc(11px * var(--ui-scale));
@@ -3179,7 +3184,7 @@ pre.code {
 .chip-btn.on {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
 }
 
 .re-range {
@@ -4289,7 +4294,7 @@ html[data-electron-titlebar="hidden"] .topbar :is(
   color: var(--err);
 }
 .tag.sim.timeout {
-  background: rgba(74, 111, 208, 0.12);
+  background: rgba(139, 152, 168, 0.12);
   color: var(--mock);
 }
 
@@ -4864,7 +4869,7 @@ html[data-electron-titlebar='hidden'] .more-wrap {
 }
 #addrCopyAll:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
 }
 .addr-part:hover {
   background: transparent;
@@ -4907,10 +4912,10 @@ html[data-electron-titlebar='hidden'] .more-wrap {
   color: var(--text-2);
 }
 .ws-dots { display: flex; gap: 6px; flex: none; }
-.ws-dots i { display: block; width: 9px; height: 9px; border-radius: 50%; background: #d8d8de; }
-.ws-dots i:nth-child(1) { background: #c4c4cf; }
-.ws-dots i:nth-child(2) { background: #a8a8b8; }
-.ws-dots i:nth-child(3) { background: #8a8a9c; }
+.ws-dots i { display: block; width: 9px; height: 9px; border-radius: 50%; background: #8a929b; }
+.ws-dots i:nth-child(1) { background: #7c8590; }
+.ws-dots i:nth-child(2) { background: #5b646d; }
+.ws-dots i:nth-child(3) { background: #3c434b; }
 .ws-title { flex: none; font-weight: 500; }
 .ws-title b { color: var(--muted); font-weight: 400; margin: 0 3px; }
 .ws-title-mid {
@@ -5187,7 +5192,7 @@ html[data-ws-sidebar="off"] .ws-sidebar { display: none; }
   gap: 16px;
   padding: 0 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -5255,7 +5260,7 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
   border-radius: 50%;
   background: var(--muted);
 }
-.dock-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(18, 133, 95, 0.15); }
+.dock-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(42, 194, 123, 0.15); }
 .dock-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(169, 118, 31, 0.15); }
 
 .dock-proxy-text {
@@ -5300,7 +5305,7 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
   background: var(--accent-soft);
 }
 .dock-toggle.on svg { color: var(--accent); }
-#dockMock.on { border-color: var(--mock); color: var(--mock); background: rgba(74, 111, 208, 0.08); }
+#dockMock.on { border-color: var(--mock); color: var(--mock); background: rgba(139, 152, 168, 0.08); }
 #dockMock.on svg { color: var(--mock); }
 /* 一键全局弱网 / 断网：两种模式用不同颜色，别让「点断网却亮弱网」 */
 #dockNet.weak-on,
@@ -5623,7 +5628,7 @@ body.dragging-file::after {
   font-size: calc(15px * var(--ui-scale));
   letter-spacing: 0.5px;
   color: var(--accent);
-  background: rgba(109, 67, 217, 0.07);
+  background: rgba(50, 240, 140, 0.07);
   border: 2px dashed var(--accent);
   pointer-events: none;
 }
@@ -6053,7 +6058,7 @@ body.dragging-file::after {
   text-overflow: ellipsis;
 }
 
-/* 事件名（SSE）和帧类型区分开：紫色只给业务事件，避免满屏彩色 */
+/* 事件名（SSE）和帧类型区分开：业务事件用中性强调色，避免满屏彩色 */
 .msg-op.ev {
   color: var(--mock);
 }

@@ -9927,7 +9927,7 @@ async function init() {
   applyScale(Number(localStorage.getItem(SCALE_KEY)) || SCALE_BASE, false);
   ICONS().mount();
   if (window.ReqLiteJSON) {
-    window.ReqLiteJSON.setTheme(savedTheme === 'dark' ? 'dark' : 'light');
+    window.ReqLiteJSON.setTheme(savedTheme === 'light' ? 'light' : 'dark');
     mountEditorsOnce();
     // 本地 4.6MB，预热一下，打开规则弹窗时不用等
     window.ReqLiteJSON.ready().catch(() => {});
