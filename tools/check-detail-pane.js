@@ -120,6 +120,7 @@ function viaProxy(host, path) {
           detail: b('#detail'),
           splitList: b('#splitList'),
           sideHead: b('.side-head'),
+          toolbar: b('.listpane > .toolbar'),
           listHead: b('.listhead'),
           overflowX: document.documentElement.scrollWidth - innerWidth,
         };
@@ -138,8 +139,8 @@ function viaProxy(host, path) {
       await page.evaluate((s) => document.documentElement.style.setProperty('--ui-scale', String(s)), scale);
       await wait(150);
       const g = await geo();
-      ok(`分组栏与表头同高 @${scale}`, g.sideHead.h === g.listHead.h && g.sideHead.bottom === g.listHead.bottom,
-        `${g.sideHead.h}/${g.listHead.h} bottom ${g.sideHead.bottom}/${g.listHead.bottom}`);
+      ok(`分组栏与搜索行同高 @${scale}`, g.sideHead.h === g.toolbar.h && g.sideHead.bottom === g.toolbar.bottom,
+        `${g.sideHead.h}/${g.toolbar.h} bottom ${g.sideHead.bottom}/${g.toolbar.bottom}`);
     }
     await page.evaluate(() => document.documentElement.style.removeProperty('--ui-scale'));
     await wait(150);

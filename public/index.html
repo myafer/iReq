@@ -109,74 +109,6 @@
       </div>
     </header>
 
-    <div class="toolbar">
-      <button class="btn icon ghost" id="sideShow" title="展开分组边栏" hidden>☰</button>
-      <div class="search">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <path
-            d="M11.7 10.3a6 6 0 1 0-1.4 1.4l3 3a1 1 0 0 0 1.4-1.4l-3-3ZM7 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
-            fill="currentColor"
-          />
-        </svg>
-        <input id="search" type="text" placeholder="搜 URL / 方法 / 状态码…" spellcheck="false" />
-        <button
-          class="search-body"
-          id="searchBody"
-          type="button"
-          aria-pressed="false"
-          title="把搜索范围扩到请求体 / 响应体（也可以直接输 body:关键词）"
-        >body</button>
-        <kbd id="searchKbd">⌘K</kbd>
-      </div>
-      <div class="chips" id="chips"></div>
-      <button class="btn ghost fbar-toggle" id="btnFilters" aria-expanded="false" aria-controls="filters"
-        title="展开 / 收起筛选条（已选条件始终显示在左侧）">
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 3.5h11L9.3 8.6v4.2l-2.6-1.1V8.6L2.5 3.5Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
-        <span>筛选</span><b class="fbar-dot" id="fbarDot" hidden>·</b>
-      </button>
-      <div class="count" id="count">0 条</div>
-    </div>
-
-    <!-- 筛选条：单选（同顶部搜索一样是「视图」）。一行只放最高频的几项，
-         其余收进「更多」菜单（协议版本 / 内容类型 / 状态码 / 其他），避免一眼看过去 20 个按钮 -->
-    <div class="fbar" id="filters" hidden>
-      <button class="on" data-status="">全部</button>
-      <span class="fbar-sep" aria-hidden="true"></span>
-      <button data-status="http">HTTP</button>
-      <button data-status="https">HTTPS</button>
-      <button data-status="ws" title="只看 WebSocket 连接（帧在详情「消息」页签里）">WebSocket</button>
-      <span class="fbar-sep" aria-hidden="true"></span>
-      <button data-status="2xx">2xx</button>
-      <button data-status="3xx">3xx</button>
-      <button data-status="4xx">4xx</button>
-      <button data-status="5xx">5xx</button>
-      <span class="fbar-sep" aria-hidden="true"></span>
-      <button data-status="json">JSON</button>
-      <button data-status="html">HTML</button>
-      <div class="more-wrap filter-more-wrap" id="filterMoreWrap">
-        <button class="filter-more-trigger" id="btnFilterMore" aria-expanded="false" title="更多筛选">更多 <span class="tri">▾</span> <b id="filterMoreDot" hidden>·</b></button>
-        <div class="more-menu filter-more-menu" id="filterMoreMenu" hidden>
-          <div class="more-head">协议</div>
-          <button data-status="sse">SSE</button>
-          <button data-status="http1">HTTP1</button>
-          <button data-status="http2">HTTP2</button>
-          <div class="more-head">内容类型</div>
-          <button data-status="xml">XML</button>
-          <button data-status="text">文本</button>
-          <button data-status="js">JS</button>
-          <button data-status="image">图片</button>
-          <button data-status="media">媒体</button>
-          <button data-status="binary">二进制</button>
-          <div class="more-head">状态码</div>
-          <button data-status="1xx">1xx</button>
-          <div class="more-head">其他</div>
-          <button data-status="error">错误</button>
-          <button data-mocked="1">Mock</button>
-          <button data-status="tls">握手失败 <b id="tlsCount" hidden>0</b></button>
-        </div>
-      </div>
-    </div>
-
     <!-- 详情默认不占位（no-detail）：选中请求后由 JS 摘掉，列表先吃满宽度 -->
     <div class="shell no-detail" id="shell">
       <aside class="side" id="side">
@@ -199,6 +131,74 @@
 
     <main class="layout">
       <section class="listpane">
+        <div class="toolbar">
+          <button class="btn icon ghost" id="sideShow" title="展开分组边栏" hidden>☰</button>
+          <div class="search">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M11.7 10.3a6 6 0 1 0-1.4 1.4l3 3a1 1 0 0 0 1.4-1.4l-3-3ZM7 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
+                fill="currentColor"
+              />
+            </svg>
+            <input id="search" type="text" placeholder="搜 URL / 方法 / 状态码…" spellcheck="false" />
+            <button
+              class="search-body"
+              id="searchBody"
+              type="button"
+              aria-pressed="false"
+              title="把搜索范围扩到请求体 / 响应体（也可以直接输 body:关键词）"
+            >body</button>
+            <kbd id="searchKbd">⌘K</kbd>
+          </div>
+          <div class="chips" id="chips"></div>
+          <button class="btn ghost fbar-toggle" id="btnFilters" aria-expanded="false" aria-controls="filters"
+            title="展开 / 收起筛选条（已选条件始终显示在左侧）">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 3.5h11L9.3 8.6v4.2l-2.6-1.1V8.6L2.5 3.5Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            <span>筛选</span><b class="fbar-dot" id="fbarDot" hidden>·</b>
+          </button>
+          <div class="count" id="count">0 条</div>
+        </div>
+
+        <!-- 筛选条：单选（同顶部搜索一样是「视图」）。一行只放最高频的几项，
+             其余收进「更多」菜单（协议版本 / 内容类型 / 状态码 / 其他），避免一眼看过去 20 个按钮 -->
+        <div class="fbar" id="filters" hidden>
+          <button class="on" data-status="">全部</button>
+          <span class="fbar-sep" aria-hidden="true"></span>
+          <button data-status="http">HTTP</button>
+          <button data-status="https">HTTPS</button>
+          <button data-status="ws" title="只看 WebSocket 连接（帧在详情「消息」页签里）">WebSocket</button>
+          <span class="fbar-sep" aria-hidden="true"></span>
+          <button data-status="2xx">2xx</button>
+          <button data-status="3xx">3xx</button>
+          <button data-status="4xx">4xx</button>
+          <button data-status="5xx">5xx</button>
+          <span class="fbar-sep" aria-hidden="true"></span>
+          <button data-status="json">JSON</button>
+          <button data-status="html">HTML</button>
+          <div class="more-wrap filter-more-wrap" id="filterMoreWrap">
+            <button class="filter-more-trigger" id="btnFilterMore" aria-expanded="false" title="更多筛选">更多 <span class="tri">▾</span> <b id="filterMoreDot" hidden>·</b></button>
+            <div class="more-menu filter-more-menu" id="filterMoreMenu" hidden>
+              <div class="more-head">协议</div>
+              <button data-status="sse">SSE</button>
+              <button data-status="http1">HTTP1</button>
+              <button data-status="http2">HTTP2</button>
+              <div class="more-head">内容类型</div>
+              <button data-status="xml">XML</button>
+              <button data-status="text">文本</button>
+              <button data-status="js">JS</button>
+              <button data-status="image">图片</button>
+              <button data-status="media">媒体</button>
+              <button data-status="binary">二进制</button>
+              <div class="more-head">状态码</div>
+              <button data-status="1xx">1xx</button>
+              <div class="more-head">其他</div>
+              <button data-status="error">错误</button>
+              <button data-mocked="1">Mock</button>
+              <button data-status="tls">握手失败 <b id="tlsCount" hidden>0</b></button>
+            </div>
+          </div>
+        </div>
+
         <div class="hist-bar" id="histBar" hidden>
           <span class="hist-dot" aria-hidden="true"></span>
           <span class="hist-bar-title">正在查看历史 · <b id="histBarName"></b></span>

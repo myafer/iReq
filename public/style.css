@@ -7878,3 +7878,80 @@ mark.dhit {
   color: var(--fg);
   background: var(--accent-soft);
 }
+
+/* ---------------------------------------------------------------
+ * 搜索 + 筛选搬进列表面板，和左侧「分组」标题同一行（同一 --head-h）。
+ * 这样顶部不再多出一条横杠：一行是「分组 | 搜索 筛选 条数」，下面才是列标题。
+ * --------------------------------------------------------------- */
+.listpane > .toolbar {
+  height: var(--head-h);
+  padding: 0 calc(10px * var(--ui-scale));
+  gap: calc(6px * var(--ui-scale));
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  flex: none;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.listpane > .toolbar .search {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;      /* 撑到「方法 + 地址」那两列的宽度 */
+  height: calc(22px * var(--ui-scale));
+  border-color: transparent;
+  background: var(--panel);
+}
+
+.listpane > .toolbar .search:focus-within {
+  border-color: var(--border-strong);
+}
+
+.listpane > .toolbar .search input {
+  height: calc(22px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
+  padding-left: calc(22px * var(--ui-scale));
+}
+
+.listpane > .toolbar .search svg {
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+  left: calc(6px * var(--ui-scale));
+}
+
+.listpane > .toolbar .chips {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+}
+
+.listpane > .toolbar #btnFilters {
+  flex: none;
+  margin-left: auto;
+  height: calc(22px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+}
+
+.listpane > .toolbar #btnFilters span {
+  display: none; /* 图标 + 小圆点足够，省横向空间 */
+}
+
+.listpane > .toolbar .count {
+  flex: none;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.listpane > .fbar {
+  flex: none;
+}
+
+/* 快捷键提示在这条窄行里太占地方（body 开关是功能，保留） */
+.listpane > .toolbar #searchKbd {
+  display: none;
+}
