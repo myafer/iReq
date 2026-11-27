@@ -1885,6 +1885,131 @@ const LIST_MIN = 260;
 const DETAIL_MIN = 260;
 
 const clampNum = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+
+/* ---------------- 表头列宽（方法 / 地址 / 状态 / 耗时） ----------------
+ * 三条边界各挂一个 .col-grip（表头 span 内的绝对定位子元素，不占 grid 轨道，
+ * 派生列 .c-dcol 由 applyColumnLayout 动态增删时也不会被误删）。
+ * 地址列保持 1fr 弹性吸收剩余：把 method / status / time 拖窄，地址自然变宽，
+ * 右侧永不留白。宽度存 localStorage，双击手柄恢复默认。 */
+const LW_KEY = 'reqlite-cols';
+const LW_VAR = { method: '--col-method', status: '--col-status', time: '--col-time' };
+const LW_DEF = { method: 64, status: 42, time: 80 };
+const LW_MIN = { method: 48, status: 36, time: 56 };
+const LW_MAX = { method: 200, status: 160, time: 240 };
+const LW_SPAN = { method: '.c-method', status: '.c-status', time: '.c-time' };
+/* 边界 → 要改的列 + 方向（拖右 dx>0 时边界应右移）：
+   method|url：方法列变宽；url|status：状态列变窄 → 地址变宽；
+   status|time：耗时列变窄 → 地址变宽。 */
+const LW_GRIPS = [
+  { sel: '.c-method', key: 'method', sign: 1 },
+  { sel: '.c-url', key: 'status', sign: -1 },
+  { sel: '.c-status', key: 'time', sign: -1 },
+];
+
+function colWidths() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LW_KEY) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function applyColumnWidths() {
+  const saved = colWidths();
+  for (const k of Object.keys(LW_VAR)) {
+    const v = Number(saved[k]);
+    if (Number.isFinite(v) && v > 0) {
+      document.documentElement.style.setProperty(LW_VAR[k], Math.round(v) + 'px');
+    } else {
+      document.documentElement.style.removeProperty(LW_VAR[k]);
+    }
+  }
+}
+
+function writeColWidths(p) {
+  try {
+    localStorage.setItem(LW_KEY, JSON.stringify(p));
+  } catch (_) {
+    /* 隐私模式：只在本次会话生效 */
+  }
+}
+
+function bindColumnResizers() {
+  const head = document.querySelector('.listhead');
+  if (!head) return;
+  for (const g of LW_GRIPS) {
+    const span = head.querySelector(g.sel);
+    if (!span || span.querySelector('.col-grip')) continue;
+    const grip = document.createElement('span');
+    grip.className = 'col-grip';
+    grip.dataset.key = g.key;
+    grip.dataset.sign = String(g.sign);
+    grip.title = '左右拖动调整列宽 · 双击恢复默认';
+    grip.setAttribute('role', 'separator');
+    grip.setAttribute('aria-label', '调整列宽');
+    /* 点一下手柄不该冒泡成「点表头排序」；capture 与冒泡都拦住 */
+    grip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    span.appendChild(grip);
+  }
+
+  let active = null;
+  head.addEventListener('pointerdown', (e) => {
+    const grip = e.target.closest && e.target.closest('.col-grip');
+    if (!grip || e.button !== 0 || NARROW.matches) return;
+    const key = grip.dataset.key;
+    const target = head.querySelector(LW_SPAN[key]);
+    const startW = target ? target.getBoundingClientRect().width : LW_DEF[key];
+    active = { grip, key, sign: Number(grip.dataset.sign), startX: e.clientX, startW, lastW: startW };
+    try {
+      grip.setPointerCapture(e.pointerId);
+    } catch (_) {
+      /* 老浏览器靠 head 上的 pointerup 兜底 */
+    }
+    grip.classList.add('dragging');
+    document.body.classList.add('col-resizing');
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  head.addEventListener('pointermove', (e) => {
+    if (!active) return;
+    const dx = e.clientX - active.startX;
+    const w = clampNum(active.startW + active.sign * dx, LW_MIN[active.key], LW_MAX[active.key]);
+    active.lastW = w;
+    document.documentElement.style.setProperty(LW_VAR[active.key], Math.round(w) + 'px');
+  });
+
+  const finish = () => {
+    if (!active) return;
+    const a = active;
+    active = null;
+    a.grip.classList.remove('dragging');
+    document.body.classList.remove('col-resizing');
+    const p = colWidths();
+    p[a.key] = Math.round(a.lastW);
+    writeColWidths(p);
+  };
+  head.addEventListener('pointerup', finish);
+  head.addEventListener('pointercancel', finish);
+  head.addEventListener('lostpointercapture', finish, true);
+
+  head.addEventListener('dblclick', (e) => {
+    const grip = e.target.closest && e.target.closest('.col-grip');
+    if (!grip) return;
+    const key = grip.dataset.key;
+    document.documentElement.style.removeProperty(LW_VAR[key]);
+    const p = colWidths();
+    delete p[key];
+    writeColWidths(p);
+    e.preventDefault();
+    e.stopPropagation();
+  });
+}
+
 const paneVar = (which) => (which === 'side' ? '--side-w' : '--list-w');
 const paneEl = (which) => (which === 'side' ? $('#side') : $('.listpane'));
 const paneCurrent = (which) => {
@@ -8288,6 +8413,7 @@ function bind() {
   $('#sideBackdrop').addEventListener('click', () => setSideVisible(false));
   bindSplitter('side');
   bindSplitter('list');
+  bindColumnResizers();
 
   $('#filters').addEventListener('click', (e) => {
     if (e.target.closest('#btnFilterMore')) {
@@ -9934,6 +10060,7 @@ async function init() {
   }
   syncSideForViewport();
   applyPaneWidths();
+  applyColumnWidths();
   bind();
   bindDock();
   // 刷新后把上次的排序 / 搜正文状态画回界面（S 里已经从 localStorage 恢复了）

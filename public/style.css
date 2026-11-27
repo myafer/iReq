@@ -1295,7 +1295,7 @@ body.resizing * {
 
 .listhead {
   display: grid;
-  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(42px * var(--ui-scale)) calc(80px * var(--ui-scale));
+  grid-template-columns: var(--col-method, calc(64px * var(--ui-scale))) 1fr var(--col-status, calc(42px * var(--ui-scale))) var(--col-time, calc(80px * var(--ui-scale)));
   gap: 8px;
   padding: calc(7px * var(--ui-scale)) 12px;
   font-size: calc(12px * var(--ui-scale));
@@ -1350,7 +1350,7 @@ body.resizing * {
 
 .row {
   display: grid;
-  grid-template-columns: calc(64px * var(--ui-scale)) 1fr calc(42px * var(--ui-scale)) calc(80px * var(--ui-scale));
+  grid-template-columns: var(--col-method, calc(64px * var(--ui-scale))) 1fr var(--col-status, calc(42px * var(--ui-scale))) var(--col-time, calc(80px * var(--ui-scale)));
   gap: 8px;
   align-items: center;
   padding: calc(8px * var(--ui-scale)) 12px;
@@ -2903,15 +2903,11 @@ pre.code {
 .jt-node > summary::-webkit-details-marker {
   display: none;
 }
-.jt-node > summary::before {
-  content: "▸";
-  display: inline-block;
-  width: 14px;
-  color: var(--muted);
-}
-.jt-node[open] > summary::before {
-  content: "▾";
-}
+/* 折叠箭头只由末尾「JSON / 表单树」那套 CSS 三角生成
+ * （content:'' + border-left + rotate）。早期这里写过 content:'▸'/'▾' 的字形版，
+ * d3f9df2 重构时没删干净：[open] 那条特异性更高，会把 content 覆盖回 '▾'，
+ * 和 border 三角叠在同一个伪元素上 —— 展开态变成两个箭头，且字形那个还被
+ * rotate(90deg) 带歪方向。与「连接步骤标题」是同一类遗留，别再加字形版。 */
 .jt-children {
   padding-left: 18px;
   border-left: 1px dashed var(--border-strong);
@@ -2942,15 +2938,7 @@ pre.code {
 .jf-node > summary::-webkit-details-marker {
   display: none;
 }
-.jf-node > summary::before {
-  content: "▸";
-  display: inline-block;
-  width: 14px;
-  color: var(--muted);
-}
-.jf-node[open] > summary::before {
-  content: "▾";
-}
+/* 同上：结构化 / 规则预览的 .jf-node 也只走末尾那套 CSS 三角。 */
 /* 收起时的摘要「{ … 3 键 }」：展开后隐藏 */
 .jf-folded {
   color: var(--muted);
@@ -6115,7 +6103,8 @@ body.dragging-file::after {
 .listhead,
 .row {
   grid-template-columns:
-    calc(64px * var(--ui-scale)) 1fr calc(42px * var(--ui-scale)) calc(80px * var(--ui-scale));
+    var(--col-method, calc(64px * var(--ui-scale))) 1fr
+    var(--col-status, calc(42px * var(--ui-scale))) var(--col-time, calc(80px * var(--ui-scale)));
   grid-auto-flow: column;
   grid-auto-columns: calc(104px * var(--ui-scale));
 }
@@ -7608,7 +7597,10 @@ mark.dhit {
   border-left: calc(5.5px * var(--ui-scale)) solid var(--muted);
   border-top: calc(4px * var(--ui-scale)) solid transparent;
   border-bottom: calc(4px * var(--ui-scale)) solid transparent;
-  margin-right: calc(4px * var(--ui-scale));
+  /* 原来字形占 14px（width:14px 的 inline-block）；删掉旧规则后三角本身只有
+     5.5px，用 9px 右外边距补回同样的视觉缩进，层级缩进才不会突然变紧。 */
+  margin-right: calc(9px * var(--ui-scale));
+  vertical-align: middle;
 }
 
 .jt-node[open] > summary::before,
@@ -7968,4 +7960,57 @@ mark.dhit {
 /* 快捷键提示在这条窄行里太占地方（body 开关是功能，保留） */
 .listpane > .toolbar #searchKbd {
   display: none;
+}
+
+
+/* ---------------------------------------------------------------
+ * 表头列宽可拖动（方法 / 地址 / 状态 / 耗时）
+ * 手柄是表头 span 内的绝对定位子元素 —— 不占 grid 轨道，派生列
+ * （.c-dcol 由 applyColumnLayout 动态增删）和现有断言都不受影响。
+ * 地址列保持 1fr 弹性吸收剩余：把 method / status / time 拖窄，地址
+ * 自然变宽，永远不会在右侧留白。变量由 app.js 写入并持久化。
+ * --------------------------------------------------------------- */
+.listhead > span {
+  position: relative;
+}
+
+.col-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(-5px * var(--ui-scale));
+  width: calc(10px * var(--ui-scale));
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-grip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  bottom: 22%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.col-grip:hover::after,
+.col-grip.dragging::after {
+  background: var(--accent);
+}
+
+body.col-resizing,
+body.col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+@media (max-width: 900px) {
+  .col-grip {
+    display: none;
+  }
 }
