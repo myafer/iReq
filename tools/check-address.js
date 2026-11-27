@@ -84,7 +84,7 @@ async function getStatus() {
     await clearCopies();
     await page.click('#addrCopyAll');
     await page.waitForTimeout(180);
-    ok('点 ⧉ 复制出 IP:端口', (await copies()).join('|') === full, JSON.stringify(await copies()));
+    ok('点复制图标复制出 IP:端口', (await copies()).join('|') === full, JSON.stringify(await copies()));
 
     // 真实剪贴板（权限可用时）
     const real = await page.evaluate(() => navigator.clipboard.readText().catch(() => null));

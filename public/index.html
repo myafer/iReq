@@ -28,13 +28,18 @@
         <span class="divider"></span>
         <span class="conn"><i id="dot" class="dot"></i><span id="connText">未连接</span></span>
         <div class="addr-wrap" id="addrWrap">
-          <div class="addr" id="addrBox" title="代理地址：点 IP / 端口分别复制，或点 ⧉ 复制完整地址">
+          <div class="addr" id="addrBox" title="代理地址：点 IP / 端口分别复制，或点复制图标复制完整地址">
             <button type="button" class="addr-part addr-ip" id="addrIp" title="复制 IP">—</button>
             <span class="addr-sep">:</span>
             <button type="button" class="addr-part addr-port" id="addrPort" title="复制端口">—</button>
             <span class="addr-div"></span>
             <button type="button" class="addr-act" id="addrPick" title="切换地址（多网卡 / 本机回环）" aria-label="切换地址" aria-expanded="false">▾</button>
-            <button type="button" class="addr-act" id="addrCopyAll" title="复制完整地址" aria-label="复制完整地址">⧉</button>
+            <button type="button" class="addr-act" id="addrCopyAll" title="复制完整地址" aria-label="复制完整地址">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="5.75" y="5.75" width="8.5" height="8.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5" />
+                <path d="M10.25 4.2V3.4a1.9 1.9 0 0 0-1.9-1.9H3.4a1.9 1.9 0 0 0-1.9 1.9v4.95a1.9 1.9 0 0 0 1.9 1.9h.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
           </div>
           <div class="addr-menu" id="addrMenu" hidden>
             <div class="addr-menu-head">代理地址 · 点选切换</div>

@@ -299,7 +299,7 @@ function applyAddr() {
   portEl.title = `复制端口 ${a.port}（Wi-Fi 代理的「端口」）`;
   $('#addrCopyAll').title = `复制完整地址 ${full}`;
   $('#addrPick').title = `切换地址，当前：${a.label} ${a.ip}（多网卡 / 本机回环）`;
-  $('#addrBox').title = `${a.label} · ${full}｜点 IP / 端口分别复制，⧉ 复制完整地址，▾ 切换地址`;
+  $('#addrBox').title = `${a.label} · ${full}｜点 IP / 端口分别复制，点复制图标复制完整地址，▾ 切换地址`;
 
   // 其它位置跟随同一个地址；元素可能被 renderList / openModal 重建，所以每次都查
   const sync = (id, text) => {
@@ -8032,7 +8032,7 @@ function bind() {
     true
   );
 
-  // 顶栏代理地址：IP / 端口分开复制，⧉ 复制完整，▾ 切换多网卡 / 本机回环
+  // 顶栏代理地址：IP / 端口分开复制，复制图标复制完整，箭头切换多网卡 / 本机回环
   $('#addrIp').addEventListener('click', () => copyAddr('ip'));
   $('#addrPort').addEventListener('click', () => copyAddr('port'));
   $('#addrCopyAll').addEventListener('click', () => copyAddr('all'));

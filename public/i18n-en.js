@@ -521,7 +521,7 @@ window.ReqLiteI18N_EN = {
   "自动": "Auto",
   "正在载入编辑器…": "Loading editor…",
   "包含：请求的完整 URL 里出现这段文字就命中。": "Contains: matches when this text appears in the full request URL.",
-  "代理地址：点 IP / 端口分别复制，或点 ⧉ 复制完整地址": "Proxy address: click the IP / port to copy separately, or ⧉ to copy the full address",
+  "代理地址：点 IP / 端口分别复制，或点复制图标复制完整地址": "Proxy address: click the IP / port to copy separately, or the copy icon for the full address",
   "切换地址（多网卡 / 本机回环）": "Switch address (multiple NICs / loopback)",
   "本机信任命令与状态": "Local trust command & status",
   "：代理已在本机监听，HTTPS 需信任根证书（⋯ 更多 → 证书与连接）": " : the proxy is listening locally; HTTPS needs the root CA trusted (\"⋯ More → Certificate & connection\")",

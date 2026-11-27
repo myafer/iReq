@@ -4860,13 +4860,22 @@ html[data-electron-titlebar='hidden'] .more-wrap {
   font-size: calc(12px * var(--ui-scale));
 }
 
-/* 地址胶囊：复制完整地址是主操作，IP / 端口退为可点的纯文本，避免 4 个等价按钮 */
+/* 复制完整地址是主操作，用品牌绿点一下；这里只留配色。
+ * 旧版「地址胶囊」的 padding:1px 7px 不能留 —— .addr-act 后来已改成 16~18px
+ * 图标方块，id 优先级会盖掉 padding:0，把图标挤成一条窄缝。 */
 #addrCopyAll {
-  padding: 1px 7px;
-  background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 500;
+  background: var(--accent-soft);
 }
+/* 复制按钮不参与「箭头画三角」规则：用 SVG 画两个叠放的方框，
+   stroke 走 currentColor，hover 变绿底时自动跟着反色。 */
+#addrCopyAll svg {
+  display: block;
+  flex: none;                 /* 别被 flex-shrink 压扁 */
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+}
+
 #addrCopyAll:hover {
   background: var(--accent);
   color: var(--accent-on);
@@ -7368,20 +7377,14 @@ body.resizing-v * {
   margin-left: 8px;
 }
 
-.cs-main > h3::after {
-  content: '▴';
-  margin-left: auto;
-  color: var(--muted);
-  font-size: calc(10px * var(--ui-scale));
-  line-height: 1;
-}
-
-.connect-step.collapsed .cs-main > h3::after {
-  content: '▾';
-}
-
+/* 步骤标题的箭头只由下面「三角箭头用 CSS 画」那一套生成
+ * （.connect-step .cs-main > h3::after：content:'' + border 三角 + rotate）。
+ * 早期这里还写过 content:'▴'/'▾' 的字形版，重构时没删干净：.collapsed 那条
+ * 特异性更高，会把 content 覆盖回 '▾'，和 border 三角叠在同一个伪元素上，
+ * 结果每个收起的步骤标题出现「一个大三角 + 一个小字形箭头」。别再加字形版。
+ * hover 也要改 border-top-color —— 改 color 对 border 画的三角无效。 */
 .cs-main > h3:hover::after {
-  color: var(--text-2);
+  border-top-color: var(--text-2);
 }
 
 /* MCP 卡片：从折叠块变成常驻卡片，标题栏右侧直接给开关 */
@@ -7529,12 +7532,14 @@ mark.dhit {
  * （20px 也才 5px），换成 border 画的三角后尺寸由像素决定，跟字体/字号/缩放无关。
  *
  * !important 只用来盖掉前面各处给这些图标设的 9~11px 字号；这些元素里没有别的文字。
+ * 注意：不能用 .addr-act 整类匹配 —— 顶栏 .addr-act 同时挂在「切换地址 ▾」和
+ * 「复制 ⧉」上，整类匹配会把复制按钮也画成向下三角（d3f9df2 曾踩过）。
  * --------------------------------------------------------------- */
 .sgroup-head .caret,
 .rtree .rhead .caret,
 .more-group .more-caret,
 .rt-caret,
-.addr-act,
+#addrPick,                 /* 只有「切换地址」是箭头；.addr-act 整类里还有复制按钮 */
 #detailUrlMore,
 .tri {
   font-size: 0 !important;
@@ -7545,7 +7550,7 @@ mark.dhit {
 .rtree .rhead .caret::before,
 .more-group .more-caret::before,
 .rt-caret::before,
-.addr-act::before,
+#addrPick::before,
 #detailUrlMore::before,
 .tri::before {
   content: '';
@@ -7590,7 +7595,8 @@ mark.dhit {
 }
 
 .connect-step:not(.collapsed) .cs-main > h3::after { transform: rotate(180deg); }
-.connect-step.collapsed .cs-main > h3::after { color: var(--muted); }
+/* collapsed 版的 `color: var(--muted)` 是字形时代残留：border 三角的颜色写死在
+   border-top-color 上，改 color 不起作用，删掉免得误导。 */
 
 /* JSON / 表单树：原来是 content: '▸' 字形 */
 .jt-node > summary::before,
@@ -7614,7 +7620,7 @@ mark.dhit {
 /* ---------------------------------------------------------------
  * 顶栏降噪（第一轮）：把「代理地址」整合成一块，弱化低频按钮。
  * 结构不动（id / 行为都保留，自检不受影响），只调视觉层级：
- *   · 地址胶囊：内部不再有分隔线，▾ / ⧉ 默认淡出，hover 整块才亮起来；
+ *   · 地址胶囊：内部不再有分隔线，切换 / 复制两个图标默认淡出，hover 整块才亮起来；
  *   · 「规则」「清空」降为 ghost，跟主操作（接管 / 抓包）拉开层级；
  *   · 右侧操作组加一条细分割线，状态区 ↔ 操作区一眼分得清。
  * --------------------------------------------------------------- */
