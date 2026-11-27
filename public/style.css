@@ -4,65 +4,68 @@
   --ui-scale: 1.04;
   /* 顶栏/筛选行独立略缩：整体比正文再小一档 */
   --hd: calc(var(--ui-scale) * 0.85);
-  --bg: #f7f6f4;
+  /* 配色：冷中性灰阶打底，只用一支靛蓝作强调；语义色统一压低饱和与明度，
+   * 避免暖米黄底 + 正红/正蓝/正橙的「纸张感 + 糖果色」。方法色、状态码、
+   * 标签、耗时条全部复用这几个变量，改一处即全站同步。 */
+  --bg: #f6f8fb;
   --panel: #ffffff;
-  --panel-2: #fbfaf8;
-  --border: #e5e2dc;
-  --border-strong: #d5d1c9;
-  --text: #211f1c;
-  --text-2: #55504a;
-  --muted: #8a8378;
-  --accent: #2f5fe0;
-  --accent-soft: #eef2ff;
-  --ok: #16794a;
-  --warn: #a35c00;
-  --err: #c22f22;
-  --mock: #8a4bd6;
+  --panel-2: #f9fafc;
+  --border: #e5e9f0;
+  --border-strong: #d2d9e5;
+  --text: #1b2432;
+  --text-2: #4b5768;
+  --muted: #7c8899;
+  --accent: #4f5bd5;
+  --accent-soft: #eef0fb;
+  --ok: #23805f;
+  --warn: #a9761f;
+  --err: #c4534e;
+  --mock: #7260b8;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   --radius: 10px;
-  --shadow: 0 1px 2px rgba(24, 20, 12, 0.06), 0 8px 24px rgba(24, 20, 12, 0.08);
+  --shadow: 0 1px 2px rgba(22, 34, 56, 0.05), 0 8px 24px rgba(22, 34, 56, 0.07);
   /* 图标中性配色：默认首字母色块 / 设备图标，避免五颜六色 */
-  --ic-def-bg: #e9e6e0;
-  --ic-def-fg: #6d675e;
-  --ic-device: #9a938a;
+  --ic-def-bg: #e8ecf3;
+  --ic-def-fg: #5d6b80;
+  --ic-device: #8c98ab;
   /* 耗时分解各段配色：列表微条与详情瀑布图共用一套，同一段永远同一个颜色 */
-  --ph-dns: #8b5cf6;
-  --ph-tcp: #0ea5e9;
-  --ph-tls: #dd8a0b;
-  --ph-wait: #2f5fe0;
-  --ph-dl: #16794a;
-  --ph-other: #b9b2a6;
+  --ph-dns: #8f93c9;
+  --ph-tcp: #5f9fd0;
+  --ph-tls: #c2a05f;
+  --ph-wait: #4f5bd5;
+  --ph-dl: #3f9c88;
+  --ph-other: #b9c2d0;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #141517;
-  --panel: #1b1d20;
-  --panel-2: #202327;
-  --border: #2b2f34;
-  --border-strong: #3a3f46;
-  --text: #e8e7e4;
-  --text-2: #b9b6b0;
-  --muted: #868c95;
-  --accent: #6b93ff;
-  --accent-soft: #1e2637;
-  --ok: #4ac28a;
-  --warn: #e0a33a;
-  --err: #f2705f;
-  --mock: #b78cff;
+  --bg: #11151b;
+  --panel: #171c24;
+  --panel-2: #1c222c;
+  --border: #28313e;
+  --border-strong: #3a4554;
+  --text: #e7ecf3;
+  --text-2: #b4bfcf;
+  --muted: #7d8ba0;
+  --accent: #8b97ef;
+  --accent-soft: #20263f;
+  --ok: #57bd97;
+  --warn: #d9a75d;
+  --err: #e8837b;
+  --mock: #a992e0;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
-  --ic-def-bg: #2b2e34;
-  --ic-def-fg: #a2a8b3;
-  --ic-device: #4d545e;
+  --ic-def-bg: #293140;
+  --ic-def-fg: #a9b6c8;
+  --ic-device: #556274;
   /* 深色下同样按色相区分，但提亮一档保证在深底上看得清 */
-  --ph-dns: #b18cff;
-  --ph-tcp: #56c8f5;
-  --ph-tls: #e0a33a;
-  --ph-wait: #6b93ff;
-  --ph-dl: #4ac28a;
-  --ph-other: #545b64;
+  --ph-dns: #a9a6e0;
+  --ph-tcp: #7bb8e0;
+  --ph-tls: #d9b877;
+  --ph-wait: #8b97ef;
+  --ph-dl: #66c4ae;
+  --ph-other: #5a6577;
 }
 
 * {
@@ -1201,7 +1204,7 @@ pre {
 .side-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(12, 10, 8, 0.38);
+  background: rgba(16, 24, 38, 0.38);
   z-index: 44;
 }
 
@@ -1486,7 +1489,7 @@ body.resizing * {
 
 /* 域名映射：这条请求实际发去了别的地方，得让人一眼看见 */
 .tag.mapped {
-  color: var(--warn, #d98324);
+  color: var(--warn, #a9761f);
 }
 
 .empty {
@@ -1720,7 +1723,7 @@ body.resizing * {
 
 /* 有变化的行给底色，扫一眼就知道哪几项变了 */
 .dstat.changed {
-  background: color-mix(in srgb, var(--warn, #d68b00) 12%, transparent);
+  background: color-mix(in srgb, var(--warn, #a9761f) 12%, transparent);
 }
 
 .dstat-k {
@@ -1776,7 +1779,7 @@ body.resizing * {
 }
 
 .drow.add {
-  background: color-mix(in srgb, var(--ok, #1a9e5c) 10%, transparent);
+  background: color-mix(in srgb, var(--ok, #23805f) 10%, transparent);
 }
 
 .drow.add .dsign {
@@ -1784,7 +1787,7 @@ body.resizing * {
 }
 
 .drow.del {
-  background: color-mix(in srgb, var(--err, #d64545) 10%, transparent);
+  background: color-mix(in srgb, var(--err, #c4534e) 10%, transparent);
 }
 
 .drow.del .dsign {
@@ -1888,7 +1891,7 @@ pre.code-block.dim {
 .modal {
   position: fixed;
   inset: 0;
-  background: rgba(20, 18, 14, 0.34);
+  background: rgba(16, 24, 38, 0.34);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
@@ -2251,8 +2254,8 @@ pre.code {
   bottom: 22px;
   left: 50%;
   transform: translateX(-50%) translateY(8px);
-  background: #26241f;
-  color: #f6f4ef;
+  background: #1b2330;
+  color: #eef2f8;
   padding: 8px 15px;
   border-radius: 999px;
   font-size: calc(12.5px * var(--ui-scale));
@@ -3431,7 +3434,7 @@ details.re-tester > summary:hover h3 {
   opacity: 1;
 }
 .tmpl-del:hover {
-  color: #e5484d;
+  color: var(--err);
   background: var(--panel-2);
 }
 .tmpl-empty {
@@ -4278,15 +4281,15 @@ html[data-electron-titlebar="hidden"] .topbar :is(
   background: var(--err);
 }
 .tag.sim {
-  background: rgba(163, 92, 0, 0.12);
+  background: rgba(169, 118, 31, 0.12);
   color: var(--warn);
 }
 .tag.sim.offline {
-  background: rgba(194, 47, 34, 0.12);
+  background: rgba(196, 83, 78, 0.12);
   color: var(--err);
 }
 .tag.sim.timeout {
-  background: rgba(138, 75, 214, 0.12);
+  background: rgba(114, 96, 184, 0.12);
   color: var(--mock);
 }
 
@@ -4703,7 +4706,7 @@ html[data-electron-titlebar='hidden'] .more-wrap {
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
-  background: rgba(20, 18, 14, 0.36);
+  background: rgba(16, 24, 38, 0.36);
   backdrop-filter: blur(2px);
 }
 .cmd-panel {
@@ -4904,10 +4907,10 @@ html[data-electron-titlebar='hidden'] .more-wrap {
   color: var(--text-2);
 }
 .ws-dots { display: flex; gap: 6px; flex: none; }
-.ws-dots i { display: block; width: 9px; height: 9px; border-radius: 50%; background: #ded9d1; }
-.ws-dots i:nth-child(1) { background: #e7a9a1; }
-.ws-dots i:nth-child(2) { background: #e8ce91; }
-.ws-dots i:nth-child(3) { background: #a8d1a5; }
+.ws-dots i { display: block; width: 9px; height: 9px; border-radius: 50%; background: #d8e0ec; }
+.ws-dots i:nth-child(1) { background: #a9b8d0; }
+.ws-dots i:nth-child(2) { background: #8598b8; }
+.ws-dots i:nth-child(3) { background: #6479a0; }
 .ws-title { flex: none; font-weight: 500; }
 .ws-title b { color: var(--muted); font-weight: 400; margin: 0 3px; }
 .ws-title-mid {
@@ -5252,8 +5255,8 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
   border-radius: 50%;
   background: var(--muted);
 }
-.dock-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(22, 121, 74, 0.15); }
-.dock-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(163, 92, 0, 0.15); }
+.dock-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(35, 128, 95, 0.15); }
+.dock-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(169, 118, 31, 0.15); }
 
 .dock-proxy-text {
   overflow: hidden;
@@ -5297,7 +5300,7 @@ html[data-electron-titlebar='hidden'] .ws-status { -webkit-app-region: no-drag; 
   background: var(--accent-soft);
 }
 .dock-toggle.on svg { color: var(--accent); }
-#dockMock.on { border-color: var(--mock); color: var(--mock); background: rgba(138, 75, 214, 0.08); }
+#dockMock.on { border-color: var(--mock); color: var(--mock); background: rgba(114, 96, 184, 0.08); }
 #dockMock.on svg { color: var(--mock); }
 /* 一键全局弱网 / 断网：两种模式用不同颜色，别让「点断网却亮弱网」 */
 #dockNet.weak-on,
@@ -5620,7 +5623,7 @@ body.dragging-file::after {
   font-size: calc(15px * var(--ui-scale));
   letter-spacing: 0.5px;
   color: var(--accent);
-  background: rgba(47, 95, 224, 0.07);
+  background: rgba(79, 91, 213, 0.07);
   border: 2px dashed var(--accent);
   pointer-events: none;
 }
@@ -6687,11 +6690,11 @@ body.dragging-file::after {
 }
 
 .nt-sw.sw-orange {
-  background: #e8792b;
+  background: #d08a45;
 }
 
 .nt-sw.sw-yellow {
-  background: #d9a400;
+  background: #c9a33c;
 }
 
 .nt-sw.sw-green {
@@ -6721,11 +6724,11 @@ body.dragging-file::after {
 }
 
 .row.mark-orange {
-  box-shadow: inset 3px 0 0 #e8792b;
+  box-shadow: inset 3px 0 0 #d08a45;
 }
 
 .row.mark-yellow {
-  box-shadow: inset 3px 0 0 #d9a400;
+  box-shadow: inset 3px 0 0 #c9a33c;
 }
 
 .row.mark-green {
