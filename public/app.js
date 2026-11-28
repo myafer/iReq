@@ -170,16 +170,21 @@ async function api(path, options = {}) {
 }
 
 let toastTimer;
+let toastHideTimer;
 function toast(msg) {
   const el = $('#toast');
-  el.textContent = msg;
+  const text = String(msg || '');
+  el.textContent = text;
+  el.classList.toggle('err', /失败|错误|有误|无法|不可|error|fail/i.test(text));
   el.hidden = false;
-  requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  requestAnimationFrame(() => el.classList.add('show'));
+  const ms = Math.min(3600, Math.max(2000, text.length * 75));
   toastTimer = setTimeout(() => {
     el.classList.remove('show');
-    setTimeout(() => (el.hidden = true), 220);
-  }, 1900);
+    toastHideTimer = setTimeout(() => (el.hidden = true), 220);
+  }, ms);
 }
 
 function fmtSize(n) {
@@ -309,6 +314,8 @@ function applyAddr() {
   sync('#emptyProxy', full);
   sync('#caMobileProxy', full);
   sync('#caUrl', `http://${full}/`);
+  $$('[data-guide-proxy]').forEach((el) => (el.textContent = full));
+  $$('[data-guide-url]').forEach((el) => (el.textContent = `http://${full}/`));
   sync('#stAddrFull', full);
   sync('#stAddrKind', `${a.label}${a.iface ? ' · ' + a.iface : ''}`);
   sync(
@@ -318,6 +325,7 @@ function applyAddr() {
       : `手机 Wi-Fi 代理：服务器 ${a.ip}、端口 ${a.port}；证书安装页 http://${full}/`
   );
   renderAddrOptions();
+  if (typeof renderDock === 'function') renderDock();
 }
 
 async function copyAddr(which) {
@@ -947,6 +955,12 @@ function rowHtml(f) {
         ? ''
         : timingBar(f) + `<span class="tmv">${fmtTime(f.duration)}</span>`
     }</span>
+    ${activeExtraCols()
+      .map((c) => {
+        const val = c.render(f);
+        return `<span class="c-xcol ${c.cls || ''}" title="${esc(c.title ? c.title(f) : val)}">${esc(val)}</span>`;
+      })
+      .join('')}
     ${(S.columns || [])
       .map((c) => `<span class="c-dcol" title="${esc(c.name)}">${esc((f.derived || {})[c.id] || '')}</span>`)
       .join('')}
@@ -1708,7 +1722,13 @@ function setFacet(key, value) {
 
 function clearFacet(key) {
   if (key === 'app') S.filter.app = [];
-  else delete S.filter[key];
+  else if (key === 'status' || key === 'mocked') {
+    S.filter.status = '';
+    S.filter.mocked = false;
+    $$('#filters button[data-status], #filters button[data-mocked]').forEach((b) => b.classList.remove('on'));
+    const allBtn = $('#filters button[data-status=""]');
+    if (allBtn) allBtn.classList.add('on');
+  } else delete S.filter[key];
   if (key === 'q') {
     S.filter.q = '';
     const input = $('#search');
@@ -1753,6 +1773,7 @@ const DOCK_KEY = 'reqlite-dock-hidden';
 function applyDock(hidden, persist = true) {
   const dock = $('#dock');
   if (dock) dock.hidden = !!hidden;
+  document.body.classList.toggle('dock-hidden', !!hidden);
   const btn = $('#btnDock');
   if (btn) {
     btn.classList.toggle('on', !hidden);
@@ -1784,6 +1805,18 @@ function renderChips() {
     if (key === 'app' ? !S.filter.app.length : !S.filter[key]) continue;
     parts.push(
       `<span class="chip"><span class="t">${FILTER_LABELS[key]}：${esc(facetDisplay(key, S.filter[key]))}</span><button data-clear="${key}" title="取消">✕</button></span>`
+    );
+  }
+  if (S.filter.status) {
+    const b = $(`#filters button[data-status="${S.filter.status}"]`);
+    const label = b ? b.textContent.replace(/\s*\d+$/, '').trim() : S.filter.status;
+    parts.push(
+      `<span class="chip"><span class="t">筛选：${esc(label)}</span><button data-clear="status" title="取消">✕</button></span>`
+    );
+  }
+  if (S.filter.mocked) {
+    parts.push(
+      `<span class="chip"><span class="t">筛选：Mock</span><button data-clear="mocked" title="取消">✕</button></span>`
     );
   }
   if (S.filter.q) {
@@ -1891,20 +1924,83 @@ const clampNum = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
  * 派生列 .c-dcol 由 applyColumnLayout 动态增删时也不会被误删）。
  * 地址列保持 1fr 弹性吸收剩余：把 method / status / time 拖窄，地址自然变宽，
  * 右侧永不留白。宽度存 localStorage，双击手柄恢复默认。 */
-const LW_KEY = 'reqlite-cols';
-const LW_VAR = { method: '--col-method', status: '--col-status', time: '--col-time' };
-const LW_DEF = { method: 64, status: 42, time: 80 };
-const LW_MIN = { method: 48, status: 36, time: 56 };
-const LW_MAX = { method: 200, status: 160, time: 240 };
-const LW_SPAN = { method: '.c-method', status: '.c-status', time: '.c-time' };
-/* 边界 → 要改的列 + 方向（拖右 dx>0 时边界应右移）：
-   method|url：方法列变宽；url|status：状态列变窄 → 地址变宽；
-   status|time：耗时列变窄 → 地址变宽。 */
-const LW_GRIPS = [
-  { sel: '.c-method', key: 'method', sign: 1 },
-  { sel: '.c-url', key: 'status', sign: -1 },
-  { sel: '.c-status', key: 'time', sign: -1 },
+const XCOLS_KEY = 'reqlite-xcols';
+const XCOLS_DEF = ['size', 'type'];
+function shortMimeType(f) {
+  if (f.ws) return 'WS';
+  if (f.sse) return 'SSE';
+  const ct = String(f.resContentType || '').toLowerCase();
+  if (!ct) return '';
+  if (ct.includes('json')) return 'JSON';
+  if (ct.includes('html')) return 'HTML';
+  if (ct.includes('javascript') || ct.includes('ecmascript')) return 'JS';
+  if (ct.includes('css')) return 'CSS';
+  if (ct.includes('xml')) return 'XML';
+  if (ct.includes('image/')) return 'IMG';
+  if (ct.includes('font/') || ct.includes('woff')) return 'FONT';
+  if (ct.includes('audio/') || ct.includes('video/')) return 'MEDIA';
+  if (ct.includes('text/')) return 'TEXT';
+  if (ct.includes('octet-stream') || ct.includes('protobuf')) return 'BIN';
+  return ct.split(';')[0].split('/').pop().slice(0, 8).toUpperCase();
+}
+function shortProto(f) {
+  if (f.ws) return 'WS';
+  if (f.sse) return 'SSE';
+  const p = (f.protocol || '').toUpperCase();
+  const v = String(f.httpVersion || '');
+  if (v === '2.0' || v === '2' || v === 'h2') return (p || 'HTTPS') + '/2';
+  if (p) return v ? `${p}/${v}` : p;
+  return '';
+}
+
+const EXTRA_COLS = [
+  { key: 'size', label: '大小', def: 72, min: 52, max: 180, cls: 'num', sort: 'size', render: (f) => (f.pending ? '' : fmtSize(f.resSize)) },
+  { key: 'type', label: '类型', def: 62, min: 48, max: 160, cls: 'type', render: (f) => shortMimeType(f), title: (f) => f.resContentType || shortMimeType(f) },
+  { key: 'host', label: '域名', def: 150, min: 80, max: 360, cls: 'mono', render: (f) => f.host || '' },
+  { key: 'app', label: '应用', def: 110, min: 70, max: 240, cls: '', render: (f) => (f.imported ? 'HAR' : f.app || '') },
+  { key: 'proto', label: '协议', def: 76, min: 56, max: 140, cls: 'mono', render: (f) => shortProto(f) },
+  { key: 'clock', label: '时间', def: 76, min: 64, max: 140, cls: 'num', sort: 'time', render: (f) => (f.startTime ? fmtClock(f.startTime) : '') },
+  { key: 'ip', label: '客户端', def: 108, min: 76, max: 200, cls: 'mono', render: (f) => f.clientIp || '' },
 ];
+
+function getEnabledExtraColKeys() {
+  try {
+    const raw = localStorage.getItem(XCOLS_KEY);
+    if (!raw) return [...XCOLS_DEF];
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return arr.filter((k) => EXTRA_COLS.some((c) => c.key === k));
+  } catch (_) {
+    /* ignore */
+  }
+  return [...XCOLS_DEF];
+}
+
+function setEnabledExtraColKeys(keys) {
+  try {
+    localStorage.setItem(XCOLS_KEY, JSON.stringify(keys));
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function activeExtraCols() {
+  const enabled = new Set(getEnabledExtraColKeys());
+  return EXTRA_COLS.filter((c) => enabled.has(c.key));
+}
+
+const LW_KEY = 'reqlite-cols';
+const LW_VAR = { method: '--col-method', url: '--col-url', status: '--col-status', time: '--col-time' };
+const LW_DEF = { method: 64, url: 360, status: 42, time: 80 };
+const LW_MIN = { method: 48, url: 120, status: 36, time: 56 };
+const LW_MAX = { method: 220, url: 1200, status: 200, time: 280 };
+const LW_SPAN = { method: '.c-method', url: '.c-url', status: '.c-status', time: '.c-time' };
+
+function colBounds(key) {
+  if (LW_MIN[key] !== undefined) return { def: LW_DEF[key], min: LW_MIN[key], max: LW_MAX[key] };
+  const xc = EXTRA_COLS.find((c) => c.key === key);
+  if (xc) return { def: xc.def, min: xc.min, max: xc.max };
+  return { def: 96, min: 56, max: 320 };
+}
 
 function colWidths() {
   try {
@@ -1915,16 +2011,40 @@ function colWidths() {
   }
 }
 
-function applyColumnWidths() {
-  const saved = colWidths();
-  for (const k of Object.keys(LW_VAR)) {
-    const v = Number(saved[k]);
-    if (Number.isFinite(v) && v > 0) {
-      document.documentElement.style.setProperty(LW_VAR[k], Math.round(v) + 'px');
-    } else {
-      document.documentElement.style.removeProperty(LW_VAR[k]);
+function colKeyOf(el) {
+  if (!el) return '';
+  if (el.classList.contains('c-method')) return 'method';
+  if (el.classList.contains('c-url')) return 'url';
+  if (el.classList.contains('c-status')) return 'status';
+  if (el.classList.contains('c-time')) return 'time';
+  if (el.dataset.xcol) return el.dataset.xcol;
+  if (el.dataset.dcol) return 'd:' + el.dataset.dcol;
+  return '';
+}
+
+function applyColumnWidths(liveWeights) {
+  const saved = liveWeights || colWidths();
+  const xcols = activeExtraCols();
+  const dcols = S.columns || [];
+  const allDefs = [
+    { key: 'method', def: 64, min: 48 },
+    { key: 'url', def: 360, min: 140 },
+    { key: 'status', def: 46, min: 38 },
+    { key: 'time', def: 82, min: 56 },
+    ...xcols.map((c) => ({ key: c.key, def: c.def, min: c.min })),
+    ...dcols.map((c) => ({ key: 'd:' + c.id, def: 96, min: 56 })),
+  ];
+  const hasCustom = allDefs.some((d) => Number.isFinite(Number(saved[d.key])) && Number(saved[d.key]) > 0);
+  const tracks = allDefs.map((d) => {
+    if (hasCustom) {
+      const w = Number(saved[d.key]);
+      const weight = Number.isFinite(w) && w > 0 ? w : d.def;
+      return `minmax(${d.min}px, ${weight.toFixed(2)}fr)`;
     }
-  }
+    if (d.key === 'url') return `minmax(${d.min}px, 1fr)`;
+    return `calc(${d.def}px * var(--ui-scale))`;
+  });
+  document.documentElement.style.setProperty('--list-cols', tracks.join(' '));
 }
 
 function writeColWidths(p) {
@@ -1935,39 +2055,123 @@ function writeColWidths(p) {
   }
 }
 
+function ensureGrip(span, key) {
+  if (!span || span.querySelector('.col-grip')) return;
+  const grip = document.createElement('span');
+  grip.className = 'col-grip';
+  grip.dataset.key = key;
+  grip.title = '左右拖动调整相邻列宽 · 双击恢复默认';
+  grip.setAttribute('role', 'separator');
+  grip.setAttribute('aria-label', '调整列宽');
+  grip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  });
+  span.appendChild(grip);
+}
+
+function syncHeaderGrips() {
+  const head = document.querySelector('.listhead');
+  if (!head) return;
+  const cells = [...head.children];
+  cells.forEach((el, idx) => {
+    const old = el.querySelector('.col-grip');
+    if (old) old.remove();
+    // 最后一列贴着右边框，不放右边界手柄；每根手柄都严格控制「左列 | 右列」
+    if (idx < cells.length - 1) {
+      const k = colKeyOf(el);
+      if (k) ensureGrip(el, k);
+    }
+  });
+}
+
+function renderListHeaderCols() {
+  const head = $('.listhead');
+  if (!head) return;
+  head.querySelectorAll('.c-xcol, .c-dcol').forEach((el) => el.remove());
+  for (const c of activeExtraCols()) {
+    const span = document.createElement('span');
+    span.className = `c-xcol ${c.cls || ''}${c.sort ? ' lh-sort' : ''}`;
+    span.dataset.xcol = c.key;
+    if (c.sort) {
+      span.dataset.sort = c.sort;
+      span.setAttribute('role', 'button');
+      span.tabIndex = 0;
+      span.title = `按${c.label}排序`;
+      span.innerHTML = `${esc(c.label)}<b class="sort-ind"></b>`;
+    } else {
+      span.textContent = c.label;
+    }
+    head.appendChild(span);
+  }
+  for (const c of S.columns || []) {
+    const span = document.createElement('span');
+    span.className = 'c-dcol';
+    span.dataset.dcol = c.id;
+    span.title = c.path || '';
+    span.textContent = c.name;
+    head.appendChild(span);
+  }
+  syncHeaderGrips();
+  applyColumnWidths();
+  if (typeof syncSortUi === 'function') syncSortUi();
+}
+
+function renderColPicker() {
+  const menu = $('#colPickerMenu');
+  if (!menu) return;
+  const enabled = new Set(getEnabledExtraColKeys());
+  const dcount = (S.columns || []).length;
+  menu.innerHTML =
+    '<div class="more-head">显示列（可拖动表头调宽）</div>' +
+    EXTRA_COLS.map(
+      (c) => `<label class="cp-item"><input type="checkbox" data-cp-key="${c.key}" ${enabled.has(c.key) ? 'checked' : ''} /><span>${esc(c.label)}</span>${c.sort ? '<em>可排序</em>' : ''}</label>`
+    ).join('') +
+    '<div class="cp-sep"></div>' +
+    `<button type="button" class="cp-act" data-cp-act="derived">自定义派生列…${dcount ? ` (${dcount})` : ''}</button>` +
+    '<button type="button" class="cp-act" data-cp-act="reset">恢复默认列与宽度</button>';
+}
+
+function openColPicker(anchorX, anchorY) {
+  const menu = $('#colPickerMenu');
+  const btn = $('#btnColPicker');
+  if (!menu) return;
+  renderColPicker();
+  menu.hidden = false;
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  const w = menu.offsetWidth || 210;
+  const h = menu.offsetHeight || 280;
+  let left = anchorX;
+  let top = anchorY;
+  if (left === undefined || top === undefined) {
+    const r = btn.getBoundingClientRect();
+    left = r.right - w;
+    top = r.bottom + 6;
+  }
+  menu.style.left = Math.max(8, Math.min(left, window.innerWidth - w - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(top, window.innerHeight - h - 8)) + 'px';
+}
+
 function bindColumnResizers() {
   const head = document.querySelector('.listhead');
   if (!head) return;
-  for (const g of LW_GRIPS) {
-    const span = head.querySelector(g.sel);
-    if (!span || span.querySelector('.col-grip')) continue;
-    const grip = document.createElement('span');
-    grip.className = 'col-grip';
-    grip.dataset.key = g.key;
-    grip.dataset.sign = String(g.sign);
-    grip.title = '左右拖动调整列宽 · 双击恢复默认';
-    grip.setAttribute('role', 'separator');
-    grip.setAttribute('aria-label', '调整列宽');
-    /* 点一下手柄不该冒泡成「点表头排序」；capture 与冒泡都拦住 */
-    grip.addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-    });
-    span.appendChild(grip);
-  }
+  renderListHeaderCols();
 
   let active = null;
   head.addEventListener('pointerdown', (e) => {
     const grip = e.target.closest && e.target.closest('.col-grip');
-    if (!grip || e.button !== 0 || NARROW.matches) return;
-    const key = grip.dataset.key;
-    const target = head.querySelector(LW_SPAN[key]);
-    const startW = target ? target.getBoundingClientRect().width : LW_DEF[key];
-    active = { grip, key, sign: Number(grip.dataset.sign), startX: e.clientX, startW, lastW: startW };
+    if (!grip || e.button !== 0 || window.innerWidth <= 520) return;
+    const cells = [...head.children];
+    const idx = cells.indexOf(grip.parentElement);
+    if (idx < 0 || idx >= cells.length - 1) return;
+    const keys = cells.map((el) => colKeyOf(el));
+    const startWs = cells.map((el) => el.getBoundingClientRect().width);
+    const mins = keys.map((k) => colBounds(k).min);
+    active = { grip, idx, keys, startWs, mins, startX: e.clientX, lastWeights: null };
     try {
       grip.setPointerCapture(e.pointerId);
     } catch (_) {
-      /* 老浏览器靠 head 上的 pointerup 兜底 */
+      /* 老浏览器靠 window 上的 pointerup 兜底 */
     }
     grip.classList.add('dragging');
     document.body.classList.add('col-resizing');
@@ -1975,12 +2179,42 @@ function bindColumnResizers() {
     e.stopPropagation();
   });
 
-  head.addEventListener('pointermove', (e) => {
+  window.addEventListener('pointermove', (e) => {
     if (!active) return;
-    const dx = e.clientX - active.startX;
-    const w = clampNum(active.startW + active.sign * dx, LW_MIN[active.key], LW_MAX[active.key]);
-    active.lastW = w;
-    document.documentElement.style.setProperty(LW_VAR[active.key], Math.round(w) + 'px');
+    const { idx, keys, startWs, mins, startX } = active;
+    const dx = e.clientX - startX;
+    const nextWs = [...startWs];
+    if (dx > 0) {
+      // 往右拖：左列 idx 变宽，优先从紧邻右列 idx+1 扣除，不足时顺次向右侧列让位，左侧列不动
+      let remain = dx;
+      let taken = 0;
+      for (let j = idx + 1; j < nextWs.length && remain > 0; j++) {
+        const avail = Math.max(0, nextWs[j] - mins[j]);
+        const cut = Math.min(avail, remain);
+        nextWs[j] -= cut;
+        remain -= cut;
+        taken += cut;
+      }
+      nextWs[idx] += taken;
+    } else if (dx < 0) {
+      // 往左拖：紧邻右列 idx+1 变宽，优先从左列 idx 扣除，不足时顺次向左侧列让位，右侧列不动
+      let remain = -dx;
+      let taken = 0;
+      for (let j = idx; j >= 0 && remain > 0; j--) {
+        const avail = Math.max(0, nextWs[j] - mins[j]);
+        const cut = Math.min(avail, remain);
+        nextWs[j] -= cut;
+        remain -= cut;
+        taken += cut;
+      }
+      nextWs[idx + 1] += taken;
+    }
+    const weights = {};
+    keys.forEach((k, i) => {
+      if (k) weights[k] = nextWs[i];
+    });
+    active.lastWeights = weights;
+    applyColumnWidths(weights);
   });
 
   const finish = () => {
@@ -1989,24 +2223,68 @@ function bindColumnResizers() {
     active = null;
     a.grip.classList.remove('dragging');
     document.body.classList.remove('col-resizing');
-    const p = colWidths();
-    p[a.key] = Math.round(a.lastW);
-    writeColWidths(p);
+    if (a.lastWeights) {
+      const merged = { ...colWidths(), ...a.lastWeights };
+      writeColWidths(merged);
+    }
   };
-  head.addEventListener('pointerup', finish);
-  head.addEventListener('pointercancel', finish);
+  window.addEventListener('pointerup', finish);
+  window.addEventListener('pointercancel', finish);
   head.addEventListener('lostpointercapture', finish, true);
 
   head.addEventListener('dblclick', (e) => {
     const grip = e.target.closest && e.target.closest('.col-grip');
     if (!grip) return;
-    const key = grip.dataset.key;
-    document.documentElement.style.removeProperty(LW_VAR[key]);
-    const p = colWidths();
-    delete p[key];
-    writeColWidths(p);
+    writeColWidths({});
+    applyColumnWidths({});
+    toast('已恢复默认列宽');
     e.preventDefault();
     e.stopPropagation();
+  });
+
+  // 右键表头直接弹出「显示列」菜单
+  head.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openColPicker(e.clientX, e.clientY);
+  });
+
+  $('#btnColPicker')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = $('#colPickerMenu');
+    if (!menu) return;
+    if (menu.hidden) openColPicker();
+    else {
+      menu.hidden = true;
+      $('#btnColPicker')?.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  $('#colPickerMenu')?.addEventListener('change', (e) => {
+    const cb = e.target.closest('input[data-cp-key]');
+    if (!cb) return;
+    const cur = new Set(getEnabledExtraColKeys());
+    if (cb.checked) cur.add(cb.dataset.cpKey);
+    else cur.delete(cb.dataset.cpKey);
+    setEnabledExtraColKeys(EXTRA_COLS.map((c) => c.key).filter((k) => cur.has(k)));
+    renderListHeaderCols();
+    renderList();
+  });
+
+  $('#colPickerMenu')?.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-cp-act]');
+    if (!act) return;
+    const menu = $('#colPickerMenu');
+    if (menu) menu.hidden = true;
+    $('#btnColPicker')?.setAttribute('aria-expanded', 'false');
+    if (act.dataset.cpAct === 'derived') {
+      openColsPanel();
+    } else if (act.dataset.cpAct === 'reset') {
+      setEnabledExtraColKeys([...XCOLS_DEF]);
+      writeColWidths({});
+      renderListHeaderCols();
+      renderList();
+      toast('已恢复默认列与宽度');
+    }
   });
 }
 
@@ -2304,7 +2582,6 @@ async function selectFlow(id) {
     const rec = S.tlsFailures.find((f) => f.host === host);
     if (!rec) return;
     S.selected = { kind: 'tls', ...rec };
-    S.detailTab = 'overview';
     S.detailSearch = '';
     S.detailUrlOpen = false;
     renderDetail();
@@ -2318,7 +2595,9 @@ async function selectFlow(id) {
         : '/api/flows/' + id
     );
     S.selected = flow;
-    S.detailTab = 'overview';
+    // 切换请求时保留当前页签（如「响应」「请求」），仅在新请求不支持该页签时回退到「概览」
+    if (S.detailTab === 'messages' && !hasMessages(flow)) S.detailTab = 'overview';
+    if (S.detailTab === 'diff' && !compareBaseIdFor(flow)) S.detailTab = 'overview';
     S.detailSearch = '';
     S.detailUrlOpen = false;
     renderDetail();
@@ -2357,16 +2636,38 @@ function headersKv(headers, side) {
     .join('')}</dl>`;
 }
 
-/** 请求头/响应头区块：行 hover 复制 + 复制全部（k: v）/ 复制 JSON */
+const SEC_FOLD_KEY = 'reqlite-sec-fold';
+function loadSecFold() {
+  const def = { 'req-head': false, 'req-body': false, 'res-head': true, 'res-body': false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SEC_FOLD_KEY) || '{}');
+    if (saved && typeof saved === 'object') return { ...def, ...saved };
+  } catch (_) {
+    /* ignore */
+  }
+  return def;
+}
+function saveSecFold(map) {
+  try {
+    localStorage.setItem(SEC_FOLD_KEY, JSON.stringify(map));
+  } catch (_) {
+    /* ignore */
+  }
+}
+S.secFold = loadSecFold();
+
+/** 请求头/响应头区块：支持点击顶栏折叠 + 行 hover 复制 + 复制全部 / 复制 JSON */
 function headerSec(title, headers, side, cls = '') {
   const n = Object.keys(headers || {}).length;
+  const foldKey = `${side}-head`;
+  const collapsed = !!(S.secFold && S.secFold[foldKey]);
   const tools = n
     ? `<span class="body-tools">
         <button class="body-tool" data-hd-copy="${side}" title="按行复制全部（每行 name: value）">复制全部</button>
         <button class="body-tool" data-hd-json="${side}" title="复制为 JSON 对象">复制 JSON</button>
       </span>`
     : '';
-  return `<div class="sec${cls ? ' ' + cls : ''}"><div class="sec-head">${esc(title)} <span class="hint">${n} 项</span>${tools}<span class="fill"></span></div>${headersKv(headers, side)}</div>`;
+  return `<div class="sec sec-card${cls ? ' ' + cls : ''}${collapsed ? ' collapsed' : ''}" data-sec-fold="${foldKey}"><div class="sec-head sec-foldable" data-fold-toggle="${foldKey}" title="点击展开 / 收起"><span class="sec-caret" aria-hidden="true"></span><span class="sec-title">${esc(title)}</span><span class="sec-badge">${n} 项</span><span class="spacer"></span>${tools}</div><div class="sec-scroll">${headersKv(headers, side)}</div></div>`;
 }
 
 /** 请求 / 响应页：头部与正文之间一条可上下拖的线，把高度分给更关心的那半 */
@@ -2498,29 +2799,41 @@ function renderDetail() {
   pane.innerHTML = `
     <div class="dhead">
       <div class="dline">
-        <span class="dmethod">${esc(f.method)}</span>
-        <span class="durl${S.detailUrlOpen ? '' : ' clamp2'}" id="detailUrl">${urlHtml(f)}</span>
-        <span class="dhead-actions">
-          <button type="button" class="btn icon ghost" id="detailUrlMore" hidden
-            title="展开完整 URL" aria-label="展开完整 URL" aria-expanded="false">▾</button>
-          <button type="button" class="btn icon ghost" id="copyUrl" title="复制完整 URL" aria-label="复制完整 URL">⧉</button>
-          <button type="button" class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
-        </span>
+        <div class="durl-box">
+          <span class="dmethod m ${esc(f.method)}">${esc(f.method)}</span>
+          <span class="durl${S.detailUrlOpen ? '' : ' clamp2'}" id="detailUrl">${urlHtml(f)}</span>
+          <span class="dhead-actions">
+            <button type="button" class="btn icon ghost" id="detailUrlMore" hidden
+              title="展开完整 URL" aria-label="展开完整 URL" aria-expanded="false">▾</button>
+            <button type="button" class="btn icon ghost" id="copyUrl" title="复制完整 URL" aria-label="复制完整 URL">⧉</button>
+          </span>
+        </div>
+        <button type="button" class="btn icon ghost dclose" id="detailClose" title="关闭详情，让列表占满宽度" aria-label="关闭详情">✕</button>
       </div>
       <div class="dmeta">
-        <span class="st ${statusClass(f.status)}">${esc(f.error ? 'ERR' : f.status || '—')} ${esc(f.statusText || '')}</span>
-        <span>耗时 <b>${fmtTime(f.duration)}</b></span>
-        <span>请求 <b>${fmtSize(f.reqSize)}</b> / 响应 <b>${fmtSize(f.resSize)}</b></span>
-        <span>${fmtClock(f.ts)}</span>
-        ${f.mocked ? '<span class="tag mock">MOCK</span>' : ''}
-        ${f.replayOf ? '<span class="tag replay">REPLAY</span>' : ''}
-        ${f.mapped ? `<span class="tag mapped" title="这条请求被域名映射改发到 ${esc(f.mapped)}">→ ${esc(f.mapped)}</span>` : ''}
+        <span class="dmeta-stats">
+          <span class="st ${statusClass(f.status)}">${esc(f.error ? 'ERR' : f.status || '—')} ${esc(f.statusText || '')}</span>
+          <span class="dmeta-chip">耗时 <b>${fmtTime(f.duration)}</b></span>
+          <span class="dmeta-chip">↑ <b>${fmtSize(f.reqSize)}</b> · ↓ <b>${fmtSize(f.resSize)}</b></span>
+          <span class="dmeta-chip">${fmtClock(f.ts)}</span>
+          ${f.mocked ? '<span class="tag mock">MOCK</span>' : ''}
+          ${f.replayOf ? '<span class="tag replay">REPLAY</span>' : ''}
+          ${f.mapped ? `<span class="tag mapped" title="这条请求被域名映射改发到 ${esc(f.mapped)}">→ ${esc(f.mapped)}</span>` : ''}
+        </span>
         <span class="dactions">
           ${f.tunneled ? `<button class="btn" id="actDecryptHost" title="只解密这一个域名：加入解密范围，之后重开 App 就能看到明文">解密这个域名</button>` : ''}
           ${f.tunneled && f.app ? `<button class="btn ghost" id="actDecryptApp" title="把这个应用的所有域名都解密">解密 ${esc(String(f.app).slice(0, 12))}</button>` : ''}
-          <button class="btn" id="actReplay">重放</button>
-          <button class="btn" id="actMock">Mock 此请求</button>
-          <button class="btn ghost" id="actStar" title="收藏这条请求的「应用 + 接口」，下次一点就筛回来">☆ 收藏</button>
+          <button class="btn dact-btn" id="actReplay" title="编辑并重新发送这条请求">
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.3-3.4M13 2.5v2.6h-2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>重放</span>
+          </button>
+          <button class="btn dact-btn dact-mock" id="actMock" title="用这条请求快速创建一条 Mock 规则">
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 5h4.2L9 11h5M9 5h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11.5" cy="11" r="1.4" fill="currentColor"/></svg>
+            <span>Mock</span>
+          </button>
+          <button class="btn icon ghost dact-star" id="actStar" title="收藏这条请求的「应用 + 接口」，下次一点就筛回来" aria-label="收藏">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="m8 2.2 1.8 3.6 4 .6-2.9 2.8.7 4L8 11.3 4.4 13.2l.7-4-2.9-2.8 4-.6L8 2.2Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          </button>
           <div class="more-wrap" id="flowMoreWrap">
             <button class="btn icon ghost" id="btnFlowMore" title="更多操作" aria-haspopup="true"
               aria-expanded="false" aria-label="更多操作">⋯</button>
@@ -2545,10 +2858,14 @@ function renderDetail() {
           .join('')}
         <span class="spacer"></span>
         <span class="dsearch">
-          <input id="detailSearch" class="input tiny" placeholder="在详情里搜索" value="${esc(S.detailSearch)}" spellcheck="false" />
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M11.7 10.3a6 6 0 1 0-1.4 1.4l3 3a1 1 0 0 0 1.4-1.4l-3-3ZM7 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" fill="currentColor"/></svg>
+          <input id="detailSearch" class="dsearch-input" placeholder="搜详情…" value="${esc(S.detailSearch)}" spellcheck="false" />
           <span class="dsearch-count" id="detailSearchCount"></span>
         </span>
-        <button data-tab="copy-body" class="hint">复制响应体</button>
+        <button data-tab="copy-body" class="dcopy-body" title="一键复制完整响应体">
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 4V3.3A1.8 1.8 0 0 0 8.7 1.5H3.3A1.8 1.8 0 0 0 1.5 3.3v5.4a1.8 1.8 0 0 0 1.8 1.8H4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span>复制响应体</span>
+        </button>
       </div>
     </div>
     <div class="dbody${splitTab ? ' can-split' : ''}">${bodyHtml}</div>`;
@@ -2591,8 +2908,7 @@ function renderDetail() {
       const list = Array.from(new Set([...(ms[key] || []), v]));
       await api('/api/config', { method: 'PUT', body: { mitmScope: { ...ms, mode: 'list', [key]: list } } });
       toast(kind === 'app' ? `已把 ${v} 加入解密范围，重开这个应用后生效` : `已把 ${v} 加入解密范围，重开这个 App 后生效`);
-      S.selected = null;
-      renderDetail();
+      closeDetail();
       renderList();
     } catch (err) {
       toast('操作失败：' + err.message);
@@ -2635,10 +2951,7 @@ function renderDetail() {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
     if (btn.dataset.tab === 'copy-body') {
-      navigator.clipboard
-        .writeText(f.resBody || '')
-        .then(() => toast('响应体已复制'))
-        .catch(() => toast('复制失败'));
+      copyText(f.resBody || '', '响应体已复制');
       return;
     }
     S.detailTab = btn.dataset.tab;
@@ -2666,6 +2979,35 @@ function renderDetail() {
 
   if (splitTab) bindDetailSplit(pane);
 
+  // 点击请求头 / 请求体 / 响应头 / 响应体顶栏折叠/展开（点内部按钮不触发）
+  pane.querySelectorAll('[data-fold-toggle]').forEach((head) => {
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('button, a, input, select')) return;
+      const key = head.dataset.foldToggle;
+      if (!key) return;
+      const card = head.closest('.sec-card');
+      if (card && card.classList.contains('body-fs')) return;
+      const next = !S.secFold[key];
+      S.secFold[key] = next;
+      saveSecFold(S.secFold);
+      if (card) card.classList.toggle('collapsed', next);
+      const dbody = pane.querySelector('.dbody.can-split');
+      if (dbody) {
+        const top = dbody.querySelector('.split-top');
+        const bot = dbody.querySelector('.split-bottom');
+        dbody.classList.toggle('top-collapsed', !!(top && top.classList.contains('collapsed')));
+        dbody.classList.toggle('bot-collapsed', !!(bot && bot.classList.contains('collapsed')));
+      }
+    });
+  });
+  const dbodyEl = pane.querySelector('.dbody.can-split');
+  if (dbodyEl) {
+    const top = dbodyEl.querySelector('.split-top');
+    const bot = dbodyEl.querySelector('.split-bottom');
+    dbodyEl.classList.toggle('top-collapsed', !!(top && top.classList.contains('collapsed')));
+    dbodyEl.classList.toggle('bot-collapsed', !!(bot && bot.classList.contains('collapsed')));
+  }
+
   $('#actReplay')?.addEventListener('click', openReplay);
   $('#actMock')?.addEventListener('click', () => openQuickMock(f));
   $('#actBreak')?.addEventListener('click', () => breakThisFlow(f));
@@ -2674,10 +3016,7 @@ function renderDetail() {
   $('#actNet')?.addEventListener('click', (e) => openFlowNetMenu(e, f));
   $('#actStar')?.addEventListener('click', () => bookmarkFlow(f));
   $('#actCurl')?.addEventListener('click', () => {
-    navigator.clipboard
-      .writeText(toCurl(f))
-      .then(() => toast('cURL 已复制'))
-      .catch(() => toast('复制失败'));
+    copyText(toCurl(f), 'cURL 已复制');
   });
 
   if (f.replayOf) {
@@ -2813,7 +3152,22 @@ function tabOverview(f) {
   if (f.replayOf)
     notice += `<div class="notice">重放自 <a href="#" data-goto="${f.replayOf}">原请求</a>。</div>`;
   if (f.note) notice += `<div class="notice">${esc(f.note)}</div>`;
-  return notice + `<div class="sec">${kv(rows)}</div>`;
+  const protoVal = f.ws
+    ? 'WebSocket'
+    : f.sse
+    ? 'SSE'
+    : /^HTTP\/2/i.test(f.httpVersion || '')
+    ? 'HTTPS · HTTP/2'
+    : f.tunneled
+    ? 'HTTPS 透传'
+    : (f.scheme || 'HTTP').toUpperCase();
+  const cards = `<div class="dov-cards">
+    <div class="dov-stat"><span>状态</span><b class="st-val ${statusClass(f.status)}">${esc(f.error ? 'ERR' : f.status || '—')}</b></div>
+    <div class="dov-stat"><span>耗时</span><b>${fmtTime(f.duration)}</b></div>
+    <div class="dov-stat"><span>传输</span><b>${fmtSize((f.reqSize || 0) + (f.resSize || 0))}</b></div>
+    <div class="dov-stat"><span>协议</span><b>${esc(protoVal)}</b></div>
+  </div>`;
+  return notice + cards + `<div class="sec dov-card">${kv(rows)}</div>`;
 }
 
 /* ------------------------------------------------------- 分阶段耗时 */
@@ -3260,22 +3614,35 @@ function bodySection(title, sizeLabel, body, contentType, kind, bin, cls = '') {
     }
   } else if (!raw) view = '<p class="hint">（无内容）</p>';
   else if (mode === 'pretty' && json && JE()) {
-    // 结构化 = 格式化 + 树一体：展开时是着色的格式化文本，点 ▸ 收起该层
-    const fold = JE().foldHtml(prettyText);
+    // 大于 200KB 的 JSON 跳过递归树节点生成，避免万级 DOM 节点卡住主线程
+    const fold = prettyText.length <= 200000 ? JE().foldHtml(prettyText) : '';
+    const bigNote =
+      prettyText.length > 200000
+        ? '<p class="hint bin-note">响应体较大，已切换为纯文本高亮展示以保持流畅。</p>'
+        : '';
     view = fold
       ? `<div class="body-view json-fold" data-json="1">${fold}</div>`
-      : `<pre class="code-block body-view" data-json="1">${JE().colorize(prettyText)}</pre>`;
+      : `${bigNote}<pre class="code-block body-view" data-json="1">${prettyText.length <= 400000 ? JE().colorize(prettyText) : esc(prettyText)}</pre>`;
   } else {
     const text = mode === 'raw' ? raw : prettyText;
     const inner = json && mode === 'pretty' && JE() ? JE().colorize(text) : esc(text);
     view = `<pre class="code-block body-view" data-json="${json ? 1 : 0}">${inner}</pre>`;
   }
   const lineCount = !bin && raw ? (mode === 'raw' ? raw : prettyText).split('\n').length : 0;
-  const head = `${esc(title)} <span class="hint">${esc(sizeLabel)}${lineCount ? ` · ${lineCount} 行` : ''}</span>${tools}<span class="fill"></span>`;
-  return `<div class="sec${cls ? ' ' + cls : ''}${fs ? ' body-fs' : ''}">
-    <div class="sec-head">${head}</div>
-    <div class="tabs sec-tabs">${modeTabs}</div>
-    ${view}</div>`;
+  const metaText = `${sizeLabel}${lineCount ? ` · ${lineCount} 行` : ''}`;
+  const foldKey = kind === 'request' ? 'req-body' : 'res-body';
+  const collapsed = !fs && !!(S.secFold && S.secFold[foldKey]);
+  return `<div class="sec sec-card${cls ? ' ' + cls : ''}${fs ? ' body-fs' : ''}${collapsed ? ' collapsed' : ''}" data-sec-fold="${foldKey}">
+    <div class="sec-head sec-head-body sec-foldable" data-fold-toggle="${foldKey}" title="点击展开 / 收起">
+      <span class="sec-caret" aria-hidden="true"></span>
+      <span class="sec-title">${esc(title)}</span>
+      <span class="sec-badge">${esc(metaText)}</span>
+      <div class="tabs sec-tabs">${modeTabs}</div>
+      <span class="spacer"></span>
+      ${tools}
+    </div>
+    <div class="sec-scroll sec-scroll-body">${view}</div>
+  </div>`;
 }
 
 function tabRequest(f) {
@@ -3630,13 +3997,20 @@ function openModal(id) {
   if (first) setTimeout(() => first.focus({ preventScroll: true }), 0);
 }
 
+function requestCloseModals() {
+  if (!$('#modalRules').hidden && S.ruleTabs.some((t) => t.dirty)) {
+    if (!confirm(netTr('还有未保存的规则标签，确定关闭工作区？'))) return false;
+  }
+  return closeModals();
+}
+
 function closeModals() {
   // 引导弹窗不管从哪条路关掉（✕ / 遮罩 / Esc / 开始使用）都算看过，只弹一次
   if (!$('#modalWelcome').hidden) markOnboarded();
   // 令牌明文只活到「关掉设置」为止：再打开时不该还能看到
   hideMcpSecret();
-  // 设置是自动保存的：关窗前把还没到 debounce 时间的改动落下去，避免「点了 ✕ 就等于没改」
-  if (!$('#modalSettings').hidden && settingsDirty) flushSettingsSave();
+  // 设置与证书弹窗都是自动保存的：关窗前把还没到 debounce 时间的改动落下去，避免「点了 ✕ 就等于没改」
+  if ((!$('#modalSettings').hidden || ($('#modalCert') && !$('#modalCert').hidden)) && settingsDirty) flushSettingsSave();
   // 网络面板同理；只在真的编辑过时 flush，避免从没打开过的空面板把规则清空
   if (!$('#modalNetwork').hidden && netDirty) {
     clearTimeout(netTimer);
@@ -3646,6 +4020,15 @@ function closeModals() {
   if (!$('#modalBreak').hidden) {
     clearTimeout(bpTimer);
     putBreak();
+  }
+  // 域名映射面板同理，关窗前 flush
+  if (!$('#modalMap').hidden) {
+    clearTimeout(mapTimer);
+    putMap();
+  }
+  // 断点拦下弹窗关闭时清掉 holdCurrent，避免再次点「断点」被同 id 拦截而 60 秒打不开
+  if (!$('#modalHold').hidden) {
+    S.holdCurrent = null;
   }
   $$('.modal').forEach((m) => (m.hidden = true));
   closeAllPopups();
@@ -3657,6 +4040,7 @@ function closeModals() {
     }
   }
   lastModalFocus = null;
+  return true;
 }
 
 /* ------------------------------------------------------------ 首启引导 */
@@ -4683,18 +5067,7 @@ async function loadColumns() {
 function applyColumnLayout() {
   const n = (S.columns || []).length;
   document.documentElement.style.setProperty('--dcols', String(n));
-  // 表头列直接追加在「耗时」后面：多包一层容器会让「表头与行对齐」的检查多算一个子元素
-  const head = $('.listhead');
-  if (head) {
-    head.querySelectorAll('.c-dcol').forEach((el) => el.remove());
-    for (const c of S.columns || []) {
-      const span = document.createElement('span');
-      span.className = 'c-dcol';
-      span.title = c.path || '';
-      span.textContent = c.name;
-      head.appendChild(span);
-    }
-  }
+  renderListHeaderCols();
   const badge = $('#colCount');
   if (badge) {
     badge.hidden = n === 0;
@@ -6525,7 +6898,7 @@ function renderTreeNode(nodes, depth, q, parentPath) {
         }" data-path="${esc(n.path)}" data-type="rule" data-id="${esc(n.rule.id)}" data-name="${esc(
           n.name
         )}" title="${esc(n.path)}" tabindex="0" role="treeitem" aria-selected="${active}" style="--d:${depth}" draggable="true">
-          <span class="rt-icon ${n.rule.enabled ? 'on' : 'off'}">${n.rule.enabled ? '◉' : '○'}</span>
+          <button type="button" class="rt-icon rt-toggle ${n.rule.enabled ? 'on' : 'off'}" data-rt-toggle="${esc(n.rule.id)}" title="${n.rule.enabled ? '已启用，点击停用' : '已停用，点击启用'}" aria-label="${n.rule.enabled ? '停用规则' : '启用规则'}">${n.rule.enabled ? '◉' : '○'}</button>
           ${
             renaming
               ? nameHTML
@@ -6599,6 +6972,28 @@ function bindTreeEvents(box) {
 
   box.onclick = async (e) => {
     if (e.target.closest('[data-tree-input]')) return; /* 输入框内的点击不触发选中 */
+    const tog = e.target.closest('[data-rt-toggle]');
+    if (tog) {
+      e.stopPropagation();
+      const id = tog.dataset.rtToggle;
+      const rule = S.rules.find((r) => r.id === id);
+      if (!rule) return;
+      const next = !rule.enabled;
+      try {
+        await api('/api/rules/' + id, { method: 'PUT', body: { enabled: next } });
+        const curTab = currentRuleTab();
+        if (curTab && curTab.id === id) {
+          curTab.data.enabled = next;
+          const cb = $('#ruEnabled');
+          if (cb) cb.checked = next;
+        }
+        await loadRules();
+        toast(next ? `已启用「${rule.name || '未命名规则'}」` : `已停用「${rule.name || '未命名规则'}」`);
+      } catch (err) {
+        toast('操作失败: ' + err.message);
+      }
+      return;
+    }
     const caret = e.target.closest('[data-caret]');
     if (caret) {
       const p = caret.getAttribute('data-caret');
@@ -7376,9 +7771,7 @@ async function toggleLocalProxy() {
 /* ------------------------------------- 控制坞（系统代理 / Mock / 弱网 / 抓包） */
 
 function dockLanAddr() {
-  const st = S.status || {};
-  const lan = Array.isArray(st.lan) && st.lan.length ? st.lan[0] : '127.0.0.1';
-  return `${lan}:${st.proxyPort || '—'}`;
+  return addrFull(currentAddr());
 }
 
 /** 控制坞只读 S 里已有的状态重绘，不自己发请求；数据变化点各自负责调用 */
@@ -7399,10 +7792,17 @@ function renderDock() {
     ? '点击释放本机系统代理'
     : '点击接管本机系统代理';
 
-  // Mock 总开关：徽章 = 已启用规则数
+  // Mock 总开关：徽章 = 已启用规则数；顶栏「规则」按钮同步反映暂停态（收起控制坞时也看得见）
   const mockOn = S.mockEnabled !== false;
   const mockEnabledRules = (S.rules || []).filter((r) => r.enabled !== false).length;
   $('#dockMock').classList.toggle('on', mockOn);
+  const btnRules = $('#btnRules');
+  if (btnRules) {
+    btnRules.classList.toggle('mock-off', !mockOn);
+    btnRules.title = mockOn ? '打开 Mock 规则工作区' : 'Mock 总开关已暂停（可在规则弹窗或底栏重新开启）';
+  }
+  const wsMockSw = $('#wsMockEnabled');
+  if (wsMockSw) wsMockSw.checked = mockOn;
   const mb = $('#dockMockCount');
   mb.hidden = !mockOn || mockEnabledRules === 0;
   mb.textContent = String(mockEnabledRules);
@@ -7424,6 +7824,7 @@ function renderDock() {
   const paused = st.capture === false;
   $('#dockPause').classList.toggle('paused', paused);
   $('#dockPauseText').textContent = paused ? '继续' : '暂停';
+  if (typeof syncRailBadges === 'function') syncRailBadges();
 }
 
 function bindDock() {
@@ -8004,7 +8405,7 @@ async function renderDiskUsage() {
   }
 }
 
-async function openSettings() {
+async function hydrateSettingsData() {
   // 打开时用服务端值覆盖输入框；直接赋值不触发 input，不会误判成用户改动
   hideMcpSecret();
   S.mcpEditing = '';
@@ -8055,7 +8456,25 @@ async function openSettings() {
     `版本        : iReq ${st.version || ''}`,
   ].join('\n');
   applyAddr();
+}
+
+function selectSettingsTab(tab) {
+  const key = tab || 'general';
+  $$('#stNav .st-nav-item').forEach((b) => b.classList.toggle('on', b.dataset.stTab === key));
+  $$('#modalSettings .st-panel').forEach((p) => p.classList.toggle('on', p.dataset.stPanel === key));
+}
+
+async function openSettings(tab) {
+  await hydrateSettingsData();
+  if (tab) selectSettingsTab(tab);
   openModal('#modalSettings');
+}
+
+async function openCertModal(step) {
+  await hydrateSettingsData();
+  void loadCaStatus();
+  openModal('#modalCert');
+  if (step) focusConnectStep(step);
 }
 
 /* ---------------------------------------------------------------- 全局快捷键
@@ -8108,6 +8527,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
+    // 浮层（更多菜单 / 右键菜单 / 命令面板 / 详情⋯菜单）开着时，优先只关浮层，不顺带关掉详情面板
+    if (closeAllPopups()) {
+      e.preventDefault();
+      return;
+    }
     // 详情里还有别的「全屏 / 编辑器」上下文时，Esc 先交给它们（各面板自己有处理器），
     // 否则这里一关详情，后面的操作就没对象了
     if (document.querySelector('#detail .body-fs, .dbody .fullscreen, #ruBodyWrap.fullscreen')) return;
@@ -8396,6 +8820,8 @@ function bind() {
     'scroll',
     () => {
       const list = $('#list');
+      const head = $('.listhead');
+      if (head && head.scrollLeft !== list.scrollLeft) head.scrollLeft = list.scrollLeft;
       if (list.scrollHeight - list.scrollTop - list.clientHeight <= PAGE_PREFETCH_PX) {
         loadMoreFlows();
       }
@@ -8427,8 +8853,8 @@ function bind() {
     S.filter.status = btn.dataset.status || '';
     S.filter.mocked = btn.dataset.mocked === '1';
     syncFilterMore();
-    if (S.filter.status === 'tls' || S.filter.status === 'error' || S.filter.mocked)
-      toggleMoreMenu('filter', false);
+    renderChips();
+    if (btn.closest('#filterMoreMenu')) toggleMoreMenu('filter', false);
     // 握手失败是连接层诊断，不在 flow store 里，后端不认这个筛选值
     if (S.filter.status === 'tls') {
       renderList();
@@ -8552,7 +8978,7 @@ function bind() {
     }
   });
   bindConnectSteps();
-  $('#localChip').addEventListener('click', openSettings);
+  $('#localChip').addEventListener('click', () => openCertModal(3));
   $('#lpToggle').addEventListener('click', toggleLocalProxy);
   $('#lpCopyOn').addEventListener('click', () => copyLocalCmd('on'));
   $('#lpCopyOff').addEventListener('click', () => copyLocalCmd('off'));
@@ -8927,14 +9353,20 @@ function bind() {
   });
 
   $$('.modal').forEach((m) => {
+    let downOnMask = false;
+    m.addEventListener('mousedown', (e) => {
+      downOnMask = e.target === m;
+    });
     m.addEventListener('click', (e) => {
-      if (e.target === m || e.target.closest('[data-close]')) {
+      const hitMask = e.target === m && downOnMask;
+      downOnMask = false;
+      if (hitMask || e.target.closest('[data-close]')) {
         // 编辑器现在嵌在工作区里面：它内部的点击不能外溢成「关掉整个工作区」。
         if (m.id === 'modalRules' && e.target.closest('#modalRule')) return;
         // 导入/导出只关自己；编辑器 ✕ 只关当前标签；其余弹窗保持「全关」语义。
         if (m.id === 'modalJsonIO') m.hidden = true;
         else if (m.id === 'modalRule' && S.ruleFromTree) closeActiveRuleTab();
-        else closeModals();
+        else requestCloseModals();
       }
     });
   });
@@ -8968,7 +9400,7 @@ function bind() {
     } else if (meta && key === 'w' && ws) {
       e.preventDefault();
       if (editing) closeActiveRuleTab();
-      else closeModals();
+      else requestCloseModals();
     } else if (meta && /^[1-9]$/.test(e.key) && ws) {
       const t = S.ruleTabs[Number(e.key) - 1];
       if (t) { e.preventDefault(); activateRuleTab(t.key); }
@@ -8977,26 +9409,18 @@ function bind() {
         e.preventDefault();
         return;
       }
+      if (!$('#modalJsonIO').hidden) {
+        e.preventDefault();
+        $('#modalJsonIO').hidden = true;
+        return;
+      }
       if (ws) {
         e.preventDefault();
         if (editing) closeActiveRuleTab();
-        else closeModals();
+        else requestCloseModals();
         return;
       }
       closeModals();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      if (document.activeElement === $('#search') || document.activeElement === $('#cmdInput')) return;
-      const idx = S.flows.findIndex((f) => f.id === S.selectedId);
-      const next =
-        e.key === 'ArrowDown'
-          ? Math.min(S.flows.length - 1, idx + 1)
-          : Math.max(0, idx - 1);
-      if (S.flows[next]) {
-        e.preventDefault();
-        selectFlow(S.flows[next].id);
-        const row = $(`.row[data-id="${S.flows[next].id}"]`);
-        if (row) row.scrollIntoView({ block: 'nearest' });
-      }
     }
   });
 
@@ -9312,6 +9736,11 @@ function closeAllPopups() {
   for (const [menuId, triggerId] of [
     ['moreMenu', 'btnMore'],
     ['filterMoreMenu', 'btnFilterMore'],
+    ['addrMenu', 'addrPick'],
+    ['flowMoreMenu', 'btnFlowMore'],
+    ['colPickerMenu', 'btnColPicker'],
+    ['railPopIntercept', 'railIntercept'],
+    ['railPopAnalyze', 'railAnalyze'],
   ]) {
     const m = $('#' + menuId);
     if (m && !m.hidden) {
@@ -9335,7 +9764,7 @@ function closeAllPopups() {
 }
 
 function syncFilterMore() {
-  const active = !!(S.filter.mocked || S.filter.status === 'tls' || S.filter.status === 'error');
+  const active = !!$('#filterMoreMenu button.on');
   const dot = $('#filterMoreDot');
   const trig = $('#btnFilterMore');
   if (dot) dot.hidden = !active;
@@ -9375,10 +9804,11 @@ function focusConnectStep(n) {
   setTimeout(() => el.classList.remove('focus'), 2000);
 }
 async function openConnect(step) {
-  await openSettings();
-  // 从设置弹窗内部直接切到「信任根证书」时也要刷新状态卡（不只走顶栏证书按钮）
-  void loadCaStatus();
-  if (step) focusConnectStep(step);
+  if (step === 1 || step === 2 || step === 3) {
+    await openCertModal(step);
+  } else {
+    await openSettings();
+  }
 }
 
 /* ------------------------------------------------------------ 就近网络模式 */
@@ -9742,7 +10172,7 @@ const CMD_ITEMS = [
   },
   {
     label: '高级设置', keys: 'settings 设置 高级',
-    run: () => { openConnect(0); const d = document.querySelector('.st-advanced'); if (d) d.open = true; },
+    run: () => openSettings('decrypt'),
   },
   { label: '切换主题', keys: 'theme dark light 主题 深色 浅色', run: () => $('#btnTheme').click() },
   { label: '切换语言', keys: 'language english 中文 语言', run: () => $('#btnLang').click() },
@@ -9873,8 +10303,14 @@ async function saveQuickMock() {
 
 function quickToAdvanced() {
   const p = quickPayload();
-  closeModals();
-  openRuleTab(p);
+  closeModals(true);
+  loadRules().catch(() => {});
+  const tab = openRuleTab(p, { fromWorkspace: true });
+  if (tab) {
+    tab.dirty = true;
+    renderRuleTabs();
+  }
+  if (window.ReqLiteJSON) setTimeout(() => window.ReqLiteJSON.relayout(), 30);
 }
 
 /* ------------------------------------------------ 规则工作区交互绑定 */
@@ -9949,6 +10385,189 @@ function bindSimpleUI() {
     e.stopPropagation();
     toggleMoreMenu('top');
   });
+
+  function syncRailBadges() {
+    const readCount = (id) => {
+      const el = $(id);
+      if (!el || el.hidden) return 0;
+      const n = parseInt(el.textContent, 10);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const isOn = (id) => {
+      const el = $(id);
+      return !!(el && !el.hidden);
+    };
+    const setTag = (id, text) => {
+      const el = $(id);
+      if (!el) return;
+      el.hidden = !text;
+      el.textContent = text || '';
+    };
+
+    const rulesN = S.mockEnabled !== false ? (S.rules || []).filter((r) => r.enabled !== false).length : 0;
+    const rb = $('#railRuleBadge');
+    if (rb) {
+      rb.hidden = rulesN === 0;
+      rb.textContent = String(rulesN);
+      rb.classList.toggle('on', rulesN > 0);
+    }
+
+    const netN = readCount('#netCount');
+    const bpN = readCount('#bpCount');
+    const mapN = readCount('#mapCount');
+    const scN = readCount('#scriptCount');
+    const rvOn = isOn('#rvDot');
+    setTag('#rpNetState', netN ? `${netN} 条` : '');
+    setTag('#rpBpState', bpN ? `${bpN} 条` : '');
+    setTag('#rpMapState', mapN ? `${mapN} 条` : '');
+    setTag('#rpScriptState', scN ? `${scN} 条` : '');
+    setTag('#rpRvState', rvOn ? '运行中' : '');
+
+    const activeIntercept = (netN > 0 ? 1 : 0) + (bpN > 0 ? 1 : 0) + (mapN > 0 ? 1 : 0) + (scN > 0 ? 1 : 0) + (rvOn ? 1 : 0);
+    const ib = $('#railInterceptBadge');
+    if (ib) {
+      ib.hidden = activeIntercept === 0;
+      ib.textContent = String(activeIntercept);
+    }
+
+    const alN = readCount('#alertCount');
+    const colN = readCount('#colCount');
+    const rdOn = isOn('#redactState');
+    setTag('#rpAlertState', alN ? `${alN}` : '');
+    setTag('#rpColState', colN ? `${colN} 列` : '');
+    setTag('#rpRedactState', rdOn ? '已开启' : '');
+    const ab = $('#railAlertBadge');
+    if (ab) {
+      ab.hidden = alN === 0;
+      ab.textContent = String(alN);
+    }
+  }
+  window.syncRailBadges = syncRailBadges;
+
+  function bindRail() {
+    const rail = $('#rail');
+    if (!rail) return;
+    const closePops = () => {
+      for (const [pid, tid] of [['railPopIntercept', 'railIntercept'], ['railPopAnalyze', 'railAnalyze']]) {
+        const p = $('#' + pid);
+        if (p) p.hidden = true;
+        const t = $('#' + tid);
+        if (t) t.setAttribute('aria-expanded', 'false');
+      }
+    };
+    const togglePop = (popId, btnId) => {
+      const pop = $('#' + popId);
+      const btn = $('#' + btnId);
+      if (!pop || !btn) return;
+      const open = pop.hidden;
+      closePops();
+      if (open) {
+        syncRailBadges();
+        pop.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    };
+
+    $('#railTraffic')?.addEventListener('click', () => {
+      closePops();
+      if ($$('.modal').some((m) => !m.hidden)) requestCloseModals();
+    });
+    $('#railRules')?.addEventListener('click', () => {
+      closePops();
+      $('#btnRules')?.click();
+    });
+    $('#railIntercept')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePop('railPopIntercept', 'railIntercept');
+    });
+    $('#railAnalyze')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePop('railPopAnalyze', 'railAnalyze');
+    });
+    $('#railCa')?.addEventListener('click', () => {
+      closePops();
+      $('#btnCa')?.click();
+    });
+    $('#railTheme')?.addEventListener('click', () => {
+      $('#btnTheme')?.click();
+    });
+    $('#railSettings')?.addEventListener('click', () => {
+      closePops();
+      $('#btnSettings')?.click();
+    });
+
+    rail.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-rail-go]');
+      if (!item) return;
+      const targetId = item.dataset.railGo;
+      closePops();
+      if (targetId) $('#' + targetId)?.click();
+    });
+
+    $('#stNav')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-st-tab]');
+      if (!btn) return;
+      selectSettingsTab(btn.dataset.stTab);
+    });
+
+    $('#certPlatTabs')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-plat]');
+      if (!btn) return;
+      const plat = btn.dataset.plat;
+      $$('#certPlatTabs button[data-plat]').forEach((b) => b.classList.toggle('on', b.dataset.plat === plat));
+      $$('#certGuide [data-plat-pane]').forEach((p) => p.classList.toggle('on', p.dataset.platPane === plat));
+    });
+
+    $('#certGuide')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-guide-copy]');
+      if (!btn) return;
+      const kind = btn.dataset.guideCopy;
+      if (kind === 'url') copyText(`http://${addrFull(currentAddr())}/`, '已复制证书安装链接');
+      else if (kind === 'mac') copyText($('#caCmdMac')?.textContent.trim() || '', '已复制 macOS 信任命令');
+      else if (kind === 'win') copyText($('#caCmdWin')?.textContent.trim() || '', '已复制 Windows 信任命令');
+      else if (kind === 'deb') copyText($('#caCmdDeb')?.textContent.trim() || '', '已复制 Debian/Ubuntu 命令');
+      else if (kind === 'arch') copyText($('#caCmdArch')?.textContent.trim() || '', '已复制 Arch/Fedora 命令');
+    });
+
+    $('#wsMockEnabled')?.addEventListener('change', async (e) => {
+      const next = !!e.target.checked;
+      try {
+        const cfg = await api('/api/config', { method: 'PUT', body: { mockEnabled: next } });
+        S.mockEnabled = cfg.mockEnabled !== false;
+        renderDock();
+        toast(S.mockEnabled ? 'Mock 已开启' : 'Mock 已关闭：所有规则临时旁路，规则内容不受影响');
+      } catch (err) {
+        e.target.checked = S.mockEnabled !== false;
+        toast('操作失败: ' + err.message);
+      }
+    });
+
+    const bulkToggleRules = async (enabled) => {
+      const q = ruleQuery();
+      const targets = S.rules.filter((r) => ruleInDir(r, S.rulesDir) && ruleMatches(r, q) && !!r.enabled !== enabled);
+      if (!targets.length) {
+        toast(enabled ? '当前列表规则已全部启用' : '当前列表规则已全部停用');
+        return;
+      }
+      try {
+        await Promise.all(targets.map((r) => api('/api/rules/' + r.id, { method: 'PUT', body: { enabled } })));
+        await loadRules();
+        toast(enabled ? `已启用 ${targets.length} 条规则` : `已停用 ${targets.length} 条规则`);
+      } catch (err) {
+        toast('批量操作失败: ' + err.message);
+      }
+    };
+    $('#rulesEnableAll')?.addEventListener('click', () => bulkToggleRules(true));
+    $('#rulesDisableAll')?.addEventListener('click', () => bulkToggleRules(false));
+
+    // 监听既有角标 DOM 变化，自动同步到左侧导航栏，避免遗漏任何异步更新点
+    const obs = new MutationObserver(() => syncRailBadges());
+    for (const id of ['#netCount', '#bpCount', '#mapCount', '#scriptCount', '#rvDot', '#alertCount', '#colCount', '#redactState', '#ruleCount']) {
+      const el = $(id);
+      if (el) obs.observe(el, { attributes: true, childList: true, characterData: true, subtree: true });
+    }
+    syncRailBadges();
+  }
   $('#moreMenu').addEventListener('click', (e) => {
     // 外观类与排序可以连续点（点完还想翻个方向），不收菜单；打开弹窗的类目点完即收
     const keep = e.target.closest('#fontDown, #fontUp, #fontVal, #btnTheme, #btnLang, #btnDock, #sortCtl, #btnMoreAdvanced');
@@ -9964,8 +10583,35 @@ function bindSimpleUI() {
       const m = $('#filterMoreMenu');
       if (m && !m.hidden) toggleMoreMenu('filter', false);
     }
+    if (!e.target.closest('#flowMoreMenu') && !e.target.closest('#btnFlowMore')) {
+      const m = $('#flowMoreMenu');
+      if (m && !m.hidden) {
+        m.hidden = true;
+        const t = $('#btnFlowMore');
+        if (t) t.setAttribute('aria-expanded', 'false');
+      }
+    }
+    if (!e.target.closest('#rail')) {
+      for (const [pid, tid] of [['railPopIntercept', 'railIntercept'], ['railPopAnalyze', 'railAnalyze']]) {
+        const p = $('#' + pid);
+        if (p && !p.hidden) {
+          p.hidden = true;
+          const t = $('#' + tid);
+          if (t) t.setAttribute('aria-expanded', 'false');
+        }
+      }
+    }
+    if (!e.target.closest('#colPickerWrap')) {
+      const m = $('#colPickerMenu');
+      if (m && !m.hidden) {
+        m.hidden = true;
+        $('#btnColPicker')?.setAttribute('aria-expanded', 'false');
+      }
+    }
     if (!e.target.closest('#ctxMenu') && !e.target.closest('[data-net-app], #actNet, [data-op="menu"]')) closeCtxMenu();
   });
+
+  bindRail();
 
   $('#ctxMenu').addEventListener('click', async (e) => {
     const rt = e.target.closest('[data-rt]');

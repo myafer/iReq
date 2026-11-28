@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>reqLite · 安装根证书</title>
+    <title>iReq · 安装根证书</title>
     <style>
       :root {
         --bg: #f7f6f4;
@@ -94,7 +94,7 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>安装 reqLite 根证书</h1>
+      <h1>安装 iReq 根证书</h1>
       <p class="sub">信任一次，就能在这台设备上看到 HTTPS 明文。</p>
 
       <div class="warn">
@@ -103,15 +103,15 @@
       </div>
 
       <div class="card">
-        <a class="btn" href="/ca.cer" download="reqlite-ca.cer">下载证书（推荐 · .cer）</a>
-        <a class="btn secondary" href="/ca.pem" download="reqlite-ca.pem">下载 PEM 格式</a>
+        <a class="btn" href="/ca.cer" download="ireq-ca.cer">下载证书（推荐 · .cer）</a>
+        <a class="btn secondary" href="/ca.pem" download="ireq-ca.pem">下载 PEM 格式</a>
       </div>
 
       <h2>iOS / iPadOS</h2>
       <ol>
         <li>点上按钮下载，弹出「此网站正尝试下载一个配置描述文件」→ 允许</li>
         <li>设置 › 已下载描述文件 › 安装</li>
-        <li><b>关键一步：</b>设置 › 通用 › 关于本机 › 证书信任设置，把 <b>reqLite Root CA</b> 打开</li>
+        <li><b>关键一步：</b>设置 › 通用 › 关于本机 › 证书信任设置，把 <b>iReq Root CA</b> 打开</li>
       </ol>
 
       <h2>Android</h2>
@@ -124,7 +124,7 @@
       <p class="kv">把这台设备的 Wi-Fi 代理指向 <b>__PROXY__</b>（HTTP 与 HTTPS 都填这一个）。</p>
 
       <footer>
-        证书只在这台 Mac 上生成，私钥从不外传。<br />
+        证书只在本机生成，私钥从不外传。<br />
         装完可以关掉这个页面，回到 App 里正常使用。
       </footer>
     </div>

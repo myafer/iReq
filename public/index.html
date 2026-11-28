@@ -72,24 +72,26 @@
         <div class="more-wrap" id="moreWrap">
           <button class="btn icon more-trigger" id="btnMore" aria-label="更多" aria-expanded="false" title="更多">⋯</button>
           <div class="more-menu" id="moreMenu" hidden>
-            <div class="more-head">工具</div>
+            <div class="more-head">拦截与改写</div>
             <button class="more-item" id="btnNetwork">网络模拟 <b id="netCount" hidden>0</b></button>
             <button class="more-item" id="btnBreak">断点 <b id="bpCount" hidden>0</b></button>
             <button class="more-item" id="btnMap">域名映射 <b id="mapCount" hidden>0</b></button>
-            <button class="more-item" id="btnReverse">反向代理 <b class="on-dot" id="rvDot" hidden title="已开启"></b></button>
-            <button class="more-item" id="btnPerf">性能视图</button>
-            <button class="more-item" id="btnOverview">会话总览</button>
-            <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
             <button class="more-item" id="btnScripts">脚本 <b id="scriptCount" hidden>0</b></button>
+            <button class="more-item" id="btnReverse">反向代理 <b class="on-dot" id="rvDot" hidden title="已开启"></b></button>
+            <div class="more-head">分析与数据</div>
+            <button class="more-item" id="btnOverview">会话总览</button>
+            <button class="more-item" id="btnPerf">性能视图</button>
+            <button class="more-item" id="btnCols">派生列 <b id="colCount" hidden>0</b></button>
             <button class="more-item" id="btnRedact">脱敏 <b class="on-dot" id="redactState" hidden title="已开启"></b></button>
+            <button class="more-item" id="btnExport">导出 HAR</button>
+            <div class="more-head">系统</div>
             <button class="more-item more-group" id="btnMoreAdvanced" aria-expanded="false" aria-controls="moreAdvanced"
               title="低频操作收在这里，菜单一行扫完不用滚">导入与证书 <span class="more-caret">▸</span></button>
             <div class="more-sub" id="moreAdvanced" hidden>
               <button class="more-item" id="btnImportHar">导入 HAR…</button>
-                <button class="more-item" id="btnCa">证书与连接</button>
+              <button class="more-item" id="btnCa">证书与连接</button>
             </div>
             <button class="more-item" id="btnSettings">设置</button>
-            <button class="more-item" id="btnExport">导出 HAR</button>
             <a class="more-item upd-badge" id="updBadge" hidden target="_blank" rel="noreferrer" title="点击打开新版本发布页">↑ <span id="updBadgeVer"></span></a>
             <div class="more-head">排序</div>
             <div class="more-row sortctl" id="sortCtl">
@@ -116,6 +118,99 @@
 
     <!-- 详情默认不占位（no-detail）：选中请求后由 JS 摘掉，列表先吃满宽度 -->
     <div class="shell no-detail" id="shell">
+      <!-- Reqable 风格左侧极窄图标导航栏：流量 / 规则 / 拦截 / 分析 / 证书 / 主题 / 设置 -->
+      <nav class="rail" id="rail" aria-label="主导航">
+        <div class="rail-group">
+          <button type="button" class="rail-btn on" id="railTraffic" title="抓包流量（主视图）">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 5.5h14M3 10h10M3 14.5h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="15.5" cy="10" r="1.8" fill="currentColor"/></svg>
+            <span>流量</span>
+          </button>
+          <button type="button" class="rail-btn" id="railRules" title="Mock 规则工作区">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 6h5l3 8h6M11 6h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14.5" cy="14" r="1.8" fill="currentColor"/></svg>
+            <span>规则</span>
+            <b class="rail-badge" id="railRuleBadge" hidden>0</b>
+          </button>
+          <button type="button" class="rail-btn" id="railIntercept" aria-expanded="false" aria-controls="railPopIntercept" title="拦截与改写：弱网、断点、映射、脚本、反代">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 2.6 16 5.2v4.6c0 3.9-2.6 6.8-6 7.8-3.4-1-6-3.9-6-7.8V5.2L10 2.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 6.8v4.2M10 13.4h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <span>拦截</span>
+            <b class="rail-badge on" id="railInterceptBadge" hidden>0</b>
+          </button>
+          <button type="button" class="rail-btn" id="railAnalyze" aria-expanded="false" aria-controls="railPopAnalyze" title="分析与数据：总览、性能、告警、派生列、HAR">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M4 15.5V9.5M8.5 15.5V5.5M13 15.5V11M17 15.5V7.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <span>分析</span>
+            <b class="rail-badge err" id="railAlertBadge" hidden>0</b>
+          </button>
+        </div>
+        <div class="rail-spacer"></div>
+        <div class="rail-group rail-bottom">
+          <button type="button" class="rail-btn" id="railCa" title="证书与连接向导">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span>证书</span>
+          </button>
+          <button type="button" class="rail-btn" id="railTheme" title="切换深色 / 浅色主题">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 3.8a6.2 6.2 0 0 1 0 12.4V3.8Z" fill="currentColor"/></svg>
+            <span>主题</span>
+          </button>
+          <button type="button" class="rail-btn" id="railSettings" title="系统设置">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 3v1.6M10 15.4V17M3 10h1.6M15.4 10H17M5.1 5.1l1.1 1.1M13.8 13.8l1.1 1.1M14.9 5.1l-1.1 1.1M6.2 13.8l-1.1 1.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span>设置</span>
+          </button>
+        </div>
+
+        <!-- 拦截与改写浮层 -->
+        <div class="rail-pop" id="railPopIntercept" hidden>
+          <div class="rail-pop-head">拦截与改写</div>
+          <button type="button" class="rail-pop-item" data-rail-go="btnNetwork">
+            <span class="rp-main"><b>网络模拟</b><em>弱网延迟、限速、断网与超时</em></span>
+            <span class="rp-tag" id="rpNetState" hidden></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnBreak">
+            <span class="rp-main"><b>断点</b><em>拦下请求或响应，现场修改后放行</em></span>
+            <span class="rp-tag" id="rpBpState" hidden></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnMap">
+            <span class="rp-main"><b>域名映射</b><em>将线上域名或路径前缀指向本地服务</em></span>
+            <span class="rp-tag" id="rpMapState" hidden></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnScripts">
+            <span class="rp-main"><b>脚本</b><em>用 JS 钩子动态改写请求头、状态与正文</em></span>
+            <span class="rp-tag" id="rpScriptState" hidden></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnReverse">
+            <span class="rp-main"><b>反向代理</b><em>监听端口接收 Webhook 与回调流量</em></span>
+            <span class="rp-tag" id="rpRvState" hidden></span>
+          </button>
+        </div>
+
+        <!-- 分析与数据浮层 -->
+        <div class="rail-pop" id="railPopAnalyze" hidden>
+          <div class="rail-pop-head">分析与视图</div>
+          <button type="button" class="rail-pop-item" data-rail-go="btnOverview">
+            <span class="rp-main"><b>会话总览</b><em>一页汇总状态分布，可复制 Markdown 报告</em></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnPerf">
+            <span class="rp-main"><b>性能视图</b><em>按接口 / 域名排查 P95 与慢请求</em></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnAlerts">
+            <span class="rp-main"><b>条件告警</b><em>命中异常状态或耗时阈值时自动提醒</em></span>
+            <span class="rp-tag err" id="rpAlertState" hidden></span>
+          </button>
+          <button type="button" class="rail-pop-item" data-rail-go="btnCols">
+            <span class="rp-main"><b>派生列</b><em>把响应 JSON 字段提取为列表展示列</em></span>
+            <span class="rp-tag" id="rpColState" hidden></span>
+          </button>
+          <div class="rail-pop-sep"></div>
+          <div class="rail-pop-head">数据与隐私</div>
+          <button type="button" class="rail-pop-item" data-rail-go="btnRedact">
+            <span class="rp-main"><b>脱敏</b><em>导出 HAR 与 MCP 输出自动隐藏敏感凭据</em></span>
+            <span class="rp-tag" id="rpRedactState" hidden></span>
+          </button>
+          <div class="rail-pop-row">
+            <button type="button" class="btn ghost" data-rail-go="btnImportHar">导入 HAR…</button>
+            <button type="button" class="btn ghost" data-rail-go="btnExport">导出 HAR</button>
+          </div>
+        </div>
+      </nav>
       <aside class="side" id="side">
         <div class="side-head">
           <span>分组</span>
@@ -161,6 +256,12 @@
             <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 3.5h11L9.3 8.6v4.2l-2.6-1.1V8.6L2.5 3.5Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
             <span>筛选</span><b class="fbar-dot" id="fbarDot" hidden>·</b>
           </button>
+          <div class="more-wrap col-picker-wrap" id="colPickerWrap">
+            <button class="btn icon ghost" id="btnColPicker" aria-expanded="false" aria-controls="colPickerMenu" title="自定义显示列（也可右键表头）">
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.5v11M10 2.5v11" stroke="currentColor" stroke-width="1.2"/></svg>
+            </button>
+            <div class="more-menu col-picker-menu" id="colPickerMenu" hidden></div>
+          </div>
           <div class="count" id="count">0 条</div>
         </div>
 
@@ -287,7 +388,7 @@
       <div class="modal-card wide">
         <div class="modal-head">
           <h2>重放请求</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="field-row">
@@ -341,8 +442,13 @@
         <div class="ws-titlebar">
           <span class="ws-dots"><i></i><i></i><i></i></span>
           <span class="ws-title">iReq <b>·</b> Mock 规则</span>
+          <label class="switch ws-mock-switch" title="Mock 全局总开关：关闭后所有规则临时旁路，规则内容不受影响">
+            <input type="checkbox" id="wsMockEnabled" checked />
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">启用 Mock</span>
+          </label>
           <span class="ws-title-mid" id="wsCurrentFile"></span>
-          <button type="button" class="ws-title-close" data-close title="关闭工作区">✕</button>
+          <button type="button" class="ws-title-close" data-close title="关闭工作区" aria-label="关闭工作区">✕</button>
         </div>
 
         <div class="ws-body">
@@ -389,7 +495,7 @@
                   <div class="ws-logo">MOCK</div>
                   <h1>Mock 规则</h1>
                   <p>从左侧文件夹树点开一条规则，就会在这里打开标签页；可以同时开多条，切换不丢内容。</p>
-                  <div class="ws-quick">
+                  <div class="ws-quick" hidden>
                     <button type="button" class="btn primary" id="wsQuickNew">+ 新建规则</button>
                     <button type="button" class="btn" id="wsQuickImport">导入 JSON</button>
                     <button type="button" class="btn" id="wsQuickExport">导出 JSON</button>
@@ -399,7 +505,9 @@
                 <div class="ws-recent">
                   <div class="ws-recent-head"><b>全部规则</b><span class="hint" id="rulesCount"></span></div>
                   <div class="rules-toolbar">
-                    <span class="hint grow">左侧搜索框会同时过滤树与列表</span>
+                    <span class="hint grow">点左侧圆点或卡片开关即可随时启停</span>
+                    <button type="button" class="btn ghost" id="rulesEnableAll" title="启用当前列表中的所有规则">全部启用</button>
+                    <button type="button" class="btn ghost" id="rulesDisableAll" title="停用当前列表中的所有规则">全部停用</button>
                     <button type="button" class="btn ghost" id="rulesImport">导入</button>
                     <button type="button" class="btn ghost" id="rulesExport">导出</button>
                     <button type="button" class="btn primary" id="ruNew">+ 新建规则</button>
@@ -422,7 +530,7 @@
                   </div>
                   <div class="re-head-actions">
                     <label class="mini-switch"><input type="checkbox" id="ruEnabled" checked /><span>启用</span></label>
-                    <button class="btn icon ghost" data-close>✕</button>
+                    <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
                   </div>
                 </div>
 
@@ -653,7 +761,7 @@
       <div class="modal-card wide">
         <div class="modal-head">
           <h2 id="jsonIoTitle">规则 JSON</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <p class="hint" id="jsonIoHint"></p>
@@ -682,122 +790,82 @@
       </div>
     </div>
 
-    <!-- 连接与设置：三步向导 + 折叠的高级配置 -->
-    <div class="modal" id="modalSettings" hidden>
-      <div class="modal-card connect-dialog">
+    <!-- 证书与连接：独立双栏弹窗（顶部状态横幅 + 左连接 / 右证书） -->
+    <div class="modal" id="modalCert" hidden>
+      <div class="modal-card cert-dialog">
         <div class="modal-head">
-          <h2>连接与设置</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <h2>证书与连接</h2>
+          <span class="hint">配置代理地址、安装根证书或接管本机流量</span>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
-        <div class="modal-body">
-          <div class="connect-steps">
-            <section class="connect-step" id="connectStep1">
-              <div class="cs-num">1</div>
-              <div class="cs-main">
-                <h3>复制代理地址 <span class="lp-badge" id="stAddrKind">—</span></h3>
-                <div class="addr-card-row">
+        <div class="modal-body cert-body">
+          <!-- 顶部证书信任状态横幅 -->
+          <div class="cert-banner" id="caStatusCard">
+            <div class="cert-banner-main">
+              <div class="ca-shield-row">
+                <span class="ca-shield" id="caShield">● 检查中…</span>
+                <span class="ca-shield-hint" id="caShieldHint">正在读取本机证书状态</span>
+              </div>
+              <p class="hint" id="caStaleTip" hidden></p>
+            </div>
+            <div class="cert-banner-ops">
+              <button type="button" class="btn primary" id="btnCaInstall">一键安装并信任</button>
+              <button type="button" class="btn ghost" id="btnCaRecheck">重新检测</button>
+            </div>
+          </div>
+
+          <!-- 主体双栏：左连接 / 右证书 -->
+          <div class="cert-grid">
+            <!-- 左栏：代理地址 + 本机接管 -->
+            <div class="cert-col">
+              <section class="cert-card" id="connectStep1">
+                <div class="cert-card-head">
+                  <h3>代理地址</h3>
+                  <span class="lp-badge" id="stAddrKind">—</span>
+                </div>
+                <div class="cert-addr-bar">
                   <code id="stAddrFull">—</code>
-                  <button type="button" class="btn primary" id="stCopyAll">复制完整地址</button>
-                  <button type="button" class="btn ghost" id="stCopyIp">复制 IP</button>
-                  <button type="button" class="btn ghost" id="stCopyPort">复制端口</button>
+                  <button type="button" class="btn primary" id="stCopyAll">复制地址</button>
+                  <button type="button" class="btn ghost" id="stCopyIp">IP</button>
+                  <button type="button" class="btn ghost" id="stCopyPort">端口</button>
                 </div>
                 <p class="hint" id="stAddrTip">—</p>
-              </div>
-            </section>
+              </section>
 
-            <section class="connect-step" id="connectStep2">
-              <div class="cs-num">2</div>
-              <div class="cs-main">
-                <h3>信任根证书 <span class="hint">解密 HTTPS 只需做一次</span></h3>
-                <div class="ca-status-card" id="caStatusCard">
-                  <div class="ca-shield-row">
-                    <span class="ca-shield" id="caShield">● 检查中…</span>
-                    <span class="ca-shield-hint" id="caShieldHint">正在读取本机证书状态</span>
-                  </div>
-                  <div class="ca-meta">
-                    <span class="ca-meta-k">指纹</span><code id="caFingerprint" data-no-i18n>—</code>
-                    <span class="ca-meta-k">档案</span><code id="caArchivePath" data-no-i18n>—</code>
-                    <span class="ca-meta-k">来源</span><b id="caSource">—</b>
-                  </div>
-                  <div class="addr-card-row ca-actions">
-                    <button type="button" class="btn primary" id="btnCaInstall">一键安装并信任</button>
-                    <button type="button" class="btn ghost" id="btnCaRecheck">重新检测</button>
-                    <button type="button" class="btn ghost" id="btnCaExportP12">导出 .p12 备份</button>
-                    <button type="button" class="btn ghost" id="btnCaImportP12">导入 .p12</button>
-                    <input type="file" id="caP12File" accept=".p12,.pfx" hidden>
-                    <input type="password" id="caP12Password" class="ca-p12-pwd" placeholder=".p12 密码（默认 ireq）" autocomplete="off" spellcheck="false">
-                  </div>
-                  <p class="hint" id="caAutoTip" data-fold-hint>安装由系统弹出授权确认；失败时可展开下面的手动命令。根证书与私钥固定在 ~/.ireq/ca，覆盖安装不会换证书。</p>
-                  <p class="hint" id="caStaleTip" hidden></p>
-                </div>
-                <div class="addr-card-row">
-                  <a class="btn primary" href="/ca.cer" download="reqlite-ca.cer">下载 .cer（推荐）</a>
-                  <a class="btn" href="/ca.pem" download="reqlite-ca.pem">下载 .pem</a>
-                </div>
-                <p class="hint" data-fold-hint>
-                  手机在 Wi-Fi 代理指向 <code id="caMobileProxy">—</code> 后，浏览器打开
-                  <code id="caUrl">—</code> 安装描述文件；本机直接复制下面的信任命令。
-                </p>
-                <details class="lp-details">
-                  <summary>本机信任命令与状态</summary>
-                  <pre class="code" id="caCmdMac">—</pre>
-                  <div class="lp-warn" id="lpCaWarn" hidden>
-                    <div class="lp-warn-title">本机根证书还没被信任</div>
-                    <p class="hint" id="lpCaReason">—</p>
-                    <p class="hint">未信任时本机 HTTPS 自动透传；执行下面命令，再点「重新检测」。</p>
-                    <pre class="code" id="lpCaCmd">—</pre>
-                    <div class="lp-warn-actions">
-                      <button class="btn primary" id="lpInstallTrust">一键安装并信任</button>
-                      <button class="btn ghost" id="lpCopyTrust">复制信任命令（免 sudo）</button>
-                      <button class="btn ghost" id="lpRecheckTrust">重新检测</button>
-                    </div>
-                  </div>
-                </details>
-                <details class="lp-details">
-                  <summary>各平台详细步骤</summary>
-                  <p class="hint">证书只在本机生成，私钥不会离开这台机器。手机地址若是 https 被跳转，请手动改回 <b>http://</b>。本机文件：<code id="caLocalPath">data/ca/reqlite-ca.pem</code></p>
-                  <ol class="steps">
-                    <li>手机：Wi-Fi 代理填上面的地址，浏览器打开上面的链接下载并安装描述文件。</li>
-                    <li>iOS：设置 › 已下载描述文件 › 安装，再到 通用 › 关于本机 › 证书信任设置 打开 <b>iReq Root CA</b>。</li>
-                    <li>macOS：双击 .pem 只算安装，还要把「使用此证书时」改成「始终信任」；用上面的命令可一次完成。</li>
-                    <li>Android 7+ 应用默认只信系统证书，抓自家 App 建议用 debug 包并配 networkSecurityConfig。</li>
-                    <li>证书固定（pinning）的 App，把域名加到下面「高级设置 › 跳过解密的域名」。</li>
-                  </ol>
-                  <pre class="code">certutil -addstore -user Root reqlite-ca.pem   # Windows
-sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-ca-certificates   # Debian 系</pre>
-                </details>
-              </div>
-            </section>
-
-            <section class="connect-step" id="connectStep3">
-              <div class="cs-num">3</div>
-              <div class="cs-main">
-                <h3>接管本机 <span class="lp-badge" id="lpBadge">检测中…</span> <span class="lp-badge trust" id="lpTrustBadge" hidden></span>
+              <section class="cert-card" id="connectStep3">
+                <div class="cert-card-head">
+                  <h3>接管本机流量</h3>
+                  <span class="lp-badge" id="lpBadge">检测中…</span>
+                  <span class="lp-badge trust" id="lpTrustBadge" hidden></span>
+                  <span class="spacer"></span>
                   <button type="button" class="btn primary lp-head-btn" id="lpToggle" title="把系统代理指向 iReq（再点一次释放，原有配置会还原）">接管本机</button>
-                </h3>
+                </div>
+                <div class="cert-kv-row">
+                  <label class="inline-field">网络服务 <select id="lpService" class="input mono"></select></label>
+                </div>
                 <details class="lp-state-details">
                   <summary id="lpStateSummary">—</summary>
                   <div class="lp-state" id="lpState">—</div>
                 </details>
-                <div class="lp-actions">
-                  <label class="inline-field">网络服务 <select id="lpService" class="input mono"></select></label>
-                </div>
-                <div class="field-row">
-                  <label class="inline-field"><input type="radio" name="stScope" id="stScopeAll" value="all" /> 抓全部流量</label>
-                  <label class="inline-field"><input type="radio" name="stScope" id="stScopeList" value="list" /> 只抓下面这些域名</label>
-                </div>
-                <label class="field">
-                  <span>只抓的域名 <em>每行一个，支持 *.example.com</em></span>
-                  <textarea id="stScopeDomains" class="input mono" rows="3" spellcheck="false" placeholder="api.example.com&#10;*.internal.example.com"></textarea>
-                </label>
-                <p class="hint">「只抓」模式下系统代理走 PAC：列表里的域名经 iReq 解密记录，其它域名直接连、完全不经过 iReq。列表为空时按全部抓包。接管状态下改完立即生效。</p>
-                <label class="field">
-                  <span>不走代理的域名 / IP <em>每行一个，VPN 网关和内网面板填这里</em></span>
-                  <textarea id="stProxyBypass" class="input mono" rows="3" spellcheck="false" placeholder="vpn.example.com&#10;10.0.0.0/8"></textarea>
-                </label>
-                <p class="hint">接管系统代理时这些地址会直连，不经 iReq —— 否则 VPN 客户端连自己网关的请求会被拦下来解密，直接连不上。</p>
                 <details class="lp-details">
-                  <summary>命令与说明</summary>
+                  <summary>本机抓包范围与绕过规则</summary>
+                  <div class="field-row" style="margin:8px 0">
+                    <label class="inline-field"><input type="radio" name="stScope" id="stScopeAll" value="all" /> 抓全部流量</label>
+                    <label class="inline-field"><input type="radio" name="stScope" id="stScopeList" value="list" /> 只抓下面这些域名</label>
+                  </div>
+                  <label class="field">
+                    <span>只抓的域名 <em>每行一个，支持 *.example.com</em></span>
+                    <textarea id="stScopeDomains" class="input mono" rows="2" spellcheck="false" placeholder="api.example.com&#10;*.internal.example.com"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>不走代理的域名 / IP <em>VPN 网关与内网面板填这里</em></span>
+                    <textarea id="stProxyBypass" class="input mono" rows="2" spellcheck="false" placeholder="vpn.example.com&#10;10.0.0.0/8"></textarea>
+                  </label>
+                  <p class="hint">「只抓」模式走 PAC；绕过列表里的地址会直连不经 iReq。</p>
+                </details>
+                <details class="lp-details">
+                  <summary>手动开启 / 关闭命令</summary>
                   <div class="addr-card-row">
                     <button class="btn ghost" id="lpCopyOn">复制开启命令</button>
                     <button class="btn ghost" id="lpCopyOff">复制关闭命令</button>
@@ -806,162 +874,362 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
                   <pre class="code" id="lpCmdOn">—</pre>
                   <p class="hint">关闭</p>
                   <pre class="code" id="lpCmdOff">—</pre>
-                  <ul class="steps">
-                    <li>本机需设置「系统代理」；HTTP_PROXY 只影响命令行程序。</li>
-                    <li>抓 HTTPS 需先信任根证书（第 2 步）。</li>
-                    <li>Chrome / Edge 可在 chrome://flags 关闭 QUIC，或用 --proxy-server 启动。</li>
-                    <li>服务停止会自动还原系统代理；被强杀时执行上面的关闭命令。</li>
-                  </ul>
                 </details>
-              </div>
-            </section>
+              </section>
+            </div>
+
+            <!-- 右栏：根证书下载、备份与安装指南 -->
+            <div class="cert-col" id="connectStep2">
+              <section class="cert-card">
+                <div class="cert-card-head">
+                  <h3>根证书下载与备份</h3>
+                  <span class="hint">解密 HTTPS 只需信任一次</span>
+                </div>
+                <div class="addr-card-row">
+                  <a class="btn primary" href="/ca.cer" download="ireq-ca.cer">下载 .cer（推荐）</a>
+                  <a class="btn" href="/ca.pem" download="ireq-ca.pem">下载 .pem</a>
+                </div>
+                <p class="hint">
+                  手机连上代理 <code id="caMobileProxy">—</code> 后，浏览器访问 <code id="caUrl">—</code> 即可安装。
+                </p>
+                <div class="ca-meta">
+                  <span class="ca-meta-k">指纹</span><code id="caFingerprint" data-no-i18n>—</code>
+                  <span class="ca-meta-k">档案</span><code id="caArchivePath" data-no-i18n>—</code>
+                  <span class="ca-meta-k">来源</span><b id="caSource">—</b>
+                </div>
+                <div class="addr-card-row ca-actions">
+                  <button type="button" class="btn ghost" id="btnCaExportP12">导出 .p12</button>
+                  <button type="button" class="btn ghost" id="btnCaImportP12">导入 .p12</button>
+                  <input type="file" id="caP12File" accept=".p12,.pfx" hidden>
+                  <input type="password" id="caP12Password" class="ca-p12-pwd" placeholder=".p12 密码（默认 ireq）" autocomplete="off" spellcheck="false">
+                </div>
+                <p class="hint" id="caAutoTip">根证书固定存放在 ~/.ireq/ca，私钥永不外传，覆盖安装不会更换证书。</p>
+                <div class="lp-warn" id="lpCaWarn" hidden>
+                  <div class="lp-warn-title">本机根证书还没被信任</div>
+                  <p class="hint" id="lpCaReason">—</p>
+                  <pre class="code" id="lpCaCmd">—</pre>
+                  <div class="lp-warn-actions">
+                    <button class="btn primary" id="lpInstallTrust">一键安装并信任</button>
+                    <button class="btn ghost" id="lpCopyTrust">复制信任命令</button>
+                    <button class="btn ghost" id="lpRecheckTrust">重新检测</button>
+                  </div>
+                </div>
+              </section>
+            </div>
           </div>
 
-          <div class="addr-card">
-            <div class="addr-card-top">
-              <h3>更新</h3>
-              <span class="lp-badge" id="updStateBadge">—</span>
-            </div>
-            <p class="hint" id="updStatusText">自动检查 GitHub Releases</p>
-            <div class="addr-card-row">
-              <label class="inline-field"><input type="checkbox" id="updAuto" /> 自动检查更新</label>
-              <button class="btn ghost" id="updCheckNow">检查更新</button>
-              <a class="btn primary" id="updGoRelease" hidden target="_blank" rel="noreferrer">前往下载</a>
-            </div>
-          </div>
-
-          <!-- MCP 接入：给 AI 客户端用的带令牌认证的接口（常驻卡片，开关就在标题栏） -->
-          <div class="addr-card mcp-card" id="stMcp">
-            <div class="addr-card-top">
-              <h3>MCP 接入 <span class="lp-badge" id="mcpBadge">未开启</span></h3>
-              <label class="switch" title="默认关闭；开启后仍然必须带令牌才能调用">
-                <input type="checkbox" id="mcpEnabled" />
-                <span class="switch-track"><span class="switch-thumb"></span></span>
-                <span class="switch-label">允许 AI 客户端接入</span>
-              </label>
-            </div>
-            <p class="hint" data-fold-hint>
-              iReq 以 MCP（Model Context Protocol）服务的形式暴露抓包 / Mock / 弱网能力：AI 客户端可以读流量、建规则、改弱网。所有请求都要带访问令牌，令牌只在这里生成、只显示一次，落盘只存哈希。
-            </p>
-            <details class="lp-details mcp-more">
-              <summary>连接地址、令牌与调用记录</summary>
-              <div class="mcp-panel">
-                <div class="addr-card">
-                  <div class="addr-card-top"><h3>连接地址</h3><span class="lp-badge" id="mcpTransport">Streamable HTTP</span></div>
-                  <div class="addr-card-row">
-                    <code id="mcpEndpoint" data-no-i18n>—</code>
-                    <button type="button" class="btn ghost" id="mcpCopyEndpoint">复制地址</button>
-                  </div>
-                  <div class="addr-card-row">
-                    <code id="mcpStdioCmd" data-no-i18n>—</code>
-                    <button type="button" class="btn ghost" id="mcpCopyStdio">复制命令</button>
-                  </div>
-                  <p class="hint">支持 HTTP 的客户端直接连上面的地址；只支持 stdio 的客户端用下面的命令桥接（令牌用 --token 传，或放进环境变量 IREQ_MCP_TOKEN）。</p>
-                </div>
-
-                <div class="addr-card">
-                  <div class="addr-card-top"><h3>访问令牌</h3><span class="lp-badge" id="mcpTokenCount">0 个令牌</span></div>
-                  <div class="addr-card-row mcp-new">
-                    <input id="mcpTokenName" class="input" placeholder="令牌名称：如 我的 AI 助手" maxlength="40" />
-                    <select id="mcpTokenScope" class="input">
-                      <option value="readwrite">读写：可改规则 / 弱网</option>
-                      <option value="read">只读：只能看流量与规则</option>
-                    </select>
-                    <button type="button" class="btn primary" id="mcpNewToken">生成令牌</button>
-                  </div>
-                  <div class="mcp-secret" id="mcpSecret" hidden>
-                    <div class="mcp-secret-head">令牌只显示这一次，关掉就找不回来 —— 请立刻复制保存</div>
-                    <div class="addr-card-row">
-                      <code id="mcpSecretValue" data-no-i18n>—</code>
-                      <button type="button" class="btn ghost" id="mcpCopySecret">复制令牌</button>
-                      <button type="button" class="btn ghost" id="mcpCopySnippet">复制客户端配置</button>
-                      <button type="button" class="btn ghost" id="mcpHideSecret" title="清掉界面上的明文（之后只能重新生成）">我已保存，隐藏</button>
-                    </div>
-                    <pre class="code mcp-snippet" id="mcpSnippet" data-no-i18n></pre>
-                  </div>
-                  <div class="mcp-tokens" id="mcpTokens"></div>
-                  <p class="hint">令牌只存 sha256 哈希；撤销后立即失效，丢了就重新生成。</p>
-                </div>
-
-                <div class="addr-card">
-                  <div class="addr-card-top"><h3>最近调用</h3><button type="button" class="btn ghost" id="mcpClearAudit">清空</button></div>
-                  <div class="mcp-audit" id="mcpAudit"></div>
-                </div>
+          <!-- 显眼的各平台安装与信任指南（默认展开，Tab 切换） -->
+          <section class="cert-card cert-guide" id="certGuide">
+            <div class="cert-guide-head">
+              <div>
+                <h3>各平台安装与信任步骤</h3>
+                <p class="hint">按你的设备切换查看，照着做 1 分钟搞定 HTTPS 抓包 · 本机证书：<code id="caLocalPath">data/ca/reqlite-ca.pem</code></p>
               </div>
-            </details>
-            <details class="lp-details mcp-tools-details">
-                  <summary>可用工具 <span class="hint" id="mcpToolCount">—</span></summary>
-                  <div class="mcp-tools" id="mcpTools"></div>
-                </details>
-          </div>
-
-          <details class="lp-details st-advanced">
-            <summary>高级设置</summary>
-            <div class="addr-card" data-no-i18n>
-              <div class="addr-card-top"><h3>Language / 界面语言</h3></div>
-              <div class="addr-card-row">
-                <select id="stLang" class="input mono">
-                  <option value="auto">跟随系统 / Auto</option>
-                  <option value="en">English</option>
-                  <option value="zh-CN">简体中文</option>
-                </select>
+              <div class="perf-seg cert-plat-tabs" id="certPlatTabs" role="tablist" aria-label="选择设备平台">
+                <button type="button" data-plat="ios" class="on" role="tab">iOS / iPadOS</button>
+                <button type="button" data-plat="android" role="tab">Android</button>
+                <button type="button" data-plat="macos" role="tab">macOS</button>
+                <button type="button" data-plat="windows" role="tab">Windows</button>
+                <button type="button" data-plat="linux" role="tab">Linux</button>
               </div>
             </div>
-            <div class="app-id">
-              <h3 title="本机按进程识别，远程设备按 User-Agent 推断">应用识别 <span class="lp-badge" id="appIdBadge">检测中…</span></h3>
-              <label class="inline-field" style="margin: 0 0 10px">
-                <input type="checkbox" id="stProcessMap" checked /> 识别本机真实进程（macOS）
-              </label>
-              <label class="field">
-                <span>UA → 应用名 <em>每行：关键词=显示名</em></span>
-                <textarea id="stUaAppMap" class="input mono" rows="4" spellcheck="false" placeholder="demo-app/2.0=我的App&#10;okhttp=另一个App&#10;CFNetwork=我的 iOS 客户端"></textarea>
-              </label>
-              <p class="hint" id="appIdStat" style="margin: 4px 0 0">—</p>
+
+            <!-- iOS / iPadOS -->
+            <div class="cert-plat-pane on" data-plat-pane="ios">
+              <ol class="guide-steps">
+                <li>
+                  <b>配置 Wi-Fi 代理</b>
+                  <span>手机与电脑连同一个 Wi-Fi，打开 <kbd>设置 › 无线局域网 › 当前网络 (i) › 配置代理 › 手动</kbd>，服务器和端口填 <code data-guide-proxy>—</code>。</span>
+                </li>
+                <li>
+                  <b>用 Safari 打开证书安装页</b>
+                  <span>地址栏必须输入 <b>http://</b> 开头（不要用微信或 Chrome）：<code data-guide-url>—</code> <button type="button" class="btn ghost tiny" data-guide-copy="url">复制链接</button>，弹出提示点「允许」。</span>
+                </li>
+                <li>
+                  <b>安装描述文件</b>
+                  <span>打开 <kbd>设置 › 通用 › VPN与设备管理</kbd>（或设置顶部「已下载描述文件」）→ 点 <b>iReq Root CA</b> → 右上角「安装」。</span>
+                </li>
+                <li class="guide-warn-step">
+                  <b>⚠️ 关键一步：开启完全信任（漏掉这步 HTTPS 会报错）</b>
+                  <span>打开 <kbd>设置 › 通用 › 关于本机 › 证书信任设置</kbd> → 找到 <b>iReq Root CA</b> 并把右侧开关打开。</span>
+                </li>
+              </ol>
             </div>
-            <div class="field">
-              <span>解密范围 <em>默认只解密你指定的，其余原样隧道</em></span>
-              <div class="field-row" style="margin-bottom:8px">
-                <label class="inline-field"><input type="radio" name="mitmScope" id="msList" value="list" /> 只解密下面的域名 / 应用</label>
-                <label class="inline-field"><input type="radio" name="mitmScope" id="msAll" value="all" /> 全部解密</label>
+
+            <!-- Android -->
+            <div class="cert-plat-pane" data-plat-pane="android">
+              <ol class="guide-steps">
+                <li>
+                  <b>配置 Wi-Fi 代理</b>
+                  <span>手机与电脑连同一个 Wi-Fi，长按当前网络 → <kbd>修改网络 › 代理 › 手动</kbd>，主机名和端口填 <code data-guide-proxy>—</code>。</span>
+                </li>
+                <li>
+                  <b>下载根证书</b>
+                  <span>手机浏览器访问 <code data-guide-url>—</code> <button type="button" class="btn ghost tiny" data-guide-copy="url">复制链接</button>，下载 <code>.cer</code> 或 <code>.pem</code> 证书文件。</span>
+                </li>
+                <li>
+                  <b>安装 CA 证书</b>
+                  <span>进入 <kbd>设置 › 安全 › 加密与凭据 › 安装证书 › CA 证书</kbd>（小米 / 华为 / OPPO 等可直接在设置顶部搜「CA 证书」），选择刚下载的证书安装。</span>
+                </li>
+              </ol>
+              <div class="guide-tip">
+                <b>Android 7+ 提示：</b>系统默认不信任用户证书，正式版第三方 App 可能会校验证书失败；调试自家 App 请用 debug 包并在 <code>network_security_config.xml</code> 中加入 <code>&lt;certificates src="user" /&gt;</code>。
               </div>
-              <textarea id="msDomains" class="input mono" rows="3" spellcheck="false"
-                placeholder="api.example.com&#10;*.mycompany.com"></textarea>
-              <textarea id="msApps" class="input mono" rows="2" spellcheck="false" style="margin-top:6px"
-                placeholder="应用名 / 进程名，如 WeChat、Chrome、demo-app"></textarea>
-              <p class="hint">默认「只解密」是为了不让证书固定的 App（App Store、Apple 音乐、银行、游戏）因为被解密而连不上。改完对**新连接**生效，老的 keep-alive 需要重启 App。HTTP 明文不受这个限制。</p>
             </div>
-            <label class="field">
-              <span>需要解密的端口 <em>默认 443</em></span>
-              <input id="stMitmPorts" class="input mono" placeholder="443, 8443" spellcheck="false" />
-            </label>
-            <div class="field-row">
-              <label class="inline-field">列表保留条数 <input id="stMax" class="input mono tiny" value="2000" /></label>
-              <label class="inline-field"><input type="checkbox" id="stH2" checked /> 协商 HTTP/2</label>
-            </div>
-            <p class="hint">只影响列表里留多少条（省内存）；每条流量都会落盘，「清空」留下的历史记录里能翻到全部。</p>
-            <div class="field-row" style="align-items:center">
-              <button type="button" class="btn ghost" id="stBypassApple"
-                title="Apple 系统 App（App Store / Apple ID / 音乐 / 推送）普遍做证书固定，解密后必然连不上。加进跳过解密后这些流量走隧道，App 恢复正常，其它域名照样抓。">+ 绕过 Apple 系统服务</button>
-              <span class="hint" id="stBypassState"></span>
-            </div>
-            <p class="hint st-disk-line">
-              <span id="stDiskUsage">数据目录占用 —</span>
-              <button type="button" class="btn ghost tiny" id="stOpenDataDir" title="在 Finder / 资源管理器里打开（重装或备份前先看一眼）">打开目录</button>
-            </p>
-            <details class="lp-details st-details">
-              <summary>运行信息</summary>
-              <pre class="code" id="stInfo">—</pre>
-            </details>
-          </details>
 
+            <!-- macOS -->
+            <div class="cert-plat-pane" data-plat-pane="macos">
+              <ol class="guide-steps">
+                <li>
+                  <b>方式一：一键自动安装（推荐）</b>
+                  <span>直接点击上方绿色按钮 <b>「一键安装并信任」</b>，输入开机密码即可自动写入钥匙串并设为始终信任。</span>
+                </li>
+                <li>
+                  <b>方式二：终端命令安装</b>
+                  <span>如果按钮授权失败，复制下面命令到终端执行：</span>
+                  <div class="guide-cmd">
+                    <pre class="code" id="caCmdMac">—</pre>
+                    <button type="button" class="btn ghost tiny" data-guide-copy="mac">复制命令</button>
+                  </div>
+                </li>
+                <li>
+                  <b>方式三：手动双击安装</b>
+                  <span>下载 <code>.pem</code> 双击导入「登录」钥匙串 → 双击 <b>iReq Root CA</b> → 展开「信任」→ 将「使用此证书时」改为 <b>始终信任</b>。</span>
+                </li>
+              </ol>
+            </div>
 
+            <!-- Windows -->
+            <div class="cert-plat-pane" data-plat-pane="windows">
+              <ol class="guide-steps">
+                <li>
+                  <b>方式一：双击图形化安装（推荐）</b>
+                  <span>点击上方 <b>「下载 .cer」</b> → 双击打开 → 点「安装证书」→ 选「当前用户」→ 选 <b>「将所有的证书都放入下列存储」</b> → 浏览选择 <b>「受信任的根证书颁发机构」</b> → 确定完成。</span>
+                </li>
+                <li>
+                  <b>方式二：PowerShell / CMD 命令</b>
+                  <span>下载 <code>.cer</code> 后，在其所在目录执行：</span>
+                  <div class="guide-cmd">
+                    <pre class="code" id="caCmdWin">certutil -addstore -user Root ireq-ca.cer</pre>
+                    <button type="button" class="btn ghost tiny" data-guide-copy="win">复制命令</button>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Linux -->
+            <div class="cert-plat-pane" data-plat-pane="linux">
+              <ol class="guide-steps">
+                <li>
+                  <b>Debian / Ubuntu</b>
+                  <span>下载 <code>.pem</code> 后执行：</span>
+                  <div class="guide-cmd">
+                    <pre class="code" id="caCmdDeb">sudo cp ireq-ca.pem /usr/local/share/ca-certificates/ireq-ca.crt &amp;&amp; sudo update-ca-certificates</pre>
+                    <button type="button" class="btn ghost tiny" data-guide-copy="deb">复制命令</button>
+                  </div>
+                </li>
+                <li>
+                  <b>Arch / Fedora / RHEL</b>
+                  <div class="guide-cmd">
+                    <pre class="code" id="caCmdArch">sudo cp ireq-ca.pem /etc/ca-certificates/trust-source/anchors/ireq-ca.crt &amp;&amp; sudo update-ca-trust</pre>
+                    <button type="button" class="btn ghost tiny" data-guide-copy="arch">复制命令</button>
+                  </div>
+                </li>
+              </ol>
+              <div class="guide-tip">
+                <b>浏览器提示：</b>Chrome / Firefox 在 Linux 下使用独立证书库，需在浏览器 <kbd>设置 › 隐私与安全 › 管理证书 › 证书颁发机构</kbd> 中额外导入 <code>ireq-ca.pem</code>。
+              </div>
+            </div>
+          </section>
         </div>
         <div class="modal-foot">
           <span class="hint">改动自动保存</span>
-          <div>
-            <button class="btn ghost" data-close>关闭</button>
-            <button class="btn primary" id="stSave">完成</button>
+          <div><button class="btn primary" data-close>完成</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系统设置：独立双栏弹窗（左侧分类导航 + 右侧设置表单） -->
+    <div class="modal" id="modalSettings" hidden>
+      <div class="modal-card settings-dialog">
+        <div class="modal-head">
+          <h2>系统设置</h2>
+          <span class="spacer"></span>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
+        </div>
+        <div class="settings-layout">
+          <nav class="settings-nav" id="stNav" aria-label="设置分类">
+            <button type="button" class="st-nav-item on" data-st-tab="general">通用与更新</button>
+            <button type="button" class="st-nav-item" data-st-tab="decrypt">HTTPS 解密</button>
+            <button type="button" class="st-nav-item" data-st-tab="appid">应用识别</button>
+            <button type="button" class="st-nav-item" data-st-tab="mcp">MCP 接入</button>
+            <button type="button" class="st-nav-item" data-st-tab="runtime">运行信息</button>
+          </nav>
+
+          <div class="settings-content">
+            <!-- ① 通用与更新 -->
+            <section class="st-panel on" data-st-panel="general">
+              <div class="st-group">
+                <h3>界面与性能</h3>
+                <div class="st-row" data-no-i18n>
+                  <div class="st-row-info"><b>Language / 界面语言</b><span>切换控制台显示语言</span></div>
+                  <select id="stLang" class="input mono">
+                    <option value="auto">跟随系统 / Auto</option>
+                    <option value="en">English</option>
+                    <option value="zh-CN">简体中文</option>
+                  </select>
+                </div>
+                <div class="st-row">
+                  <div class="st-row-info"><b>列表保留条数</b><span>只影响内存列表上限，全部流量仍会落盘归档</span></div>
+                  <input id="stMax" class="input mono tiny" value="2000" />
+                </div>
+                <div class="st-row">
+                  <div class="st-row-info"><b>协商 HTTP/2</b><span>解密 HTTPS 时向客户端和上游启用 ALPN h2</span></div>
+                  <label class="inline-field"><input type="checkbox" id="stH2" checked /> 启用</label>
+                </div>
+                <div class="st-row">
+                  <div class="st-row-info"><b>数据目录</b><span id="stDiskUsage">数据目录占用 —</span></div>
+                  <button type="button" class="btn ghost" id="stOpenDataDir" title="在 Finder / 资源管理器里打开">打开目录</button>
+                </div>
+              </div>
+
+              <div class="st-group">
+                <div class="st-group-head">
+                  <h3>软件更新</h3>
+                  <span class="lp-badge" id="updStateBadge">—</span>
+                </div>
+                <p class="hint" id="updStatusText">自动检查 GitHub Releases</p>
+                <div class="addr-card-row">
+                  <label class="inline-field"><input type="checkbox" id="updAuto" /> 自动检查更新</label>
+                  <button class="btn ghost" id="updCheckNow">检查更新</button>
+                  <a class="btn primary" id="updGoRelease" hidden target="_blank" rel="noreferrer">前往下载</a>
+                </div>
+              </div>
+            </section>
+
+            <!-- ② HTTPS 解密 -->
+            <section class="st-panel" data-st-panel="decrypt">
+              <div class="st-group">
+                <h3>解密范围</h3>
+                <p class="hint">默认只解密指定域名或应用，避免证书固定的 App（App Store、银行、游戏）连不上。修改对新连接生效。</p>
+                <div class="field-row" style="margin:10px 0">
+                  <label class="inline-field"><input type="radio" name="mitmScope" id="msList" value="list" /> 只解密下面的域名 / 应用</label>
+                  <label class="inline-field"><input type="radio" name="mitmScope" id="msAll" value="all" /> 全部解密</label>
+                </div>
+                <label class="field">
+                  <span>域名列表 <em>每行一个，支持通配符 *.example.com</em></span>
+                  <textarea id="msDomains" class="input mono" rows="4" spellcheck="false" placeholder="api.example.com&#10;*.mycompany.com"></textarea>
+                </label>
+                <label class="field">
+                  <span>应用 / 进程名 <em>每行一个</em></span>
+                  <textarea id="msApps" class="input mono" rows="3" spellcheck="false" placeholder="WeChat&#10;Chrome&#10;demo-app"></textarea>
+                </label>
+                <div class="st-row">
+                  <div class="st-row-info"><b>需要解密的端口</b><span>默认 443，多个用逗号分隔</span></div>
+                  <input id="stMitmPorts" class="input mono" style="width:160px" placeholder="443, 8443" spellcheck="false" />
+                </div>
+                <div class="addr-card-row" style="margin-top:10px">
+                  <button type="button" class="btn ghost" id="stBypassApple"
+                    title="Apple 系统 App（App Store / Apple ID / 音乐 / 推送）普遍做证书固定，解密后必然连不上。">+ 绕过 Apple 系统服务</button>
+                  <span class="hint" id="stBypassState"></span>
+                </div>
+              </div>
+            </section>
+
+            <!-- ③ 应用识别 -->
+            <section class="st-panel" data-st-panel="appid">
+              <div class="st-group">
+                <div class="st-group-head">
+                  <h3>应用识别</h3>
+                  <span class="lp-badge" id="appIdBadge">检测中…</span>
+                </div>
+                <p class="hint">本机流量按进程识别，远程设备（手机等）按 User-Agent 推断。</p>
+                <div class="st-row">
+                  <div class="st-row-info"><b>识别本机真实进程（macOS）</b><span>自动关联本机请求来源 App 名称与图标</span></div>
+                  <label class="inline-field"><input type="checkbox" id="stProcessMap" checked /> 启用</label>
+                </div>
+                <label class="field" style="margin-top:10px">
+                  <span>UA → 应用名映射 <em>每行：关键词=显示名</em></span>
+                  <textarea id="stUaAppMap" class="input mono" rows="5" spellcheck="false" placeholder="demo-app/2.0=我的App&#10;okhttp=另一个App&#10;CFNetwork=我的 iOS 客户端"></textarea>
+                </label>
+                <p class="hint" id="appIdStat">—</p>
+              </div>
+            </section>
+
+            <!-- ④ MCP 接入 -->
+            <section class="st-panel" data-st-panel="mcp">
+              <div class="st-group mcp-card" id="stMcp">
+                <div class="st-group-head">
+                  <h3>MCP 接入 <span class="lp-badge" id="mcpBadge">未开启</span></h3>
+                  <label class="switch" title="默认关闭；开启后仍然必须带令牌才能调用">
+                    <input type="checkbox" id="mcpEnabled" />
+                    <span class="switch-track"><span class="switch-thumb"></span></span>
+                    <span class="switch-label">允许 AI 客户端接入</span>
+                  </label>
+                </div>
+                <p class="hint">以 Model Context Protocol 暴露抓包 / Mock / 弱网能力。所有调用均需访问令牌，令牌只显示一次、落盘只存哈希。</p>
+
+                <div class="mcp-panel" style="margin-top:10px">
+                  <div class="addr-card">
+                    <div class="addr-card-top"><h3>连接地址</h3><span class="lp-badge" id="mcpTransport">Streamable HTTP</span></div>
+                    <div class="addr-card-row">
+                      <code id="mcpEndpoint" data-no-i18n>—</code>
+                      <button type="button" class="btn ghost" id="mcpCopyEndpoint">复制地址</button>
+                    </div>
+                    <div class="addr-card-row" style="margin-top:6px">
+                      <code id="mcpStdioCmd" data-no-i18n>—</code>
+                      <button type="button" class="btn ghost" id="mcpCopyStdio">复制命令</button>
+                    </div>
+                  </div>
+
+                  <div class="addr-card">
+                    <div class="addr-card-top"><h3>访问令牌</h3><span class="lp-badge" id="mcpTokenCount">0 个令牌</span></div>
+                    <div class="addr-card-row mcp-new">
+                      <input id="mcpTokenName" class="input" placeholder="令牌名称：如 我的 AI 助手" maxlength="40" />
+                      <select id="mcpTokenScope" class="input">
+                        <option value="readwrite">读写：可改规则 / 弱网</option>
+                        <option value="read">只读：只能看流量与规则</option>
+                      </select>
+                      <button type="button" class="btn primary" id="mcpNewToken">生成令牌</button>
+                    </div>
+                    <div class="mcp-secret" id="mcpSecret" hidden>
+                      <div class="mcp-secret-head">令牌只显示这一次，关掉就找不回来 —— 请立刻复制保存</div>
+                      <div class="addr-card-row">
+                        <code id="mcpSecretValue" data-no-i18n>—</code>
+                        <button type="button" class="btn ghost" id="mcpCopySecret">复制令牌</button>
+                        <button type="button" class="btn ghost" id="mcpCopySnippet">复制客户端配置</button>
+                        <button type="button" class="btn ghost" id="mcpHideSecret">我已保存，隐藏</button>
+                      </div>
+                      <pre class="code mcp-snippet" id="mcpSnippet" data-no-i18n></pre>
+                    </div>
+                    <div class="mcp-tokens" id="mcpTokens"></div>
+                  </div>
+
+                  <div class="addr-card">
+                    <div class="addr-card-top"><h3>最近调用</h3><button type="button" class="btn ghost" id="mcpClearAudit">清空</button></div>
+                    <div class="mcp-audit" id="mcpAudit"></div>
+                  </div>
+
+                  <details class="lp-details mcp-tools-details">
+                    <summary>可用工具 <span class="hint" id="mcpToolCount">—</span></summary>
+                    <div class="mcp-tools" id="mcpTools"></div>
+                  </details>
+                </div>
+              </div>
+            </section>
+
+            <!-- ⑤ 运行信息 -->
+            <section class="st-panel" data-st-panel="runtime">
+              <div class="st-group">
+                <h3>运行信息</h3>
+                <pre class="code" id="stInfo">—</pre>
+              </div>
+            </section>
           </div>
+        </div>
+        <div class="modal-foot">
+          <span class="hint">改动自动保存</span>
+          <div><button class="btn primary" id="stSave">完成</button></div>
         </div>
       </div>
     </div>
@@ -971,7 +1239,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       <div class="modal-card net-dialog">
         <div class="modal-head">
           <h2>断点</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="net-top">
@@ -998,6 +1266,10 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             </ul>
           </details>
         </div>
+        <div class="modal-foot">
+          <span class="hint">改动自动保存，立即生效</span>
+          <div><button class="btn primary" data-close>完成</button></div>
+        </div>
       </div>
     </div>
 
@@ -1005,7 +1277,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       <div class="modal-card net-dialog">
         <div class="modal-head">
           <h2>域名映射</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="net-top">
@@ -1035,6 +1307,10 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             </ul>
           </details>
         </div>
+        <div class="modal-foot">
+          <span class="hint">改动自动保存，立即生效</span>
+          <div><button class="btn primary" data-close>完成</button></div>
+        </div>
       </div>
     </div>
 
@@ -1045,7 +1321,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <h2>性能视图</h2>
           <span class="hint" id="perfScope"></span>
           <span class="spacer"></span>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="perf-top">
@@ -1107,7 +1383,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <h2>派生列</h2>
           <span class="hint">最多 4 列 · 保存后立即按已有流量重算</span>
           <span class="spacer"></span>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="net-rules" id="colRules"></div>
@@ -1141,7 +1417,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           </label>
           <span class="spacer"></span>
           <button class="btn ghost" id="alMute">静音 5 分钟</button>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <p class="hint" data-fold-hint>规则之间是「且」的关系：留空的字段表示不限。每条规则自带冷却，同一问题不会连着刷屏；全局每分钟最多 20 条。</p>
@@ -1169,7 +1445,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <span class="switch-label">启用</span>
           </label>
           <span class="spacer"></span>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <p class="hint" data-fold-hint>
@@ -1210,7 +1486,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <span class="switch-label">启用</span>
           </label>
           <span class="spacer"></span>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <p class="hint rd-scope" data-fold-hint>只作用于导出文件、MCP 输出和带 redact=1 的接口。界面里始终显示原值 —— 打了码你就没法确认到底是哪个 token 失效了。</p>
@@ -1258,7 +1534,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <span class="spacer"></span>
           <button class="btn ghost" id="ovCopy">复制 Markdown</button>
           <button class="btn ghost" id="ovDownload">下载 .md</button>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="ov-cards" id="ovCards"></div>
@@ -1292,7 +1568,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
           <h2>备注与颜色</h2>
           <span class="hint" id="ntLabel"></span>
           <span class="spacer"></span>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <textarea class="input mono nt-text" id="ntText" rows="4" maxlength="500" spellcheck="false"
@@ -1324,7 +1600,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
             <span class="switch-label">启用</span>
           </label>
           <span class="spacer"></span>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <p class="hint rv-scope" data-fold-hint>正向代理抓的是客户端发出去的请求；这里反过来 —— 起一个端口接住打向本机服务的请求（webhook / 回调 / 网关），规则、断点、脚本、弱网照常生效。</p>
@@ -1353,7 +1629,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       <div class="modal-card hold-dialog">
         <div class="modal-head">
           <h2 id="holdTitle">断点：请求被拦下</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="hold-meta" id="holdMeta"></div>
@@ -1383,7 +1659,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       <div class="modal-card net-dialog">
         <div class="modal-head">
           <h2>网络模拟</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <div class="net-top">
@@ -1436,7 +1712,7 @@ sudo cp reqlite-ca.pem /usr/local/share/ca-certificates/ &amp;&amp; sudo update-
       <div class="modal-card quick-dialog">
         <div class="modal-head">
           <h2>快速 Mock</h2>
-          <button class="btn icon ghost" data-close>✕</button>
+          <button class="btn icon ghost" data-close aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
           <p class="hint" id="qkMatchLine">—</p>
